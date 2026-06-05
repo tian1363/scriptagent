@@ -138,6 +138,31 @@ func (h *Handler) publishJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": jobs.StatusPublished})
 }
 
+func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
+	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if isRunningStatus(job.Status) {
+		writeError(w, http.StatusBadRequest, errors.New("job is already running"))
+		return
+	}
+	if err := h.store.AppendLog(job.ID, "用户触发重试，准备重新生成。"); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := h.store.ResetForRetry(job.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.runner.Enqueue(job.ID)
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"job_id": job.ID,
+		"status": jobs.StatusPending,
+	})
+}
+
 func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string, string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
@@ -149,6 +174,22 @@ func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string,
 		return "", "", err
 	}
 	return path, header.Filename, nil
+}
+
+func isRunningStatus(status string) bool {
+	switch status {
+	case jobs.StatusPending,
+		jobs.StatusRunning,
+		jobs.StatusAnalyzingVideo,
+		jobs.StatusExtractingStructure,
+		jobs.StatusGeneratingReplica,
+		jobs.StatusGeneratingFission,
+		jobs.StatusValidating,
+		jobs.StatusPublishing:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseFissionCount(raw string) (int, error) {

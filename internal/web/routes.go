@@ -29,6 +29,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Post("/jobs", h.createJob)
 		api.Get("/jobs/{id}", h.getJob)
 		api.Get("/jobs/{id}/result", h.getJob)
+		api.Post("/jobs/{id}/retry", h.retryJob)
 		api.Post("/jobs/{id}/publish", h.publishJob)
 	})
 

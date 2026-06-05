@@ -24,6 +24,13 @@ export async function publishJob(id) {
   });
 }
 
+export async function retryJob(id) {
+  return request(`/api/jobs/${id}/retry`, {
+    method: "POST",
+    headers: jsonHeaders,
+  });
+}
+
 async function request(path, init) {
   const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));

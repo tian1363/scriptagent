@@ -6,12 +6,13 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  RotateCcw,
   Send,
   Upload,
   Video,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createJob, getJob, listJobs, publishJob } from "./api.js";
+import { createJob, getJob, listJobs, publishJob, retryJob } from "./api.js";
 import logo from "./assets/logo-scriptagent.svg";
 
 const tabs = [
@@ -36,9 +37,10 @@ const runningStatuses = new Set([
 export function App() {
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
-  const [activeTab, setActiveTab] = useState("analysis_markdown");
+  const [activeTab, setActiveTab] = useState("run_log");
   const [isCreating, setIsCreating] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState("");
 
   async function refreshJobs(nextSelectedId) {
@@ -106,8 +108,24 @@ export function App() {
     }
   }
 
+  async function handleRetry() {
+    if (!selectedJob) return;
+    setError("");
+    setIsRetrying(true);
+    try {
+      const retried = await retryJob(selectedJob.id);
+      setActiveTab("run_log");
+      await refreshJobs(retried.job_id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
   const visibleContent = selectedJob?.[activeTab] || "";
   const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
+  const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
   const hasJobs = jobs.length > 0;
 
   return (
@@ -194,7 +212,15 @@ export function App() {
           </section>
 
           <section className="result-pane">
-            <ResultHeader job={selectedJob} isPublishing={isPublishing} canPublish={canPublish} onPublish={handlePublish} />
+            <ResultHeader
+              job={selectedJob}
+              isPublishing={isPublishing}
+              isRetrying={isRetrying}
+              canPublish={canPublish}
+              canRetry={canRetry}
+              onPublish={handlePublish}
+              onRetry={handleRetry}
+            />
             <div className="tabs">
               {tabs.map(([key, label]) => (
                 <button key={key} className={activeTab === key ? "active" : ""} type="button" onClick={() => setActiveTab(key)}>
@@ -223,7 +249,7 @@ function FileField({ name, label, accept, icon }) {
   );
 }
 
-function ResultHeader({ job, isPublishing, canPublish, onPublish }) {
+function ResultHeader({ job, isPublishing, isRetrying, canPublish, canRetry, onPublish, onRetry }) {
   const subtitle = useMemo(() => {
     if (!job) return "选择历史记录或创建新任务后查看结果。";
     return `${job.video_original_name} · ${job.product_md_name}`;
@@ -241,6 +267,10 @@ function ResultHeader({ job, isPublishing, canPublish, onPublish }) {
             {runningStatuses.has(job.status) ? <Clock3 size={13} /> : <CheckCircle2 size={13} />}
             {statusLabel(job.status)}
           </span>
+          <button className="secondary-button" type="button" onClick={onRetry} disabled={!canRetry || isRetrying}>
+            {isRetrying ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
+            <span>重试</span>
+          </button>
           <button className="secondary-button" type="button" onClick={onPublish} disabled={!canPublish || isPublishing}>
             {isPublishing ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
             <span>{job.status === "published" ? "重新发布" : "发布至 CreatiBI"}</span>

@@ -157,6 +157,19 @@ func (s *Store) UpdateStatus(id, status, errorMessage string) error {
 	return requireOne(res)
 }
 
+func (s *Store) ResetForRetry(id string) error {
+	res, err := s.db.Exec(`
+UPDATE jobs
+SET status = ?, analysis_markdown = '', replica_script_json = '', fission_scripts_json = '',
+    creatibi_result_json = '', error_message = '', updated_at = ?
+WHERE id = ?`,
+		StatusPending, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
+}
+
 func (s *Store) AppendLog(id, message string) error {
 	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), strings.TrimSpace(message))
 	res, err := s.db.Exec(`UPDATE jobs SET run_log = COALESCE(run_log, '') || ?, updated_at = ? WHERE id = ?`,
