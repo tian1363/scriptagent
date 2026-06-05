@@ -5,13 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	writeMu sync.Mutex
 }
 
 func OpenStore(path string) (*Store, error) {
@@ -19,7 +21,14 @@ func OpenStore(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	store := &Store{db: db}
+	if err := store.configure(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -31,7 +40,25 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) configure() error {
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA foreign_keys=ON",
+	}
+	for _, pragma := range pragmas {
+		if _, err := s.db.Exec(pragma); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) migrate() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
@@ -61,6 +88,9 @@ CREATE TABLE IF NOT EXISTS jobs (
 }
 
 func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	now := time.Now().UTC()
 	job := &Job{
 		ID:                newID(),
@@ -149,6 +179,9 @@ FROM jobs WHERE id = ?`, id)
 }
 
 func (s *Store) UpdateStatus(id, status, errorMessage string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	res, err := s.db.Exec(`UPDATE jobs SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`,
 		status, errorMessage, time.Now().UTC().Format(time.RFC3339), id)
 	if err != nil {
@@ -158,6 +191,9 @@ func (s *Store) UpdateStatus(id, status, errorMessage string) error {
 }
 
 func (s *Store) ResetForRetry(id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	res, err := s.db.Exec(`
 UPDATE jobs
 SET status = ?, analysis_markdown = '', replica_script_json = '', fission_scripts_json = '',
@@ -171,6 +207,9 @@ WHERE id = ?`,
 }
 
 func (s *Store) AppendLog(id, message string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), strings.TrimSpace(message))
 	res, err := s.db.Exec(`UPDATE jobs SET run_log = COALESCE(run_log, '') || ?, updated_at = ? WHERE id = ?`,
 		line, time.Now().UTC().Format(time.RFC3339), id)
@@ -181,6 +220,9 @@ func (s *Store) AppendLog(id, message string) error {
 }
 
 func (s *Store) SaveResult(id string, result ScriptResult) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	res, err := s.db.Exec(`
 UPDATE jobs
 SET status = ?, analysis_markdown = ?, replica_script_json = ?, fission_scripts_json = ?,
@@ -195,6 +237,9 @@ WHERE id = ?`,
 }
 
 func (s *Store) SavePublishResult(id, status, resultJSON, errorMessage string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	res, err := s.db.Exec(`
 UPDATE jobs
 SET status = ?, creatibi_result_json = ?, error_message = ?, updated_at = ?
