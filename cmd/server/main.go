@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/tian1363/scriptagent/internal/agent"
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/storage"
 	webserver "github.com/tian1363/scriptagent/internal/web"
 )
@@ -34,7 +36,7 @@ func main() {
 	defer store.Close()
 
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
-	runner := jobs.NewRunner(store, agent.NewMockScriptAgent())
+	runner := jobs.NewRunner(store, buildAgent())
 	handler := webserver.NewHandler(cfg, store, fileStore, runner)
 	runner.ResumeUnfinished()
 
@@ -44,9 +46,42 @@ func main() {
 	}
 }
 
+func buildAgent() jobs.Agent {
+	mode := env("SCRIPT_AGENT_MODE", "auto")
+	apiKey := os.Getenv("DASHSCOPE_API_KEY")
+	if mode == "mock" || (mode == "auto" && apiKey == "") {
+		log.Printf("ScriptAgent model mode: mock")
+		return agent.NewMockScriptAgent()
+	}
+
+	client := model.NewDashScopeClient(model.DashScopeConfig{
+		APIKey:   apiKey,
+		Endpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
+		Model:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
+	})
+	log.Printf("ScriptAgent model mode: qwen")
+	return agent.NewQwenScriptAgent(agent.QwenConfig{
+		Client:       client,
+		VideoFPS:     envInt("SCRIPT_AGENT_VIDEO_FPS", 2),
+		MaxVideoSize: int64(envInt("SCRIPT_AGENT_MAX_VIDEO_MB", 80)) * 1024 * 1024,
+	})
+}
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

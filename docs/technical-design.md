@@ -407,9 +407,11 @@ DATA_DIR=./data
 UPLOAD_DIR=./uploads
 
 DASHSCOPE_API_KEY=
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+DASHSCOPE_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
 SCRIPT_AGENT_MODEL=qwen3.6-plus
 SCRIPT_AGENT_VIDEO_FPS=2
+SCRIPT_AGENT_MODE=auto
+SCRIPT_AGENT_MAX_VIDEO_MB=80
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi
@@ -421,7 +423,12 @@ CREATIBI_CLI_BIN=cbi
 
 模型侧不应直接使用本地文件路径。后端需要提供模型可访问的视频 URL，或使用平台支持的文件上传方式。
 
-第一版允许两种实现路线：
+当前实现路线：
+
+- 本地视频转换为 Base64 data URL，传入 DashScope 多模态接口。
+- 默认 `SCRIPT_AGENT_MAX_VIDEO_MB=80`，超过限制会提示用户使用更小视频或等待后续临时 URL 上传方案。
+
+后续允许两种升级路线：
 
 - 临时公开 URL：上传到 OSS/S3/临时文件服务后传入模型。
 - 平台文件上传：如果 DashScope 支持当前环境直接上传文件，则使用平台 file API。
