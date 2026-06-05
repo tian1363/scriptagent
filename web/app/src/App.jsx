@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createJob, getJob, listJobs, publishJob } from "./api.js";
-import logo from "./design-system/assets/logo-creatibi.svg";
+import logo from "./assets/logo-scriptagent.svg";
 
 const tabs = [
   ["analysis_markdown", "视频分析"],
@@ -112,8 +112,7 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <img src={logo} alt="CreatiBI" />
-          <span>ScriptAgent</span>
+          <img src={logo} alt="ScriptAgent" />
         </div>
         <button className="icon-button" type="button" onClick={() => refreshJobs().catch((err) => setError(err.message))} title="刷新">
           <RefreshCw size={16} />

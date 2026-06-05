@@ -1,0 +1,6 @@
+<svg width="126" height="24" viewBox="0 0 126 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ScriptAgent">
+  <rect x="1" y="2" width="20" height="20" rx="6" fill="#8B4EEF"/>
+  <path d="M6.5 7.25H15.5M6.5 11.75H17.5M6.5 16.25H13.25" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M16.6 5.6L18.35 7.35L15.25 10.45H13.5V8.7L16.6 5.6Z" fill="white"/>
+  <text x="29" y="16.5" fill="#1E1F21" font-family="Inter, 'Noto Sans SC', Arial, sans-serif" font-size="14" font-weight="600">ScriptAgent</text>
+</svg>
