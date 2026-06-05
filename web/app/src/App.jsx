@@ -66,12 +66,13 @@ export function App() {
 
   async function handleCreate(event) {
     event.preventDefault();
+    const formEl = event.currentTarget;
     setError("");
     setIsCreating(true);
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formEl);
     try {
       const created = await createJob(form);
-      event.currentTarget.reset();
+      formEl.reset();
       setActiveTab("analysis_markdown");
       await refreshJobs(created.job_id);
     } catch (err) {
