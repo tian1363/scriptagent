@@ -1,0 +1,15 @@
+# Runtime data
+/data/
+/uploads/
+
+# Go
+/bin/
+*.test
+
+# Frontend
+/web/app/node_modules/
+/web/app/dist/
+
+# OS/editor
+.DS_Store
+*.swp

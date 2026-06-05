@@ -86,8 +86,10 @@ SQLite 历史记录 + 本地文件存储
 - HTTP 框架：Gin 或 chi，推荐 chi，轻量且适合 API 服务。
 - 数据库：SQLite。
 - 文件存储：本地 `uploads/`，后续可替换为 OSS/S3。
+- 任务与上传文件必须本地持久化，程序重启后历史记录仍可查看。
 - 任务执行：Go goroutine + 状态表。
 - 任务进度：第一版使用轮询，后续可升级 SSE。
+- 任务日志：保存可审计步骤摘要，不保存或展示模型隐式逐字思维链。
 - CreatiBI 写入：优先封装为独立 `creatibi` 模块，内部可调用 CLI 或 API。
 
 ### 6.2 前端
@@ -357,6 +359,18 @@ GET /api/jobs/{id}/result
 POST /api/jobs/{id}/publish
 ```
 
+### 10.6 重试任务
+
+```http
+POST /api/jobs/{id}/retry
+```
+
+约束：
+
+- 只允许非运行中的任务重试。
+- 重试复用原输入文件和参数。
+- 重试清空旧生成结果与发布结果，并追加运行日志。
+
 ## 11. 数据库设计
 
 第一版使用单表即可。
@@ -376,6 +390,7 @@ CREATE TABLE jobs (
   fission_scripts_json TEXT,
   creatibi_result_json TEXT,
   error_message TEXT,
+  run_log TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -406,9 +421,11 @@ DATA_DIR=./data
 UPLOAD_DIR=./uploads
 
 DASHSCOPE_API_KEY=
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+DASHSCOPE_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
 SCRIPT_AGENT_MODEL=qwen3.6-plus
 SCRIPT_AGENT_VIDEO_FPS=2
+SCRIPT_AGENT_MODE=auto
+SCRIPT_AGENT_MAX_VIDEO_MB=80
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi
@@ -420,7 +437,12 @@ CREATIBI_CLI_BIN=cbi
 
 模型侧不应直接使用本地文件路径。后端需要提供模型可访问的视频 URL，或使用平台支持的文件上传方式。
 
-第一版允许两种实现路线：
+当前实现路线：
+
+- 本地视频转换为 Base64 data URL，传入 DashScope 多模态接口。
+- 默认 `SCRIPT_AGENT_MAX_VIDEO_MB=80`，超过限制会提示用户使用更小视频或等待后续临时 URL 上传方案。
+
+后续允许两种升级路线：
 
 - 临时公开 URL：上传到 OSS/S3/临时文件服务后传入模型。
 - 平台文件上传：如果 DashScope 支持当前环境直接上传文件，则使用平台 file API。

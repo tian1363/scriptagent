@@ -1,0 +1,305 @@
+/* ============================================================
+   CreatiBI · Design tokens
+   Source of truth: main-site/src/themes/colors.ts + light.tsx + global.less
+   ============================================================ */
+
+/* ---- Fonts ----
+   Inter (Latin) + Noto Sans SC (Chinese) — Google Fonts.
+   We don't ship .woff2 in this system; substitute self-hosted files in
+   ./fonts/ if available. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap");
+
+:root {
+  /* =====================================================
+     COLOR TOKENS (raw)
+     ===================================================== */
+
+  /* Primary — brand purple */
+  --cbi-primary:           #8B4EEF;
+  --cbi-primary-dark:      #6136A7;
+  --cbi-primary-light:     #A271F2;
+  --cbi-primary-contrast:  #FFFFFF;
+  --cbi-primary-tint:      #F6F0FA;   /* "mainWhite" — selected toggle bg */
+
+  /* Secondary — deep indigo, rarely used */
+  --cbi-secondary:         #160C88;
+  --cbi-secondary-dark:    #0F085F;
+  --cbi-secondary-light:   #443C9F;
+
+  /* Surfaces */
+  --cbi-bg-default:        #FFFFFF;
+  --cbi-bg-paper:          #FFFFFF;
+  --cbi-bg-shell:          #F9F8F8;   /* sidebar/nav background (textExtend.ten) */
+  --cbi-bg-subtle:         #F3F1F1;   /* hover row, divider row (textExtend.twenty) */
+  --cbi-bg-disabled:       #FCFBFB;   /* (textExtend.five) */
+
+  /* Text */
+  --cbi-text-primary:      #1E1F21;
+  --cbi-text-secondary:    #6D6E6F;
+  --cbi-text-hint:         #AFABAC;   /* placeholder / helper text */
+  --cbi-text-disabled:     #ECEAE9;   /* also default border */
+  --cbi-text-inverse:      #FFFFFF;
+
+  /* Borders & dividers */
+  --cbi-border-default:    #ECEAE9;   /* "textDisabled" — default outline */
+  --cbi-border-hover:      #AFABAC;   /* hover state on inputs/buttons */
+  --cbi-border-strong:     #D5D5D5;   /* (textExtend.forty) */
+  --cbi-divider:           #ECEAE9;
+  --cbi-divider-subtle:    #F3F1F1;
+
+  /* Semantic */
+  --cbi-success:           #34C759;
+  --cbi-error:             #E50F0F;
+  --cbi-warning:           #ED6C02;
+  --cbi-warning-soft:      #F1BD6C;   /* used in adv/onboarding nudges */
+  --cbi-info:              #0288D1;
+
+  /* Scrollbar (warm taupe — the one warm note) */
+  --cbi-scrollbar-thumb:   #D3D1CB;
+
+  /* Black & white absolutes (used sparingly) */
+  --cbi-black:             #000000;   /* active Tab indicator only */
+  --cbi-white:             #FFFFFF;
+
+  /* =====================================================
+     ELEVATION
+     ===================================================== */
+  --cbi-shadow-1:          -2px 0px 10px 0px rgba(0,0,0,0.05);
+  --cbi-shadow-2:          0px 9px 28px 8px rgba(0,0,0,0.05),
+                           0px 6px 16px 0px rgba(0,0,0,0.08),
+                           0px 3px 6px -4px rgba(0,0,0,0.12);
+  --cbi-shadow-3:          0 0 0 1px var(--cbi-text-disabled);  /* "ring" border */
+  --cbi-shadow-tooltip:    0 4px 12px rgba(0,0,0,0.15);
+
+  /* =====================================================
+     RADII
+     ===================================================== */
+  --cbi-radius-xs:         4px;
+  --cbi-radius-sm:         6px;   /* default — buttons, inputs, menu items */
+  --cbi-radius-md:         8px;   /* skeletons, chip groups */
+  --cbi-radius-lg:         12px;  /* cards / Paper / bordered surfaces */
+  --cbi-radius-pill:       999px; /* chip / pill */
+
+  /* =====================================================
+     SPACING (MUI 8px grid)
+     ===================================================== */
+  --cbi-space-0:           0;
+  --cbi-space-0-5:         4px;
+  --cbi-space-1:           8px;
+  --cbi-space-1-5:         12px;
+  --cbi-space-2:           16px;
+  --cbi-space-2-5:         20px;
+  --cbi-space-3:           24px;
+  --cbi-space-4:           32px;
+  --cbi-space-5:           40px;
+  --cbi-space-6:           48px;
+  --cbi-space-8:           64px;
+
+  /* =====================================================
+     LAYOUT
+     ===================================================== */
+  --cbi-navbar-height:     48px;
+  --cbi-sidebar-rail:      64px;     /* first-column icon rail */
+  --cbi-sidebar-secondary: 240px;    /* secondary nav drawer */
+  --cbi-min-content-width: 1080px;   /* dense data tables */
+
+  /* =====================================================
+     CONTROL HEIGHTS (MUI sizes)
+     ===================================================== */
+  --cbi-h-mini:            28px;     /* InputBase variant `mini` */
+  --cbi-h-small:           28px;     /* Button size=small (default) */
+  --cbi-h-medium:          36px;     /* Button size=medium · default form fields */
+  --cbi-h-large:           56px;     /* Button/Select size=large · marketing/onboarding */
+
+  /* =====================================================
+     TYPOGRAPHY
+     ===================================================== */
+  --cbi-font-sans:         'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --cbi-font-mono:         'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Sizes — derived from the MUI overrides + global.less */
+  --cbi-fs-xs:             10px;     /* tiny meta */
+  --cbi-fs-sm:             12px;     /* body2, labels, helper text, chip, button-sm/md */
+  --cbi-fs-base:           14px;     /* body, button-lg, table cell, tab */
+  --cbi-fs-md:             16px;     /* dialog body, button-lg */
+  --cbi-fs-lg:             18px;     /* form label in size=medium */
+  --cbi-fs-xl:             24px;     /* section heading */
+  --cbi-fs-2xl:            32px;     /* page heading */
+  --cbi-fs-3xl:            40px;     /* welcome / hero */
+
+  --cbi-lh-tight:          1.2;
+  --cbi-lh-snug:           1.4;
+  --cbi-lh-normal:         1.5;      /* MUI body2 / most text */
+  --cbi-lh-relaxed:        1.6;
+
+  --cbi-fw-regular:        400;
+  --cbi-fw-medium:         500;
+  --cbi-fw-semibold:       600;      /* dominant for headings & button labels */
+
+  /* =====================================================
+     TRANSITIONS
+     ===================================================== */
+  --cbi-transition-fast:   150ms ease;
+  --cbi-transition-base:   250ms cubic-bezier(0.4, 0, 0.2, 1);  /* MUI default */
+  --cbi-transition-slow:   500ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* =====================================================
+     SEMANTIC ALIASES
+     (use these in component CSS; the raw tokens above
+     should rarely be referenced directly outside this file)
+     ===================================================== */
+
+  /* Foreground */
+  --cbi-fg-1: var(--cbi-text-primary);    /* headings, primary body */
+  --cbi-fg-2: var(--cbi-text-secondary);  /* secondary body, captions, table headers */
+  --cbi-fg-3: var(--cbi-text-hint);       /* placeholders, helper text, disabled-active */
+  --cbi-fg-disabled: var(--cbi-text-disabled);
+  --cbi-fg-on-primary: var(--cbi-primary-contrast);
+
+  /* Background */
+  --cbi-bg-1: var(--cbi-bg-default);      /* main canvas */
+  --cbi-bg-2: var(--cbi-bg-shell);        /* sidebar/nav rail */
+  --cbi-bg-3: var(--cbi-bg-subtle);       /* hovered row */
+
+  /* Surface (cards) */
+  --cbi-surface: var(--cbi-bg-paper);
+  --cbi-surface-border: var(--cbi-divider);
+  --cbi-surface-radius: var(--cbi-radius-lg);
+  --cbi-surface-shadow: var(--cbi-shadow-2);
+}
+
+/* ============================================================
+   SEMANTIC TYPE STYLES
+   Apply with utility classes OR by selector if the element is
+   unambiguous. Heading sizes are deliberately conservative —
+   CreatiBI uses scale + weight + color, not size alone.
+   ============================================================ */
+
+html {
+  font-family: var(--cbi-font-sans);
+  font-size: var(--cbi-fs-base);
+  color: var(--cbi-fg-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background: var(--cbi-bg-1);
+  font-family: var(--cbi-font-sans);
+  font-size: var(--cbi-fs-base);
+  line-height: var(--cbi-lh-normal);
+  color: var(--cbi-fg-1);
+}
+
+.cbi-h1, h1.cbi {
+  font-size: var(--cbi-fs-2xl);
+  font-weight: var(--cbi-fw-semibold);
+  line-height: var(--cbi-lh-tight);
+  color: var(--cbi-fg-1);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.cbi-h2, h2.cbi {
+  font-size: var(--cbi-fs-xl);
+  font-weight: var(--cbi-fw-semibold);
+  line-height: var(--cbi-lh-snug);
+  color: var(--cbi-fg-1);
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+.cbi-h3, h3.cbi {
+  font-size: var(--cbi-fs-lg);
+  font-weight: var(--cbi-fw-semibold);
+  line-height: var(--cbi-lh-snug);
+  color: var(--cbi-fg-1);
+  margin: 0;
+}
+
+.cbi-h4, h4.cbi {
+  font-size: var(--cbi-fs-md);
+  font-weight: var(--cbi-fw-semibold);
+  line-height: var(--cbi-lh-normal);
+  color: var(--cbi-fg-1);
+  margin: 0;
+}
+
+.cbi-body, p.cbi {
+  font-size: var(--cbi-fs-base);
+  font-weight: var(--cbi-fw-regular);
+  line-height: var(--cbi-lh-normal);
+  color: var(--cbi-fg-1);
+}
+
+.cbi-body-2 {
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-regular);
+  line-height: var(--cbi-lh-normal);
+  color: var(--cbi-fg-2);
+}
+
+.cbi-caption {
+  font-size: var(--cbi-fs-xs);
+  font-weight: var(--cbi-fw-regular);
+  line-height: var(--cbi-lh-normal);
+  color: var(--cbi-fg-2);
+  letter-spacing: 0.02em;
+}
+
+.cbi-label {                      /* MuiFormLabel */
+  display: block;
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-regular);
+  color: var(--cbi-fg-2);
+  margin-bottom: var(--cbi-space-1);
+  text-align: left;
+}
+
+.cbi-helper {                     /* MuiFormHelperText */
+  font-size: var(--cbi-fs-sm);
+  color: var(--cbi-fg-3);
+  margin-top: var(--cbi-space-1);
+  line-height: var(--cbi-lh-normal);
+}
+
+.cbi-button-label {
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+  line-height: 1;
+}
+
+.cbi-table-header {
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+  color: var(--cbi-fg-2);
+  text-transform: none;
+}
+
+.cbi-tab-label {
+  font-size: var(--cbi-fs-base);
+  font-weight: var(--cbi-fw-semibold);
+  color: var(--cbi-fg-2);
+}
+.cbi-tab-label.is-active {
+  color: var(--cbi-black);
+}
+
+.cbi-link {
+  color: var(--cbi-primary);
+  text-decoration: none;
+  text-underline-offset: 0.2em;
+}
+.cbi-link:hover { text-decoration: underline; }
+
+/* ============================================================
+   APP CHROME PRIMITIVES
+   ============================================================ */
+
+.cbi-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+.cbi-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--cbi-scrollbar-thumb);
+  border-radius: var(--cbi-radius-sm);
+}
+.cbi-scrollbar { scrollbar-color: var(--cbi-scrollbar-thumb) transparent; }

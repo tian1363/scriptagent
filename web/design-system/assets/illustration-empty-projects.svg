@@ -1,0 +1,24 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="160" viewBox="0 0 200 160" fill="none">
+  <defs>
+    
+  </defs>
+  
+  <ellipse cx="100" cy="140" rx="58" ry="5" fill="#F3F1F1"></ellipse>
+  
+  <path class="fill-accent" d="M48 56 L82 56 L92 64 L152 64 L152 130 L48 130 Z"></path>
+  <path class="ln" d="M48 56 L82 56 L92 64 L152 64 L152 130 L48 130 Z"></path>
+  
+  <path class="ln" d="M44 70 L156 70 L150 130 L50 130 Z" fill="#FFFFFF"></path>
+  
+  <line class="ln" x1="62" y1="86" x2="138" y2="86"></line>
+  <line class="ln" x1="62" y1="98" x2="120" y2="98"></line>
+  <line class="accent" x1="62" y1="110" x2="100" y2="110"></line>
+  
+  <circle class="accent" cx="148" cy="46" r="10" fill="#FFFFFF"></circle>
+  <line class="accent" x1="148" y1="40" x2="148" y2="52"></line>
+  <line class="accent" x1="142" y1="46" x2="154" y2="46"></line>
+  
+  <path class="accent" d="M40 32 L40 40 M36 36 L44 36"></path>
+  <path class="accent" d="M168 96 L168 102 M165 99 L171 99"></path>
+</svg>
