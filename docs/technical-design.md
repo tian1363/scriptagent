@@ -86,6 +86,7 @@ SQLite 历史记录 + 本地文件存储
 - HTTP 框架：Gin 或 chi，推荐 chi，轻量且适合 API 服务。
 - 数据库：SQLite。
 - 文件存储：本地 `uploads/`，后续可替换为 OSS/S3。
+- 任务与上传文件必须本地持久化，程序重启后历史记录仍可查看。
 - 任务执行：Go goroutine + 状态表。
 - 任务进度：第一版使用轮询，后续可升级 SSE。
 - CreatiBI 写入：优先封装为独立 `creatibi` 模块，内部可调用 CLI 或 API。
