@@ -15,6 +15,7 @@ import { createJob, getJob, listJobs, publishJob } from "./api.js";
 import logo from "./assets/logo-scriptagent.svg";
 
 const tabs = [
+  ["run_log", "运行日志"],
   ["analysis_markdown", "视频分析"],
   ["replica_script_json", "复刻脚本"],
   ["fission_scripts_json", "裂变脚本"],
@@ -73,7 +74,7 @@ export function App() {
     try {
       const created = await createJob(form);
       formEl.reset();
-      setActiveTab("analysis_markdown");
+      setActiveTab("run_log");
       await refreshJobs(created.job_id);
     } catch (err) {
       setError(err.message);
@@ -84,7 +85,7 @@ export function App() {
 
   async function handleSelect(id) {
     setError("");
-    setActiveTab("analysis_markdown");
+    setActiveTab("run_log");
     const job = await getJob(id);
     setSelectedJob(job);
   }
@@ -260,7 +261,7 @@ function ResultContent({ job, content, activeTab }) {
   if (!content) {
     return <EmptyState text={runningStatuses.has(job.status) ? "任务执行中" : "当前页暂无内容"} />;
   }
-  const mode = activeTab === "analysis_markdown" ? "markdown" : "json";
+  const mode = activeTab === "analysis_markdown" || activeTab === "run_log" ? "markdown" : "json";
   return <pre className={`result-output ${mode}`}>{content}</pre>;
 }
 

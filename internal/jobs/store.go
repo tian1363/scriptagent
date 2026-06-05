@@ -3,6 +3,8 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -47,11 +49,15 @@ CREATE TABLE IF NOT EXISTS jobs (
   fission_scripts_json TEXT,
   creatibi_result_json TEXT,
   error_message TEXT,
+  run_log TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.ensureColumn("jobs", "run_log", "TEXT")
 }
 
 func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
@@ -89,7 +95,7 @@ func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -111,7 +117,7 @@ func (s *Store) ListUnfinishedJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs
 WHERE status IN (?, ?, ?, ?, ?, ?, ?)
 ORDER BY created_at ASC`,
@@ -137,7 +143,7 @@ func (s *Store) GetJob(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
@@ -145,6 +151,16 @@ FROM jobs WHERE id = ?`, id)
 func (s *Store) UpdateStatus(id, status, errorMessage string) error {
 	res, err := s.db.Exec(`UPDATE jobs SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`,
 		status, errorMessage, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
+}
+
+func (s *Store) AppendLog(id, message string) error {
+	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), strings.TrimSpace(message))
+	res, err := s.db.Exec(`UPDATE jobs SET run_log = COALESCE(run_log, '') || ?, updated_at = ? WHERE id = ?`,
+		line, time.Now().UTC().Format(time.RFC3339), id)
 	if err != nil {
 		return err
 	}
@@ -185,12 +201,12 @@ func scanJob(row scanner) (*Job, error) {
 	var job Job
 	var createdAt, updatedAt string
 	var analysisMarkdown, replicaScriptJSON, fissionScriptsJSON sql.NullString
-	var creatibiResultJSON, errorMessage sql.NullString
+	var creatibiResultJSON, errorMessage, runLog sql.NullString
 	err := row.Scan(
 		&job.ID, &job.Title, &job.Status, &job.VideoPath, &job.VideoOriginalName,
 		&job.ProductMDPath, &job.ProductMDName, &job.Requirement, &job.Industry,
 		&job.FissionCount, &analysisMarkdown, &replicaScriptJSON,
-		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage,
+		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -201,9 +217,36 @@ func scanJob(row scanner) (*Job, error) {
 	job.FissionScriptsJSON = fissionScriptsJSON.String
 	job.CreatiBIResultJSON = creatibiResultJSON.String
 	job.ErrorMessage = errorMessage.String
+	job.RunLog = runLog.String
 	job.CreatedAt = parseTime(createdAt)
 	job.UpdatedAt = parseTime(updatedAt)
 	return &job, nil
+}
+
+func (s *Store) ensureColumn(table, column, columnType string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + columnType)
+	return err
 }
 
 func parseTime(value string) time.Time {

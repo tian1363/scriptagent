@@ -19,7 +19,8 @@ func NewMockScriptAgent() *MockScriptAgent {
 	return &MockScriptAgent{}
 }
 
-func (a *MockScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptResult, error) {
+func (a *MockScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
+	progress(jobs.StatusAnalyzingVideo, "mock 模式：生成视频理解占位结果。")
 	product, err := os.ReadFile(job.ProductMDPath)
 	if err != nil {
 		return jobs.ScriptResult{}, err
@@ -29,6 +30,7 @@ func (a *MockScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptRes
 		productTitle = strings.TrimSuffix(job.ProductMDName, filepath.Ext(job.ProductMDName))
 	}
 
+	progress(jobs.StatusGeneratingReplica, "mock 模式：生成复刻脚本。")
 	replica := scriptPayload{
 		Title:           productTitle + " 复刻脚本",
 		ScriptType:      "replica",
@@ -82,6 +84,7 @@ func (a *MockScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptRes
 		},
 	}
 
+	progress(jobs.StatusGeneratingFission, "mock 模式：生成裂变脚本。")
 	fissions := make([]scriptPayload, 0, job.FissionCount)
 	for i := 1; i <= job.FissionCount; i++ {
 		item := replica

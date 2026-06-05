@@ -89,6 +89,7 @@ SQLite 历史记录 + 本地文件存储
 - 任务与上传文件必须本地持久化，程序重启后历史记录仍可查看。
 - 任务执行：Go goroutine + 状态表。
 - 任务进度：第一版使用轮询，后续可升级 SSE。
+- 任务日志：保存可审计步骤摘要，不保存或展示模型隐式逐字思维链。
 - CreatiBI 写入：优先封装为独立 `creatibi` 模块，内部可调用 CLI 或 API。
 
 ### 6.2 前端
@@ -377,6 +378,7 @@ CREATE TABLE jobs (
   fission_scripts_json TEXT,
   creatibi_result_json TEXT,
   error_message TEXT,
+  run_log TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

@@ -43,10 +43,11 @@ func NewQwenScriptAgent(cfg QwenConfig) *QwenScriptAgent {
 	}
 }
 
-func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptResult, error) {
+func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
 	if a.client == nil {
 		return jobs.ScriptResult{}, errors.New("qwen client is not configured")
 	}
+	progress(jobs.StatusAnalyzingVideo, "开始读取产品 Markdown 和参考视频。")
 	product, err := os.ReadFile(job.ProductMDPath)
 	if err != nil {
 		return jobs.ScriptResult{}, err
@@ -56,6 +57,7 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptRes
 		return jobs.ScriptResult{}, err
 	}
 
+	progress(jobs.StatusAnalyzingVideo, "开始调用 qwen3.6-plus 进行视频理解。")
 	analysis, err := a.client.Generate(ctx, []model.ContentItem{
 		{Video: videoDataURL, FPS: a.videoFPS},
 		{Text: videoAnalysisPrompt(job, string(product))},
@@ -64,6 +66,8 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptRes
 		return jobs.ScriptResult{}, fmt.Errorf("video analysis failed: %w", err)
 	}
 
+	progress(jobs.StatusExtractingStructure, "视频理解完成，准备生成复刻结构和脚本。")
+	progress(jobs.StatusGeneratingReplica, "开始调用 qwen3.6-plus 生成复刻脚本和裂变脚本。")
 	scriptRaw, err := a.client.Generate(ctx, []model.ContentItem{
 		{Text: scriptGenerationPrompt(job, string(product), analysis)},
 	})
@@ -71,6 +75,7 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job) (jobs.ScriptRes
 		return jobs.ScriptResult{}, fmt.Errorf("script generation failed: %w", err)
 	}
 
+	progress(jobs.StatusValidating, "模型已返回脚本，正在解析 JSON 并校验结构。")
 	parsed, err := parseScriptBundle(scriptRaw)
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("script response parse failed: %w", err)
