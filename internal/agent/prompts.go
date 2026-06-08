@@ -192,13 +192,38 @@ func fissionScriptPrompt(job jobs.Job, productMD, analysisMarkdown, replicaScrip
 裂变生成原则：
 
 - 裂变脚本必须以复刻脚本为母版，先继承每个分镜的 scene_index、time_range、镜头功能、叙事节奏和转场顺序。
-- 每条裂变只选择一个清晰裂变维度，优先从钩子、卖点、场景、人群、冲突、CTA、表现形式中选择，不要把所有元素同时改掉。
+- 每条裂变只选择一个清晰裂变维度，必须从下方“允许裂变维度”中选择，metadata.fission_dimension 必须使用“层级-维度”格式，例如“视听层-换BGM”。
+- 如果需要生成多条裂变，应优先覆盖不同层级；不要连续多条都只改同一种元素。
 - 每条裂变的 storyboards 数量和复刻脚本保持一致；每个分镜的 time_range 尽量保持一致。
 - 每个裂变分镜必须保留原分镜的 purpose，但改写 visual、action、voiceover、subtitle、props_scene、audio 中与裂变维度相关的内容。
 - 裂变应适合直接写入 CreatiBI 分镜结构，不要输出抽象策略，要输出可拍/可剪/可生成的视频分镜。
 - 所有 storyboards 都必须包含 scene_index、time_range、visual、action、voiceover、subtitle、shot_size、camera_intent、props_scene、audio、purpose。
 - fission_scripts 数量必须严格等于 %d。
 - 输出必须是严格 JSON，不要 Markdown，不要代码块，不要解释。
+
+允许裂变维度：
+
+1. 视听层
+   - 换BGM：保留画面结构，替换音乐风格、情绪走向或卡点方式，写入 audio。
+   - 换音效：保留镜头和台词，替换关键动作、UI、转场、点击、爆点音效，写入 audio。
+   - 换色调/滤镜：保留主体与动作，改变 visual 中的色彩、光影、滤镜、氛围描述。
+   - 换字幕&花字：保留旁白核心，改写 subtitle 的花字风格、强调词、屏幕文字层级。
+   - 换画幅：保留内容结构，改写 visual 中的构图、主体位置、留白、贴片适配方式。
+   - 换配音(语速/声线)：保留语义，改写 voiceover 的语速、声线、情绪、口吻。
+
+2. 结构层
+   - 换开头钩子：重点改写前 1-2 个分镜的 visual/action/voiceover/subtitle，但保留后续链路。
+   - 换CTA：重点改写最后 1-2 个分镜的 voiceover/subtitle/action，强化不同转化动作。
+   - 时长压缩/拉伸：调整 time_range 和 duration_seconds，压缩或拉伸节奏，同时保留分镜顺序。
+   - 变速·节奏调整：保留时长大体不变，改变 action 和 camera_intent 中的速度、卡点、停顿。
+   - 换首帧/封面：重点改写第 1 个分镜的 visual、action、subtitle，让首帧更强。
+   - 同素材高光重剪：不换主体素材，重排高光重点和镜头强调，改写 camera_intent/action。
+
+3. 元素层
+   - 换局部角色/群演：保留场景与叙事，替换 visual/action 中的局部角色、群演或人物关系。
+   - 换局部场景贴片：保留主体动作，替换 visual/props_scene 中的局部背景、贴片、环境元素。
+   - 换局部道具/UI：保留镜头结构，替换 props_scene/visual 中的局部道具、UI 元素、按钮、弹窗。
+   - 字幕语言本地化：保留语义，按目标地区改写 subtitle 和必要的 voiceover 表达。
 
 JSON Schema：
 
@@ -227,7 +252,7 @@ JSON Schema：
       ],
       "metadata": {
         "parent_script_id": "replica",
-        "fission_dimension": "钩子裂变",
+        "fission_dimension": "视听层-换BGM",
         "kept_elements": ["保留元素"],
         "changed_elements": ["替换元素"]
       }
