@@ -79,7 +79,8 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create replica script: %w", err)
 	}
-	if err := p.saveStoryboard(parentID, replica); err != nil {
+	saveRaw, err := p.saveStoryboard(projectID, parentID, replicaTitle, replica)
+	if err != nil {
 		return "", fmt.Errorf("save replica script: %w", err)
 	}
 	created.Scripts = append(created.Scripts, publishedScript{
@@ -88,6 +89,7 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 		Type:        "replica",
 		ParentID:    0,
 		CreateRaw:   raw,
+		SaveRaw:     saveRaw,
 		StoryboardN: len(replica.Storyboards),
 	})
 
@@ -100,7 +102,8 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("create fission script %d: %w", i+1, err)
 		}
-		if err := p.saveStoryboard(childID, fission); err != nil {
+		saveRaw, err := p.saveStoryboard(projectID, childID, title, fission)
+		if err != nil {
 			return "", fmt.Errorf("save fission script %d: %w", i+1, err)
 		}
 		created.Scripts = append(created.Scripts, publishedScript{
@@ -109,6 +112,7 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 			Type:        "fission",
 			ParentID:    parentID,
 			CreateRaw:   raw,
+			SaveRaw:     saveRaw,
 			StoryboardN: len(fission.Storyboards),
 		})
 	}
@@ -159,13 +163,20 @@ func (p *CLIPublisher) createScript(projectID int, name string, parentID int) (i
 	return id, out, nil
 }
 
-func (p *CLIPublisher) saveStoryboard(scriptID int, script scriptPayload) error {
+func (p *CLIPublisher) saveStoryboard(projectID int, scriptID int, title string, script scriptPayload) (string, error) {
 	content, err := json.Marshal(toCreatiBIStoryboard(script.Storyboards))
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = p.run("project", "script-save", "--script-id", strconv.Itoa(scriptID), "--format", "2", "--script", string(content), "-q")
-	return err
+	return p.run(
+		"project", "script-save",
+		"--project-id", strconv.Itoa(projectID),
+		"--script-id", strconv.Itoa(scriptID),
+		"--name", title,
+		"--format", "2",
+		"--script", string(content),
+		"-q",
+	)
 }
 
 func (p *CLIPublisher) run(args ...string) (string, error) {
@@ -319,4 +330,5 @@ type publishedScript struct {
 	ParentID    int    `json:"parent_id,omitempty"`
 	StoryboardN int    `json:"storyboard_count"`
 	CreateRaw   string `json:"create_raw,omitempty"`
+	SaveRaw     string `json:"save_raw,omitempty"`
 }
