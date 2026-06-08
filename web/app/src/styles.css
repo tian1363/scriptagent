@@ -525,6 +525,11 @@ textarea:focus {
   background: var(--cbi-bg-1);
 }
 
+.product-meta-grid {
+  display: grid;
+  gap: var(--cbi-space-1);
+}
+
 .detail-row {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr);
@@ -548,6 +553,26 @@ textarea:focus {
   font-weight: var(--cbi-fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.product-preview {
+  min-height: 300px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--cbi-divider-subtle);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+}
+
+.product-preview .section-heading {
+  padding: var(--cbi-space-1-5);
+  border-bottom: 1px solid var(--cbi-divider);
+  background: var(--cbi-bg-2);
+}
+
+.product-preview .markdown-output {
+  min-height: 0;
 }
 
 .config-card {

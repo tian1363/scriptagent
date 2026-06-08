@@ -25,6 +25,7 @@ import {
   getModelSettings,
   getChat,
   getJob,
+  getProductMarkdown,
   listProducts,
   listChats,
   listJobs,
@@ -93,6 +94,8 @@ export function App() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [products, setProducts] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
+  const [productPreview, setProductPreview] = useState(null);
+  const [isLoadingProductPreview, setIsLoadingProductPreview] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [modelSettings, setModelSettings] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -172,6 +175,28 @@ export function App() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [selectedJob?.id, selectedJob?.status]);
+
+  useEffect(() => {
+    if (view !== "products" || !selectedProductId) {
+      setProductPreview(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setIsLoadingProductPreview(true);
+    getProductMarkdown(selectedProductId)
+      .then((preview) => {
+        if (!cancelled) setProductPreview(preview);
+      })
+      .catch((err) => {
+        if (!cancelled) setProductPreview({ error: err.message });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingProductPreview(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, selectedProductId]);
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -367,6 +392,8 @@ export function App() {
             <ProductsWorkspace
               products={products}
               selectedProductId={selectedProductId}
+              productPreview={productPreview}
+              isLoadingProductPreview={isLoadingProductPreview}
               isCreatingProduct={isCreatingProduct}
               error={error}
               onCreate={handleCreateProduct}
@@ -735,7 +762,7 @@ function FissionDirectionPicker({ count }) {
   );
 }
 
-function ProductsWorkspace({ products, selectedProductId, isCreatingProduct, error, onCreate }) {
+function ProductsWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, error, onCreate }) {
   const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
   return (
     <>
@@ -776,18 +803,35 @@ function ProductsWorkspace({ products, selectedProductId, isCreatingProduct, err
         </div>
         {selectedProduct ? (
           <div className="product-detail">
-            <div className="detail-row">
-              <span>产品 ID</span>
-              <strong>{selectedProduct.id}</strong>
+            <div className="product-meta-grid">
+              <div className="detail-row">
+                <span>产品 ID</span>
+                <strong>{selectedProduct.id}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Markdown 文件</span>
+                <strong>{selectedProduct.md_name}</strong>
+              </div>
+              <div className="detail-row">
+                <span>更新时间</span>
+                <strong>{formatTime(selectedProduct.updated_at)}</strong>
+              </div>
             </div>
-            <div className="detail-row">
-              <span>Markdown 文件</span>
-              <strong>{selectedProduct.md_name}</strong>
-            </div>
-            <div className="detail-row">
-              <span>更新时间</span>
-              <strong>{formatTime(selectedProduct.updated_at)}</strong>
-            </div>
+            <section className="product-preview">
+              <div className="section-heading">
+                <span>Markdown 预览</span>
+                <small>{isLoadingProductPreview ? "读取中" : productPreview?.md_name || selectedProduct.md_name}</small>
+              </div>
+              {productPreview?.error ? (
+                <div className="error-banner">{productPreview.error}</div>
+              ) : isLoadingProductPreview ? (
+                <EmptyState text="正在读取产品 Markdown" compact />
+              ) : productPreview?.content ? (
+                <MarkdownContent content={productPreview.content} />
+              ) : (
+                <EmptyState text="暂无可预览内容" compact />
+              )}
+            </section>
           </div>
         ) : (
           <EmptyState text="暂无产品详情" />

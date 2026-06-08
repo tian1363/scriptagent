@@ -190,7 +190,7 @@ Top NavBar
   - CreatiBI 写入
 
 创建任务区按素材输入、补充要求、生成设置和裂变方向分组。结果区按内容类型展示：运行日志渲染为步骤时间线，视频分析 Markdown 渲染标题和表格，JSON 结果展示脚本摘要卡片并保留原始 JSON。
-产品资料库用于保存产品名称和产品 Markdown 文件。模型配置页用于保存用户自己的 DashScope API Key、Endpoint 和模型名；用户配置优先于环境变量。
+产品资料库用于保存产品名称和产品 Markdown 文件，并支持在产品详情中读取和预览 Markdown 内容。模型配置页用于保存用户自己的 DashScope API Key、Endpoint 和模型名；用户配置优先于环境变量。
 
 历史记录包含：
 
@@ -353,12 +353,25 @@ POST /api/jobs
 ```http
 GET /api/products
 POST /api/products
+GET /api/products/{id}/markdown
 ```
 
 `POST /api/products` 使用 multipart 表单：
 
 - `title`: 产品名称，可选。
 - `product_md`: 产品 Markdown 文件，必填。
+
+`GET /api/products/{id}/markdown` 返回：
+
+- `id`: 产品 ID。
+- `title`: 产品名称。
+- `md_name`: Markdown 原始文件名。
+- `content`: Markdown 文件内容，用于前端预览。
+
+约束：
+
+- 预览接口只读取该产品记录关联的 Markdown 文件。
+- 预览内容受 Markdown 文件大小上限保护。
 
 ### 10.1B 模型配置
 

@@ -100,6 +100,36 @@ func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, product)
 }
 
+func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
+	product, err := h.store.GetProduct(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	file, err := os.Open(product.MDPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, int64(storage.MaxMarkdownBytes)+1))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(content) > storage.MaxMarkdownBytes {
+		writeError(w, http.StatusBadRequest, errors.New("product Markdown is too large to preview"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":      product.ID,
+		"title":   product.Title,
+		"md_name": product.MDName,
+		"content": string(content),
+	})
+}
+
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(storage.MaxVideoBytes + storage.MaxMarkdownBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err)

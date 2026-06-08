@@ -28,6 +28,10 @@ export async function createProduct(formData) {
   });
 }
 
+export async function getProductMarkdown(id) {
+  return request(`/api/products/${id}/markdown`);
+}
+
 export async function getModelSettings() {
   return request("/api/settings/model");
 }
