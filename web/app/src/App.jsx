@@ -63,6 +63,18 @@ const fissionDirectionGroups = [
   },
 ];
 
+const fissionDirections = fissionDirectionGroups.flatMap((group) =>
+  group.items.map((item) => ({
+    layer: group.layer,
+    label: item,
+    value: `${group.layer}-${item}`,
+  })),
+);
+
+function defaultFissionDirection(index) {
+  return fissionDirections[index % fissionDirections.length]?.value || "";
+}
+
 export function App() {
   const [view, setView] = useState("jobs");
   const [jobs, setJobs] = useState([]);
@@ -382,6 +394,13 @@ function CallsSidebar({ calls, selectedCallId, onSelect }) {
 }
 
 function JobsWorkspace(props) {
+  const [fissionCount, setFissionCount] = useState(5);
+
+  function handleFissionCountChange(event) {
+    const next = Number.parseInt(event.target.value, 10);
+    setFissionCount(Number.isFinite(next) ? Math.min(20, Math.max(1, next)) : 1);
+  }
+
   return (
     <>
       <section className="composer">
@@ -413,14 +432,14 @@ function JobsWorkspace(props) {
             </label>
             <label>
               <span>裂变数量</span>
-              <input name="fission_count" type="number" min="1" max="20" defaultValue="5" />
+              <input name="fission_count" type="number" min="1" max="20" value={fissionCount} onChange={handleFissionCountChange} />
             </label>
             <button className="primary-button" type="submit" disabled={props.isCreating}>
               {props.isCreating ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
               <span>{props.isCreating ? "创建中" : "生成"}</span>
             </button>
           </div>
-          <FissionDirectionPicker />
+          <FissionDirectionPicker count={fissionCount} />
         </form>
         {props.error ? <div className="error-banner">{props.error}</div> : null}
       </section>
@@ -478,27 +497,34 @@ function ChatWorkspace({ thread, draft, isSending, error, onDraft, onSend }) {
   );
 }
 
-function FissionDirectionPicker() {
+function FissionDirectionPicker({ count }) {
+  const rows = Array.from({ length: count }, (_, index) => index);
+
   return (
     <div className="direction-panel">
       <div className="direction-heading">
         <span>裂变方向</span>
-        <small>默认全选，可按本次任务收窄生成范围</small>
+        <small>每条脚本只选择 1 个裂变元素，可重复使用同一元素</small>
       </div>
-      <div className="direction-grid">
-        {fissionDirectionGroups.map((group) => (
-          <fieldset key={group.layer} className="direction-group">
-            <legend>{group.layer}</legend>
-            {group.items.map((item) => {
-              const value = `${group.layer}-${item}`;
-              return (
-                <label key={value} className="check-option">
-                  <input name="fission_directions" type="checkbox" value={value} defaultChecked />
-                  <span>{item}</span>
-                </label>
-              );
-            })}
-          </fieldset>
+      <div className="direction-list">
+        {rows.map((index) => (
+          <label key={index} className="direction-row">
+            <span>裂变脚本 {String(index + 1).padStart(2, "0")}</span>
+            <select name="fission_directions" defaultValue={defaultFissionDirection(index)} required>
+              {fissionDirectionGroups.map((group) => (
+                <optgroup key={group.layer} label={group.layer}>
+                  {group.items.map((item) => {
+                    const value = `${group.layer}-${item}`;
+                    return (
+                      <option key={value} value={value}>
+                        {item}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              ))}
+            </select>
+          </label>
         ))}
       </div>
     </div>

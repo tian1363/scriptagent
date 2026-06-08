@@ -205,6 +205,27 @@ func parseJSON(raw string, target any) error {
 }
 
 func validateFissionDimensions(scripts []scriptPayload, selectedDirections string) error {
+	selected := selectedFissionDirectionList(selectedDirections)
+	if len(selected) > 0 {
+		if len(selected) != len(scripts) {
+			return fmt.Errorf("selected fission directions count %d does not match scripts count %d", len(selected), len(scripts))
+		}
+		known := allowedFissionDirections("")
+		for i, script := range scripts {
+			dimension := strings.TrimSpace(script.Metadata.FissionDimension)
+			if dimension == "" {
+				return fmt.Errorf("fission script %d has empty fission_dimension", i+1)
+			}
+			if !known[dimension] {
+				return fmt.Errorf("fission script %d uses invalid or mixed fission_dimension: %s", i+1, dimension)
+			}
+			if dimension != selected[i] {
+				return fmt.Errorf("fission script %d must use selected fission_dimension %s, got %s", i+1, selected[i], dimension)
+			}
+		}
+		return nil
+	}
+
 	allowed := allowedFissionDirections(selectedDirections)
 	for i, script := range scripts {
 		dimension := strings.TrimSpace(script.Metadata.FissionDimension)
@@ -216,6 +237,18 @@ func validateFissionDimensions(scripts []scriptPayload, selectedDirections strin
 		}
 	}
 	return nil
+}
+
+func selectedFissionDirectionList(selectedDirections string) []string {
+	values := strings.Split(strings.TrimSpace(selectedDirections), "\n")
+	result := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func allowedFissionDirections(selectedDirections string) map[string]bool {

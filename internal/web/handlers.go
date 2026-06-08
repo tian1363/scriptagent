@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -90,6 +91,11 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	fissionDirections := parseFissionDirections(r)
+	if err := validateFissionDirectionCount(fissionDirections, fissionCount); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	industry := r.FormValue("industry")
 	if industry == "" {
 		industry = "auto"
@@ -109,7 +115,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		Requirement:       r.FormValue("requirement"),
 		Industry:          industry,
 		FissionCount:      fissionCount,
-		FissionDirections: parseFissionDirections(r),
+		FissionDirections: fissionDirections,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -313,16 +319,25 @@ func parseFissionCount(raw string) (int, error) {
 func parseFissionDirections(r *http.Request) string {
 	values := r.MultipartForm.Value["fission_directions"]
 	result := []string{}
-	seen := map[string]bool{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
+		if value == "" {
 			continue
 		}
-		seen[value] = true
 		result = append(result, value)
 	}
 	return strings.Join(result, "\n")
+}
+
+func validateFissionDirectionCount(raw string, expected int) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	actual := len(strings.Split(strings.TrimSpace(raw), "\n"))
+	if actual != expected {
+		return fmt.Errorf("fission_directions must contain exactly %d items, got %d", expected, actual)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

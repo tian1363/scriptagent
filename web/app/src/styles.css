@@ -321,50 +321,35 @@ textarea:focus {
   font-size: var(--cbi-fs-sm);
 }
 
-.direction-grid {
+.direction-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--cbi-space-1);
+  gap: 8px;
 }
 
-.direction-group {
+.direction-row {
   min-width: 0;
-  margin: 0;
-  padding: var(--cbi-space-1);
   display: grid;
-  gap: 6px;
+  grid-template-columns: 128px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
   border: 1px solid var(--cbi-border-default);
   border-radius: var(--cbi-radius-sm);
   background: var(--cbi-bg-1);
 }
 
-.direction-group legend {
-  padding: 0 4px;
+.direction-row span {
+  min-width: 0;
   color: var(--cbi-fg-1);
   font-size: var(--cbi-fs-sm);
   font-weight: var(--cbi-fw-semibold);
-}
-
-.check-option {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  color: var(--cbi-fg-2);
-}
-
-.check-option input {
-  width: 14px;
-  height: 14px;
-  padding: 0;
-}
-
-.check-option span {
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.direction-row select {
+  min-width: 0;
 }
 
 .file-input {
@@ -653,7 +638,7 @@ textarea:focus {
 
   .upload-grid,
   .settings-row,
-  .direction-grid,
+  .direction-row,
   .chat-form,
   .call-detail {
     grid-template-columns: 1fr;
