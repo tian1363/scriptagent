@@ -30,7 +30,7 @@ type Publisher interface {
 }
 
 type ChatResponder interface {
-	Send(ctx context.Context, conversationID, content string) (*jobs.ChatThread, error)
+	Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error)
 }
 
 func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder) *Handler {
@@ -271,13 +271,14 @@ func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Content string `json:"content"`
+		Content   string `json:"content"`
+		ProductID string `json:"product_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.Send(r.Context(), chi.URLParam(r, "id"), input.Content)
+	thread, err := h.chat.Send(r.Context(), chi.URLParam(r, "id"), input.Content, input.ProductID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -291,13 +292,14 @@ func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Content string `json:"content"`
+		Content   string `json:"content"`
+		ProductID string `json:"product_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.Send(r.Context(), "", input.Content)
+	thread, err := h.chat.Send(r.Context(), "", input.Content, input.ProductID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return

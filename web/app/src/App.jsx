@@ -100,6 +100,7 @@ export function App() {
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatDraft, setChatDraft] = useState("");
+  const [chatProductId, setChatProductId] = useState("");
   const [isSending, setIsSending] = useState(false);
 
   const [modelCalls, setModelCalls] = useState([]);
@@ -241,8 +242,8 @@ export function App() {
     setIsSending(true);
     try {
       const thread = selectedChat?.conversation?.id
-        ? await sendChatMessage(selectedChat.conversation.id, content)
-        : await sendNewChatMessage(content);
+        ? await sendChatMessage(selectedChat.conversation.id, content, chatProductId)
+        : await sendNewChatMessage(content, chatProductId);
       setSelectedChat(thread);
       setChatDraft("");
       await refreshChats(thread.conversation.id);
@@ -375,9 +376,12 @@ export function App() {
             <ChatWorkspace
               thread={selectedChat}
               draft={chatDraft}
+              products={products}
+              selectedProductId={chatProductId}
               isSending={isSending}
               error={error}
               onDraft={setChatDraft}
+              onProduct={setChatProductId}
               onSend={handleSendChat}
             />
           ) : null}
@@ -640,19 +644,37 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, draft, isSending, error, onDraft, onSend }) {
+function ChatWorkspace({ thread, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
   const messages = thread?.messages || [];
+  const selectedProduct = products.find((product) => product.id === selectedProductId);
   return (
     <section className="chat-pane">
       <div className="result-header">
         <div>
           <h2>{thread?.conversation?.title || "通用对话"}</h2>
-          <p>用于讨论脚本策略、裂变方向、发布问题和一般创作问题。</p>
+          <p>用于讨论脚本策略、裂变方向、发布问题和一般创作问题，可调用产品库资料。</p>
         </div>
         <span className="status-pill neutral">
           <Bot size={13} />
           非 ReAct 工作流
         </span>
+      </div>
+      <div className="chat-context-bar">
+        <label>
+          <span>产品上下文</span>
+          <select value={selectedProductId} onChange={(event) => onProduct(event.target.value)}>
+            <option value="">不调用产品库</option>
+            {products.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className={`context-chip ${selectedProduct ? "active" : ""}`}>
+          <Package size={14} />
+          <span>{selectedProduct ? `本轮会引用 ${selectedProduct.md_name}` : "普通对话"}</span>
+        </div>
       </div>
       <div className="chat-messages">
         {messages.length ? (

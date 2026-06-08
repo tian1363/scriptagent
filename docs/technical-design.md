@@ -58,7 +58,7 @@ ScriptAgent
 
 后续只有在游戏、电商、审核、批处理、投放策略等能力显著复杂化时，才考虑升级为主控编排型 Multi-Agent。
 
-当前前端使用 React。当前 Agent 编排不是 ReAct（Reason + Act）框架，而是固定步骤的单 Agent 顺序工作流：视频理解 -> 复刻脚本 -> 裂变脚本 -> 用户确认发布。通用对话也是普通上下文对话，不执行工具行动循环。
+当前前端使用 React。当前 Agent 编排不是 ReAct（Reason + Act）框架，而是固定步骤的单 Agent 顺序工作流：视频理解 -> 复刻脚本 -> 裂变脚本 -> 用户确认发布。通用对话也是普通上下文对话，不执行工具行动循环；发送消息时可选产品库产品，后端读取对应 Markdown 并作为本次模型调用上下文注入。
 
 ## 5. 总体系统架构
 
@@ -410,6 +410,26 @@ POST /api/jobs/{id}/retry
 - 只允许非运行中的任务重试。
 - 重试复用原输入文件和参数。
 - 重试清空旧生成结果与发布结果，并追加运行日志。
+
+### 10.7 通用对话
+
+```http
+GET /api/chats
+GET /api/chats/{id}
+POST /api/chats/messages
+POST /api/chats/{id}/messages
+```
+
+`POST /api/chats/messages` 和 `POST /api/chats/{id}/messages` 使用 JSON：
+
+- `content`: 用户消息，必填。
+- `product_id`: 可选，产品库产品 ID。传入后，后端读取该产品 Markdown 并注入本次模型调用 prompt。
+
+约束：
+
+- `product_id` 只影响本次消息的模型上下文，不强制绑定整个会话。
+- 未传 `product_id` 时执行普通通用对话。
+- 模型调用日志中记录的是脱敏后的可见请求体，不记录 API Key。
 
 ## 11. 数据库设计
 

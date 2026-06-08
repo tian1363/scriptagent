@@ -62,19 +62,19 @@ export async function getChat(id) {
   return request(`/api/chats/${id}`);
 }
 
-export async function sendNewChatMessage(content) {
+export async function sendNewChatMessage(content, productId = "") {
   return request("/api/chats/messages", {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, product_id: productId }),
   });
 }
 
-export async function sendChatMessage(id, content) {
+export async function sendChatMessage(id, content, productId = "") {
   return request(`/api/chats/${id}/messages`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, product_id: productId }),
   });
 }
 
