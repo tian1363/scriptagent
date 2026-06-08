@@ -491,7 +491,9 @@ CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
 - CreatiBI 写入逻辑必须封装在 `internal/creatibi` 中。
 - 上层业务不直接拼 CLI 命令。
 - 发布使用 `cbi project script-create` 创建复刻脚本和裂变子脚本；复刻脚本只传 `project-id/name`，裂变脚本通过 `parent-id` 挂载到复刻脚本下。
-- 发布使用 `cbi project script-save --project-id ... --name ... --format 2 --script ...` 保存分镜内容，确保保存内容时不清空脚本名称。
+- 发布使用 `cbi project script-save --project-id ... --name ... --format 2 --script ...` 保存完整分镜 doc JSON，确保保存内容时不清空脚本名称。
+- CreatiBI 分镜 doc 使用 `heading + CbiFrame + paragraph` 结构；一个 `CbiFrame` 包含多个 `CbiFrameItem`。
+- 字段映射：`voiceover/subtitle -> Copy`，`visual/action/props_scene/shot_size -> Description`，`time_range/camera_intent/purpose/audio -> Note`，`action/props_scene/shot_size/audio -> property.Movement/Prop/ShotSize/text.SoundEffec`。
 - `CREATIBI_PROJECT_ID` 可指定目标专案；未指定时使用 `cbi project list` 返回的第一个专案。
 - CLI/API 返回结果必须保存到 `creatibi_result_json`。
 - 写入失败不能删除本地生成结果。

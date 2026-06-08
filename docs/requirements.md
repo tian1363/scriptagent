@@ -230,6 +230,18 @@ ScriptAgent 是一个面向 CreatiBI 脚本生产流程的内部工作台。用�
 - 发布必须真实调用 CreatiBI CLI/API 创建脚本，不允许仅把本地状态标记为已发布。
 - 裂变脚本应作为复刻脚本的子任务创建；未获得有效来源任务 ID 时不得向 CreatiBI 传任意 `source-object`。
 - 保存脚本内容时必须同时保留脚本名称和目标专案 ID，避免内容保存后 CreatiBI 任务显示为空名称或异常状态。
+- 写入 CreatiBI 分镜脚本时必须按字段映射填充：`voiceover/subtitle` 写入 Copy，`visual/action/props_scene/shot_size` 写入 Description，`time_range/camera_intent/purpose/audio` 写入 Note，`action/props_scene/shot_size/audio` 同步写入分镜属性 `Movement/Prop/ShotSize/SoundEffec`。
+
+### FR-011 裂变脚本生成
+
+系统必须基于复刻脚本生成裂变脚本，而不是只基于视频分析一次性生成全部脚本。
+
+验收标准：
+
+- 复刻脚本生成完成并校验后，才进入裂变脚本生成。
+- 裂变提示词必须包含复刻脚本 JSON。
+- 裂变脚本必须继承复刻脚本的分镜数量、时间段、镜头功能和叙事顺序。
+- 每条裂变脚本必须有明确裂变维度，并说明保留元素与替换元素。
 
 ## 8. 视频理解需求
 

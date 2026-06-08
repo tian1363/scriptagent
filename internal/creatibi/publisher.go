@@ -2,6 +2,7 @@ package creatibi
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -164,7 +165,7 @@ func (p *CLIPublisher) createScript(projectID int, name string, parentID int) (i
 }
 
 func (p *CLIPublisher) saveStoryboard(projectID int, scriptID int, title string, script scriptPayload) (string, error) {
-	content, err := json.Marshal(toCreatiBIStoryboard(script.Storyboards))
+	content, err := json.Marshal(toCreatiBIDoc(title, script.Storyboards))
 	if err != nil {
 		return "", err
 	}
@@ -194,27 +195,136 @@ func (p *CLIPublisher) run(args ...string) (string, error) {
 	return text, nil
 }
 
-func toCreatiBIStoryboard(items []storyboard) []map[string]any {
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		copyText := strings.TrimSpace(strings.Join(nonEmpty([]string{
-			"画面：" + item.Visual,
-			"动作：" + item.Action,
-			"旁白：" + item.Voiceover,
-			"字幕：" + item.Subtitle,
-			"镜头：" + item.ShotSize,
-			"镜头动机：" + item.CameraIntent,
-			"道具场景：" + item.PropsScene,
-			"音频：" + item.Audio,
-			"目的：" + item.Purpose,
-		}), "\n"))
-		result = append(result, map[string]any{
-			"Copy":       copyText,
-			"duration":   durationSeconds(item.TimeRange),
-			"time_range": item.TimeRange,
-		})
+func toCreatiBIDoc(title string, items []storyboard) map[string]any {
+	return map[string]any{
+		"type":    "doc",
+		"content": []map[string]any{headingNode(title), frameNode(items), paragraphNode("")},
 	}
-	return result
+}
+
+func headingNode(title string) map[string]any {
+	id := uuid()
+	node := map[string]any{
+		"type": "heading",
+		"attrs": map[string]any{
+			"id":          id,
+			"data-toc-id": id,
+			"textAlign":   "left",
+			"level":       1,
+		},
+	}
+	if text := strings.TrimSpace(title); text != "" {
+		node["content"] = []map[string]any{{"type": "text", "text": text}}
+	}
+	return node
+}
+
+func frameNode(items []storyboard) map[string]any {
+	content := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		content = append(content, frameItemNode(item))
+	}
+	return map[string]any{
+		"type": "CbiFrame",
+		"attrs": map[string]any{
+			"id":                nanoID(),
+			"currentLang":       "zh-CN",
+			"isLoading":         false,
+			"translateVersions": []any{},
+		},
+		"content": content,
+	}
+}
+
+func frameItemNode(item storyboard) map[string]any {
+	return map[string]any{
+		"type": "CbiFrameItem",
+		"attrs": map[string]any{
+			"id":          nanoID(),
+			"aspectRatio": "9:16",
+			"duration":    durationSeconds(item.TimeRange),
+			"imagePrompt": "",
+			"media":       []any{},
+			"placeholder": "",
+			"property": map[string]any{
+				"Movement": item.Action,
+				"Prop":     item.PropsScene,
+				"ShotSize": item.ShotSize,
+				"text": map[string]any{
+					"SoundEffec": item.Audio,
+				},
+			},
+		},
+		"content": []map[string]any{
+			frameFieldNode("Copy", copyText(item)),
+			frameFieldNode("Note", noteText(item)),
+			frameFieldNode("Description", descriptionText(item)),
+		},
+	}
+}
+
+func frameFieldNode(label, text string) map[string]any {
+	return map[string]any{
+		"type": "CbiFrameField",
+		"attrs": map[string]any{
+			"id":    nanoID(),
+			"label": label,
+			"media": []any{},
+		},
+		"content": []map[string]any{paragraphNode(text)},
+	}
+}
+
+func paragraphNode(text string) map[string]any {
+	node := map[string]any{
+		"type": "paragraph",
+		"attrs": map[string]any{
+			"id":        uuid(),
+			"class":     nil,
+			"textAlign": "left",
+		},
+	}
+	if text = strings.TrimSpace(text); text != "" {
+		node["content"] = []map[string]any{{"type": "text", "text": text}}
+	}
+	return node
+}
+
+func copyText(item storyboard) string {
+	return joinLines(
+		fieldLine("旁白/对话", item.Voiceover),
+		fieldLine("字幕", item.Subtitle),
+	)
+}
+
+func noteText(item storyboard) string {
+	return joinLines(
+		fieldLine("时间段", item.TimeRange),
+		fieldLine("镜头动机", item.CameraIntent),
+		fieldLine("叙事目的", item.Purpose),
+		fieldLine("音效/BGM", item.Audio),
+	)
+}
+
+func descriptionText(item storyboard) string {
+	return joinLines(
+		fieldLine("画面描述", item.Visual),
+		fieldLine("动作描述", item.Action),
+		fieldLine("道具场景", item.PropsScene),
+		fieldLine("景别", item.ShotSize),
+	)
+}
+
+func fieldLine(label, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "-" {
+		return ""
+	}
+	return label + "：" + value
+}
+
+func joinLines(values ...string) string {
+	return strings.Join(nonEmpty(values), "\n")
 }
 
 func nonEmpty(values []string) []string {
@@ -246,6 +356,37 @@ func durationSeconds(timeRange string) int {
 func atoi(value string) int {
 	parsed, _ := strconv.Atoi(value)
 	return parsed
+}
+
+func nanoID() string {
+	const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-"
+	buf := make([]byte, 21)
+	if _, err := rand.Read(buf); err != nil {
+		return fallbackID(21)
+	}
+	for i, b := range buf {
+		buf[i] = alphabet[int(b)%len(alphabet)]
+	}
+	return string(buf)
+}
+
+func uuid() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fallbackUUID()
+	}
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
+}
+
+func fallbackID(length int) string {
+	return strings.Repeat("0", length)
+}
+
+func fallbackUUID() string {
+	return "00000000-0000-4000-8000-000000000000"
 }
 
 func extractID(text string) (int, error) {
