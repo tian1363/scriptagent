@@ -31,6 +31,12 @@ func (h *Handler) Routes() http.Handler {
 		api.Get("/jobs/{id}/result", h.getJob)
 		api.Post("/jobs/{id}/retry", h.retryJob)
 		api.Post("/jobs/{id}/publish", h.publishJob)
+		api.Get("/chats", h.listChats)
+		api.Post("/chats", h.createChat)
+		api.Post("/chats/messages", h.sendNewChatMessage)
+		api.Get("/chats/{id}", h.getChat)
+		api.Post("/chats/{id}/messages", h.sendChatMessage)
+		api.Get("/model-calls", h.listModelCalls)
 	})
 
 	if stat, err := os.Stat(h.cfg.StaticDir); err == nil && stat.IsDir() {

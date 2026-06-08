@@ -31,6 +31,38 @@ export async function retryJob(id) {
   });
 }
 
+export async function listChats() {
+  return request("/api/chats");
+}
+
+export async function getChat(id) {
+  return request(`/api/chats/${id}`);
+}
+
+export async function sendNewChatMessage(content) {
+  return request("/api/chats/messages", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function sendChatMessage(id, content) {
+  return request(`/api/chats/${id}/messages`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function listModelCalls(params = {}) {
+  const query = new URLSearchParams();
+  if (params.ref_id) query.set("ref_id", params.ref_id);
+  if (params.limit) query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request(`/api/model-calls${suffix}`);
+}
+
 async function request(path, init) {
   const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));

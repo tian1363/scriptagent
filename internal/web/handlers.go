@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -19,13 +21,18 @@ type Handler struct {
 	files     *storage.LocalStore
 	runner    *jobs.Runner
 	publisher Publisher
+	chat      ChatResponder
 }
 
 type Publisher interface {
 	Publish(job jobs.Job) (string, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher) *Handler {
+type ChatResponder interface {
+	Send(ctx context.Context, conversationID, content string) (*jobs.ChatThread, error)
+}
+
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder) *Handler {
 	if publisher == nil {
 		publisher = disabledPublisher{}
 	}
@@ -35,6 +42,7 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		files:     files,
 		runner:    runner,
 		publisher: publisher,
+		chat:      chat,
 	}
 }
 
@@ -167,6 +175,95 @@ func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
 		"job_id": job.ID,
 		"status": jobs.StatusPending,
 	})
+}
+
+func (h *Handler) listChats(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.store.ListChatConversations()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) createChat(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	conversation, err := h.store.CreateChatConversation(input.Title)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, conversation)
+}
+
+func (h *Handler) getChat(w http.ResponseWriter, r *http.Request) {
+	thread, err := h.store.GetChatThread(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
+	if h.chat == nil {
+		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
+		return
+	}
+	var input struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	thread, err := h.chat.Send(r.Context(), chi.URLParam(r, "id"), input.Content)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
+	if h.chat == nil {
+		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
+		return
+	}
+	var input struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	thread, err := h.chat.Send(r.Context(), "", input.Content)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, thread)
+}
+
+func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	result, err := h.store.ListModelCalls(r.URL.Query().Get("ref_id"), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string, string, error) {

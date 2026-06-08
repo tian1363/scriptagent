@@ -58,22 +58,32 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	}
 
 	progress(jobs.StatusAnalyzingVideo, "开始调用 qwen3.6-plus 进行视频理解。")
-	analysis, err := a.client.Generate(ctx, []model.ContentItem{
+	analysisResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
+		Scope: "job",
+		RefID: job.ID,
+		Step:  "video_analysis",
+	}, []model.ContentItem{
 		{Video: videoDataURL, FPS: a.videoFPS},
 		{Text: videoAnalysisPrompt(job, string(product))},
 	})
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("video analysis failed: %w", err)
 	}
+	analysis := analysisResult.Text
 
 	progress(jobs.StatusExtractingStructure, "视频理解完成，准备生成复刻结构。")
 	progress(jobs.StatusGeneratingReplica, "开始调用 qwen3.6-plus 生成复刻脚本。")
-	replicaRaw, err := a.client.Generate(ctx, []model.ContentItem{
+	replicaResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
+		Scope: "job",
+		RefID: job.ID,
+		Step:  "replica_script",
+	}, []model.ContentItem{
 		{Text: replicaScriptPrompt(job, string(product), analysis)},
 	})
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("replica script generation failed: %w", err)
 	}
+	replicaRaw := replicaResult.Text
 
 	progress(jobs.StatusValidating, "模型已返回复刻脚本，正在解析 JSON 并校验结构。")
 	replica, err := parseReplicaScript(replicaRaw)
@@ -86,12 +96,17 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	}
 
 	progress(jobs.StatusGeneratingFission, "开始基于复刻脚本生成裂变脚本。")
-	fissionRaw, err := a.client.Generate(ctx, []model.ContentItem{
+	fissionResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
+		Scope: "job",
+		RefID: job.ID,
+		Step:  "fission_scripts",
+	}, []model.ContentItem{
 		{Text: fissionScriptPrompt(job, string(product), analysis, replicaJSON)},
 	})
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("fission script generation failed: %w", err)
 	}
+	fissionRaw := fissionResult.Text
 
 	progress(jobs.StatusValidating, "模型已返回裂变脚本，正在解析 JSON 并校验结构。")
 	fissions, err := parseFissionScripts(fissionRaw)

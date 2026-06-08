@@ -42,6 +42,39 @@ textarea {
   width: auto;
 }
 
+.view-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-2);
+}
+
+.view-switcher button,
+.mini-button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--cbi-space-1);
+  border: 0;
+  border-radius: var(--cbi-radius-sm);
+  background: transparent;
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+  cursor: pointer;
+}
+
+.view-switcher button.active,
+.view-switcher button:hover,
+.mini-button:hover {
+  background: var(--cbi-bg-1);
+  color: var(--cbi-fg-1);
+}
+
 .icon-button,
 .secondary-button,
 .primary-button {
@@ -114,6 +147,16 @@ button:disabled {
   font-size: var(--cbi-fs-sm);
   font-weight: var(--cbi-fw-semibold);
   color: var(--cbi-fg-2);
+}
+
+.pane-heading.split {
+  justify-content: space-between;
+}
+
+.pane-heading.split span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cbi-space-1);
 }
 
 .history-list {
@@ -277,6 +320,12 @@ textarea:focus {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.result-pane.full-height,
+.chat-pane {
+  grid-row: 1 / -1;
+  min-height: 0;
+}
+
 .result-header {
   display: flex;
   align-items: center;
@@ -333,6 +382,116 @@ textarea:focus {
   white-space: pre;
 }
 
+.chat-pane {
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-lg);
+  background: var(--cbi-surface);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.chat-messages {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--cbi-space-2);
+  display: grid;
+  align-content: start;
+  gap: var(--cbi-space-1-5);
+}
+
+.chat-message {
+  max-width: 820px;
+  display: grid;
+  gap: 6px;
+  padding: var(--cbi-space-1-5);
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+}
+
+.chat-message.user {
+  justify-self: end;
+  background: rgba(132, 78, 239, 0.06);
+  border-color: rgba(132, 78, 239, 0.18);
+}
+
+.chat-message.assistant {
+  justify-self: start;
+}
+
+.chat-message span {
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.chat-message p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--cbi-space-1);
+  align-items: end;
+  padding: var(--cbi-space-2);
+  border-top: 1px solid var(--cbi-divider);
+}
+
+.chat-form .error-banner {
+  grid-column: 1 / -1;
+}
+
+.chat-form textarea {
+  min-height: 72px;
+}
+
+.token-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--cbi-space-1);
+  flex-wrap: wrap;
+}
+
+.token-strip span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--cbi-space-1);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-3);
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.call-detail {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--cbi-space-2);
+  padding: var(--cbi-space-2);
+}
+
+.call-detail section {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  overflow: hidden;
+}
+
+.call-detail h3 {
+  margin: 0;
+  padding: var(--cbi-space-1) var(--cbi-space-1-5);
+  border-bottom: 1px solid var(--cbi-divider);
+  font-size: var(--cbi-fs-sm);
+  color: var(--cbi-fg-2);
+}
+
 .error-output,
 .error-banner {
   color: var(--cbi-error);
@@ -381,6 +540,10 @@ textarea:focus {
   font-size: var(--cbi-fs-sm);
 }
 
+.empty-state.compact {
+  min-height: 120px;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
@@ -417,7 +580,13 @@ textarea:focus {
   }
 
   .upload-grid,
-  .settings-row {
+  .settings-row,
+  .chat-form,
+  .call-detail {
     grid-template-columns: 1fr;
+  }
+
+  .view-switcher span {
+    display: none;
   }
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tian1363/scriptagent/internal/agent"
+	"github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creatibi"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
@@ -38,8 +39,9 @@ func main() {
 	defer store.Close()
 
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
-	runner := jobs.NewRunner(store, buildAgent())
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher())
+	modelClient := buildModelClient(store)
+	runner := jobs.NewRunner(store, buildAgent(modelClient))
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient))
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
@@ -56,24 +58,30 @@ func buildPublisher() webserver.Publisher {
 	})
 }
 
-func buildAgent() jobs.Agent {
+func buildAgent(client *model.DashScopeClient) jobs.Agent {
 	mode := env("SCRIPT_AGENT_MODE", "auto")
-	apiKey := os.Getenv("DASHSCOPE_API_KEY")
-	if mode == "mock" || (mode == "auto" && apiKey == "") {
+	if mode == "mock" || (mode == "auto" && client == nil) {
 		log.Printf("ScriptAgent model mode: mock")
 		return agent.NewMockScriptAgent()
 	}
-
-	client := model.NewDashScopeClient(model.DashScopeConfig{
-		APIKey:   apiKey,
-		Endpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
-		Model:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
-	})
 	log.Printf("ScriptAgent model mode: qwen")
 	return agent.NewQwenScriptAgent(agent.QwenConfig{
 		Client:       client,
 		VideoFPS:     envInt("SCRIPT_AGENT_VIDEO_FPS", 2),
 		MaxVideoSize: int64(envInt("SCRIPT_AGENT_MAX_VIDEO_MB", 80)) * 1024 * 1024,
+	})
+}
+
+func buildModelClient(store *jobs.Store) *model.DashScopeClient {
+	apiKey := os.Getenv("DASHSCOPE_API_KEY")
+	if apiKey == "" {
+		return nil
+	}
+	return model.NewDashScopeClient(model.DashScopeConfig{
+		APIKey:   apiKey,
+		Endpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
+		Model:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
+		Recorder: store,
 	})
 }
 

@@ -53,3 +53,40 @@ type ScriptResult struct {
 	ReplicaScriptJSON  string
 	FissionScriptsJSON string
 }
+
+type ChatConversation struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ChatMessage struct {
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversation_id"`
+	Role           string    `json:"role"`
+	Content        string    `json:"content"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type ChatThread struct {
+	Conversation ChatConversation `json:"conversation"`
+	Messages     []ChatMessage    `json:"messages"`
+}
+
+type ModelCall struct {
+	ID           string    `json:"id"`
+	Scope        string    `json:"scope"`
+	RefID        string    `json:"ref_id"`
+	Step         string    `json:"step"`
+	Model        string    `json:"model"`
+	InputJSON    string    `json:"input_json"`
+	OutputText   string    `json:"output_text"`
+	ResponseJSON string    `json:"response_json"`
+	PromptTokens int       `json:"prompt_tokens"`
+	OutputTokens int       `json:"output_tokens"`
+	TotalTokens  int       `json:"total_tokens"`
+	LatencyMS    int64     `json:"latency_ms"`
+	ErrorMessage string    `json:"error_message"`
+	CreatedAt    time.Time `json:"created_at"`
+}
