@@ -129,8 +129,147 @@ CREATE TABLE IF NOT EXISTS model_calls (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_model_calls_ref ON model_calls(ref_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_model_calls_created ON model_calls(created_at);
+
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  md_path TEXT NOT NULL,
+  md_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_settings (
+  id TEXT PRIMARY KEY,
+  api_key TEXT,
+  endpoint TEXT NOT NULL,
+  model TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 `)
 	return err
+}
+
+func (s *Store) CreateProduct(input CreateProductInput) (*Product, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	product := &Product{
+		ID:        newID(),
+		Title:     normalizeTitle(valueOr(input.Title, defaultProductTitle(input.MDName))),
+		MDPath:    input.MDPath,
+		MDName:    input.MDName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := s.db.Exec(`
+INSERT INTO products (id, title, md_path, md_name, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		product.ID, product.Title, product.MDPath, product.MDName,
+		now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
+func defaultProductTitle(fileName string) string {
+	title := strings.TrimSuffix(fileName, ".markdown")
+	title = strings.TrimSuffix(title, ".md")
+	return title
+}
+
+func (s *Store) ListProducts() ([]Product, error) {
+	rows, err := s.db.Query(`
+SELECT id, title, md_path, md_name, created_at, updated_at
+FROM products
+ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []Product{}
+	for rows.Next() {
+		product, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *product)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetProduct(id string) (*Product, error) {
+	return scanProduct(s.db.QueryRow(`
+SELECT id, title, md_path, md_name, created_at, updated_at
+FROM products WHERE id = ?`, id))
+}
+
+func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	existing, _ := s.GetModelSettings()
+	apiKey := strings.TrimSpace(settings.APIKey)
+	if apiKey == "" && existing != nil {
+		apiKey = existing.APIKey
+	}
+	endpoint := strings.TrimSpace(settings.Endpoint)
+	if endpoint == "" {
+		endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+	}
+	modelName := strings.TrimSpace(settings.Model)
+	if modelName == "" {
+		modelName = "qwen3.6-plus"
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+INSERT INTO model_settings (id, api_key, endpoint, model, updated_at)
+VALUES ('default', ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  api_key = excluded.api_key,
+  endpoint = excluded.endpoint,
+  model = excluded.model,
+  updated_at = excluded.updated_at`,
+		apiKey, endpoint, modelName, now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ModelSettings{APIKey: apiKey, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
+}
+
+func (s *Store) GetModelSettings() (*ModelSettings, error) {
+	settings := &ModelSettings{}
+	var updatedAt string
+	var apiKey sql.NullString
+	err := s.db.QueryRow(`
+SELECT api_key, endpoint, model, updated_at
+FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &settings.Model, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	settings.APIKey = apiKey.String
+	settings.UpdatedAt = parseTime(updatedAt)
+	return settings, nil
+}
+
+func (s *Store) GetModelRuntimeConfig() (model.RuntimeConfig, error) {
+	settings, err := s.GetModelSettings()
+	if err != nil {
+		return model.RuntimeConfig{}, err
+	}
+	return model.RuntimeConfig{
+		APIKey:   settings.APIKey,
+		Endpoint: settings.Endpoint,
+		Model:    settings.Model,
+		Source:   "user",
+	}, nil
 }
 
 func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
@@ -497,6 +636,17 @@ func scanChatConversation(row scanner) (*ChatConversation, error) {
 	conversation.CreatedAt = parseTime(createdAt)
 	conversation.UpdatedAt = parseTime(updatedAt)
 	return &conversation, nil
+}
+
+func scanProduct(row scanner) (*Product, error) {
+	var product Product
+	var createdAt, updatedAt string
+	if err := row.Scan(&product.ID, &product.Title, &product.MDPath, &product.MDName, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	product.CreatedAt = parseTime(createdAt)
+	product.UpdatedAt = parseTime(updatedAt)
+	return &product, nil
 }
 
 func scanChatMessage(row scanner) (*ChatMessage, error) {

@@ -19,6 +19,7 @@ type DashScopeClient struct {
 	model      string
 	httpClient *http.Client
 	recorder   Recorder
+	provider   ConfigProvider
 }
 
 type DashScopeConfig struct {
@@ -26,6 +27,18 @@ type DashScopeConfig struct {
 	Endpoint string
 	Model    string
 	Recorder Recorder
+	Provider ConfigProvider
+}
+
+type RuntimeConfig struct {
+	APIKey   string
+	Endpoint string
+	Model    string
+	Source   string
+}
+
+type ConfigProvider interface {
+	GetModelRuntimeConfig() (RuntimeConfig, error)
 }
 
 func NewDashScopeClient(cfg DashScopeConfig) *DashScopeClient {
@@ -43,6 +56,7 @@ func NewDashScopeClient(cfg DashScopeConfig) *DashScopeClient {
 		model:      modelName,
 		httpClient: &http.Client{Timeout: 10 * time.Minute},
 		recorder:   cfg.Recorder,
+		provider:   cfg.Provider,
 	}
 }
 
@@ -55,11 +69,12 @@ func (c *DashScopeClient) Generate(ctx context.Context, content []ContentItem) (
 }
 
 func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (Generation, error) {
-	if c.apiKey == "" {
+	runtime := c.runtimeConfig()
+	if runtime.APIKey == "" {
 		return Generation{}, errors.New("DASHSCOPE_API_KEY is not configured")
 	}
 	reqBody := requestBody{
-		Model: c.model,
+		Model: runtime.Model,
 		Input: requestInput{
 			Messages: []message{
 				{
@@ -77,40 +92,40 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	if err != nil {
 		return Generation{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, runtime.Endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return Generation{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+runtime.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	started := time.Now()
 	res, err := c.httpClient.Do(req)
 	if err != nil {
-		c.record(ctx, callCtx, logRaw, nil, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+		c.record(ctx, callCtx, runtime.Model, logRaw, nil, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 		return Generation{}, err
 	}
 	defer res.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 20*1024*1024))
 	if err != nil {
-		c.record(ctx, callCtx, logRaw, nil, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+		c.record(ctx, callCtx, runtime.Model, logRaw, nil, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 		return Generation{}, err
 	}
 	logBody := sanitizedResponseJSON(body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		err := fmt.Errorf("dashscope request failed with status %d: %s", res.StatusCode, string(body))
-		c.record(ctx, callCtx, logRaw, logBody, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 		return Generation{}, err
 	}
 
 	var parsed responseBody
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		c.record(ctx, callCtx, logRaw, logBody, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 		return Generation{}, err
 	}
 	if len(parsed.Output.Choices) == 0 {
 		err := errors.New("dashscope response has no choices")
-		c.record(ctx, callCtx, logRaw, logBody, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 		return Generation{}, err
 	}
 	choice := parsed.Output.Choices[0]
@@ -118,7 +133,7 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 		if item.Text != "" {
 			result := Generation{
 				Text:         item.Text,
-				Model:        c.model,
+				Model:        runtime.Model,
 				RequestJSON:  string(logRaw),
 				ResponseJSON: string(logBody),
 				PromptTokens: parsed.Usage.promptTokens(),
@@ -126,13 +141,31 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 				TotalTokens:  parsed.Usage.totalTokens(),
 				LatencyMS:    elapsedMS(started),
 			}
-			c.record(ctx, callCtx, logRaw, logBody, result, nil)
+			c.record(ctx, callCtx, runtime.Model, logRaw, logBody, result, nil)
 			return result, nil
 		}
 	}
 	err = errors.New("dashscope response has no text content")
-	c.record(ctx, callCtx, logRaw, logBody, Generation{Model: c.model, LatencyMS: elapsedMS(started)}, err)
+	c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
 	return Generation{}, err
+}
+
+func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
+	runtime := RuntimeConfig{
+		APIKey:   c.apiKey,
+		Endpoint: c.endpoint,
+		Model:    c.model,
+		Source:   "env",
+	}
+	if c.provider != nil {
+		if provided, err := c.provider.GetModelRuntimeConfig(); err == nil && provided.APIKey != "" {
+			runtime.APIKey = provided.APIKey
+			runtime.Endpoint = valueOr(provided.Endpoint, runtime.Endpoint)
+			runtime.Model = valueOr(provided.Model, runtime.Model)
+			runtime.Source = valueOr(provided.Source, "user")
+		}
+	}
+	return runtime
 }
 
 type ContentItem struct {
@@ -280,7 +313,7 @@ func redactReasoning(value any) {
 	}
 }
 
-func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, req, res []byte, result Generation, err error) {
+func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, modelName string, req, res []byte, result Generation, err error) {
 	if c.recorder == nil {
 		return
 	}
@@ -288,7 +321,7 @@ func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, req, 
 		Scope:        callCtx.Scope,
 		RefID:        callCtx.RefID,
 		Step:         callCtx.Step,
-		Model:        c.model,
+		Model:        modelName,
 		InputJSON:    string(req),
 		OutputText:   result.Text,
 		ResponseJSON: string(res),
@@ -305,4 +338,11 @@ func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, req, 
 
 func elapsedMS(started time.Time) int64 {
 	return time.Since(started).Milliseconds()
+}
+
+func valueOr(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }

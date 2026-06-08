@@ -38,6 +38,15 @@ type Job struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type Product struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	MDPath    string    `json:"md_path"`
+	MDName    string    `json:"md_name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type CreateJobInput struct {
 	Title             string
 	VideoPath         string
@@ -48,6 +57,28 @@ type CreateJobInput struct {
 	Industry          string
 	FissionCount      int
 	FissionDirections string
+}
+
+type CreateProductInput struct {
+	Title  string
+	MDPath string
+	MDName string
+}
+
+type ModelSettings struct {
+	APIKey    string    `json:"-"`
+	Endpoint  string    `json:"endpoint"`
+	Model     string    `json:"model"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type PublicModelSettings struct {
+	Configured bool      `json:"configured"`
+	Source     string    `json:"source"`
+	APIKeyMask string    `json:"api_key_mask,omitempty"`
+	Endpoint   string    `json:"endpoint"`
+	Model      string    `json:"model"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
 
 type ScriptResult struct {

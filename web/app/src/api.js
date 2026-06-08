@@ -17,6 +17,29 @@ export async function createJob(formData) {
   });
 }
 
+export async function listProducts() {
+  return request("/api/products");
+}
+
+export async function createProduct(formData) {
+  return request("/api/products", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function getModelSettings() {
+  return request("/api/settings/model");
+}
+
+export async function saveModelSettings(settings) {
+  return request("/api/settings/model", {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify(settings),
+  });
+}
+
 export async function publishJob(id) {
   return request(`/api/jobs/${id}/publish`, {
     method: "POST",

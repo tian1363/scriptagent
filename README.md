@@ -11,7 +11,8 @@ This repository currently contains the first application scaffold:
 - Local upload storage.
 - React + Vite frontend.
 - CreatiBI Design System tokens and assets.
-- Qwen mode when `DASHSCOPE_API_KEY` is configured, with mock mode fallback for local workflow verification.
+- Qwen mode with model settings configurable from the UI or environment variables.
+- Product library for reusable product Markdown files.
 
 ## Run Locally
 
@@ -38,7 +39,7 @@ The frontend dev server runs at `http://127.0.0.1:5173`. The API server runs at 
 
 ## Configure Qwen
 
-Set your DashScope API key before starting the Go server:
+You can configure Qwen from the app UI at `配置 -> 模型配置`. For server-level defaults, set your DashScope API key before starting the Go server:
 
 ```bash
 export DASHSCOPE_API_KEY="sk-your-key"
@@ -47,7 +48,7 @@ export SCRIPT_AGENT_VIDEO_FPS="2"
 go run ./cmd/server
 ```
 
-When `DASHSCOPE_API_KEY` is present, the server uses Qwen mode automatically. To force mock mode:
+User-saved model settings take precedence over environment variables. To force mock mode:
 
 ```bash
 export SCRIPT_AGENT_MODE="mock"

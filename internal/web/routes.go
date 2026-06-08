@@ -25,6 +25,8 @@ func (h *Handler) Routes() http.Handler {
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", h.health)
+		api.Get("/products", h.listProducts)
+		api.Post("/products", h.createProduct)
 		api.Get("/jobs", h.listJobs)
 		api.Post("/jobs", h.createJob)
 		api.Get("/jobs/{id}", h.getJob)
@@ -37,6 +39,8 @@ func (h *Handler) Routes() http.Handler {
 		api.Get("/chats/{id}", h.getChat)
 		api.Post("/chats/{id}/messages", h.sendChatMessage)
 		api.Get("/model-calls", h.listModelCalls)
+		api.Get("/settings/model", h.getModelSettings)
+		api.Put("/settings/model", h.saveModelSettings)
 	})
 
 	if stat, err := os.Stat(h.cfg.StaticDir); err == nil && stat.IsDir() {

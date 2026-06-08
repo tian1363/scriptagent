@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
+	"os"
 	"strconv"
 	"strings"
 
@@ -69,6 +69,37 @@ func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
+func (h *Handler) listProducts(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.store.ListProducts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(storage.MaxMarkdownBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	product, err := h.store.CreateProduct(jobs.CreateProductInput{
+		Title:  r.FormValue("title"),
+		MDPath: mdPath,
+		MDName: mdName,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, product)
+}
+
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(storage.MaxVideoBytes + storage.MaxMarkdownBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -80,7 +111,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	product, err := h.resolveJobProduct(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -103,15 +134,15 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 
 	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
-		title = strings.TrimSuffix(mdName, filepath.Ext(mdName))
+		title = product.Title
 	}
 
 	job, err := h.store.CreateJob(jobs.CreateJobInput{
 		Title:             title,
 		VideoPath:         videoPath,
 		VideoOriginalName: videoName,
-		ProductMDPath:     mdPath,
-		ProductMDName:     mdName,
+		ProductMDPath:     product.MDPath,
+		ProductMDName:     product.MDName,
 		Requirement:       r.FormValue("requirement"),
 		Industry:          industry,
 		FissionCount:      fissionCount,
@@ -126,6 +157,22 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"job_id": job.ID,
 		"status": job.Status,
+	})
+}
+
+func (h *Handler) resolveJobProduct(r *http.Request) (*jobs.Product, error) {
+	productID := strings.TrimSpace(r.FormValue("product_id"))
+	if productID != "" {
+		return h.store.GetProduct(productID)
+	}
+	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	if err != nil {
+		return nil, errors.New("select a product or upload product Markdown")
+	}
+	return h.store.CreateProduct(jobs.CreateProductInput{
+		Title:  r.FormValue("product_title"),
+		MDPath: mdPath,
+		MDName: mdName,
 	})
 }
 
@@ -273,6 +320,63 @@ func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handler) getModelSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.publicModelSettings())
+}
+
+func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		APIKey   string `json:"api_key"`
+		Endpoint string `json:"endpoint"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if _, err := h.store.SaveModelSettings(jobs.ModelSettings{
+		APIKey:   input.APIKey,
+		Endpoint: input.Endpoint,
+		Model:    input.Model,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.publicModelSettings())
+}
+
+func (h *Handler) publicModelSettings() jobs.PublicModelSettings {
+	if settings, err := h.store.GetModelSettings(); err == nil && strings.TrimSpace(settings.APIKey) != "" {
+		return jobs.PublicModelSettings{
+			Configured: true,
+			Source:     "user",
+			APIKeyMask: maskAPIKey(settings.APIKey),
+			Endpoint:   settings.Endpoint,
+			Model:      settings.Model,
+			UpdatedAt:  settings.UpdatedAt,
+		}
+	}
+	apiKey := os.Getenv("DASHSCOPE_API_KEY")
+	return jobs.PublicModelSettings{
+		Configured: strings.TrimSpace(apiKey) != "",
+		Source:     "env",
+		APIKeyMask: maskAPIKey(apiKey),
+		Endpoint:   valueOr(os.Getenv("DASHSCOPE_ENDPOINT"), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"),
+		Model:      valueOr(os.Getenv("SCRIPT_AGENT_MODEL"), "qwen3.6-plus"),
+	}
+}
+
+func maskAPIKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "..." + value[len(value)-4:]
+}
+
 func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string, string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
@@ -284,6 +388,13 @@ func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string,
 		return "", "", err
 	}
 	return path, header.Filename, nil
+}
+
+func valueOr(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func isRunningStatus(status string) bool {

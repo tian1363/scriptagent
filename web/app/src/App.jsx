@@ -7,23 +7,31 @@ import {
   History,
   Loader2,
   MessageSquare,
+  Package,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Send,
+  Settings,
+  KeyRound,
   Upload,
   Video,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   createJob,
+  createProduct,
+  getModelSettings,
   getChat,
   getJob,
+  listProducts,
   listChats,
   listJobs,
   listModelCalls,
   publishJob,
   retryJob,
+  saveModelSettings,
   sendChatMessage,
   sendNewChatMessage,
 } from "./api.js";
@@ -83,6 +91,11 @@ export function App() {
   const [isCreating, setIsCreating] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [modelSettings, setModelSettings] = useState(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -120,17 +133,33 @@ export function App() {
     }
   }
 
+  async function refreshProducts(nextSelectedId) {
+    const items = await listProducts();
+    setProducts(items);
+    if (nextSelectedId || (!selectedProductId && items[0])) {
+      setSelectedProductId(nextSelectedId || items[0]?.id || "");
+    }
+  }
+
+  async function refreshModelSettings() {
+    setModelSettings(await getModelSettings());
+  }
+
   async function refreshCurrent() {
     setError("");
     if (view === "jobs") await refreshJobs();
     if (view === "chat") await refreshChats();
     if (view === "calls") await refreshModelCalls();
+    if (view === "products") await refreshProducts();
+    if (view === "settings") await refreshModelSettings();
   }
 
   useEffect(() => {
     refreshJobs().catch((err) => setError(err.message));
     refreshChats().catch(() => {});
     refreshModelCalls().catch(() => {});
+    refreshProducts().catch(() => {});
+    refreshModelSettings().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -154,6 +183,7 @@ export function App() {
       formEl.reset();
       setActiveTab("run_log");
       await refreshJobs(created.job_id);
+      await refreshProducts();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -224,6 +254,42 @@ export function App() {
     }
   }
 
+  async function handleCreateProduct(event) {
+    event.preventDefault();
+    const formEl = event.currentTarget;
+    setError("");
+    setIsCreatingProduct(true);
+    try {
+      const product = await createProduct(new FormData(formEl));
+      formEl.reset();
+      await refreshProducts(product.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsCreatingProduct(false);
+    }
+  }
+
+  async function handleSaveModelSettings(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setError("");
+    setIsSavingSettings(true);
+    try {
+      const next = await saveModelSettings({
+        api_key: String(form.get("api_key") || ""),
+        endpoint: String(form.get("endpoint") || ""),
+        model: String(form.get("model") || ""),
+      });
+      setModelSettings(next);
+      event.currentTarget.reset();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
   const visibleContent = selectedJob?.[activeTab] || "";
   const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
@@ -240,6 +306,10 @@ export function App() {
             <FileText size={15} />
             <span>脚本任务</span>
           </button>
+          <button className={view === "products" ? "active" : ""} type="button" onClick={() => setView("products")}>
+            <Package size={15} />
+            <span>产品库</span>
+          </button>
           <button className={view === "chat" ? "active" : ""} type="button" onClick={() => setView("chat")}>
             <MessageSquare size={15} />
             <span>通用对话</span>
@@ -247,6 +317,10 @@ export function App() {
           <button className={view === "calls" ? "active" : ""} type="button" onClick={() => setView("calls")}>
             <Activity size={15} />
             <span>模型调用</span>
+          </button>
+          <button className={view === "settings" ? "active" : ""} type="button" onClick={() => setView("settings")}>
+            <Settings size={15} />
+            <span>配置</span>
           </button>
         </div>
         <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新">
@@ -258,12 +332,16 @@ export function App() {
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
+        {view === "products" ? (
+          <ProductsSidebar products={products} selectedProductId={selectedProductId} onSelect={setSelectedProductId} />
+        ) : null}
         {view === "chat" ? (
           <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={() => setSelectedChat(null)} />
         ) : null}
         {view === "calls" ? (
           <CallsSidebar calls={modelCalls} selectedCallId={selectedCall?.id} onSelect={setSelectedCallId} />
         ) : null}
+        {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
         <section className="main-pane">
           {view === "jobs" ? (
@@ -276,11 +354,21 @@ export function App() {
               isRetrying={isRetrying}
               canPublish={canPublish}
               canRetry={canRetry}
+              products={products}
               error={error}
               onCreate={handleCreate}
               onPublish={handlePublish}
               onRetry={handleRetry}
               onTab={setActiveTab}
+            />
+          ) : null}
+          {view === "products" ? (
+            <ProductsWorkspace
+              products={products}
+              selectedProductId={selectedProductId}
+              isCreatingProduct={isCreatingProduct}
+              error={error}
+              onCreate={handleCreateProduct}
             />
           ) : null}
           {view === "chat" ? (
@@ -294,6 +382,9 @@ export function App() {
             />
           ) : null}
           {view === "calls" ? <ModelCallsWorkspace call={selectedCall} error={error} /> : null}
+          {view === "settings" ? (
+            <SettingsWorkspace modelSettings={modelSettings} isSaving={isSavingSettings} error={error} onSave={handleSaveModelSettings} />
+          ) : null}
         </section>
       </main>
     </div>
@@ -324,6 +415,54 @@ function JobsSidebar({ jobs, selectedJob, onSelect }) {
         ) : (
           <EmptyState text="暂无生成记录" compact />
         )}
+      </div>
+    </aside>
+  );
+}
+
+function ProductsSidebar({ products, selectedProductId, onSelect }) {
+  return (
+    <aside className="history-pane">
+      <div className="pane-heading">
+        <Package size={16} />
+        <span>产品资料库</span>
+      </div>
+      <div className="history-list">
+        {products.length ? (
+          products.map((product) => (
+            <button
+              key={product.id}
+              className={`history-item ${selectedProductId === product.id ? "active" : ""}`}
+              type="button"
+              onClick={() => onSelect(product.id)}
+            >
+              <span className="history-title">{product.title}</span>
+              <span className="history-meta">{product.md_name}</span>
+              <span className="history-meta">{formatTime(product.updated_at)}</span>
+            </button>
+          ))
+        ) : (
+          <EmptyState text="暂无产品" compact />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function SettingsSidebar({ modelSettings }) {
+  return (
+    <aside className="history-pane">
+      <div className="pane-heading">
+        <Settings size={16} />
+        <span>配置中心</span>
+      </div>
+      <div className="history-list">
+        <div className="config-card">
+          <span className={`status-pill ${modelSettings?.configured ? "success" : "danger"}`}>
+            {modelSettings?.configured ? "模型已配置" : "模型未配置"}
+          </span>
+          <p>{modelSettings?.source === "user" ? "使用用户配置" : "使用环境变量"}</p>
+        </div>
       </div>
     </aside>
   );
@@ -395,6 +534,7 @@ function CallsSidebar({ calls, selectedCallId, onSelect }) {
 
 function JobsWorkspace(props) {
   const [fissionCount, setFissionCount] = useState(5);
+  const [selectedProductID, setSelectedProductID] = useState("");
 
   function handleFissionCountChange(event) {
     const next = Number.parseInt(event.target.value, 10);
@@ -420,8 +560,32 @@ function JobsWorkspace(props) {
             </label>
             <div className="upload-grid">
               <FileField name="video" label="参考视频" accept="video/mp4,video/quicktime,video/webm" icon={<Video size={16} />} />
-              <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} />
+              <label>
+                <span>选择产品</span>
+                <select name="product_id" value={selectedProductID} onChange={(event) => setSelectedProductID(event.target.value)}>
+                  <option value="">上传新产品 Markdown</option>
+                  {props.products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
+            {selectedProductID ? (
+              <div className="selected-product-note">
+                <Package size={15} />
+                <span>已选择产品库资料，本次任务会复用该产品 Markdown。</span>
+              </div>
+            ) : (
+              <div className="upload-grid">
+                <label>
+                  <span>新产品名称</span>
+                  <input name="product_title" type="text" placeholder="默认使用 Markdown 文件名" />
+                </label>
+                <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} required={!selectedProductID} />
+              </div>
+            )}
           </div>
 
           <div className="form-section split-section">
@@ -549,6 +713,121 @@ function FissionDirectionPicker({ count }) {
   );
 }
 
+function ProductsWorkspace({ products, selectedProductId, isCreatingProduct, error, onCreate }) {
+  const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
+  return (
+    <>
+      <section className="composer product-composer">
+        <div>
+          <h1>产品资料库</h1>
+          <p>统一维护产品和产品 Markdown。创建脚本任务时可直接选择已有产品。</p>
+        </div>
+        <form className="task-form" onSubmit={onCreate}>
+          <div className="form-section split-section">
+            <label>
+              <span>产品名称</span>
+              <input name="title" type="text" placeholder="例如：无尽冬日 - 游戏信息总结" />
+            </label>
+            <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} required />
+          </div>
+          <div className="submit-row">
+            <div>
+              <span>保存产品</span>
+              <small>Markdown 会保存到本地资料库，后续任务可复用</small>
+            </div>
+            <button className="primary-button" type="submit" disabled={isCreatingProduct}>
+              {isCreatingProduct ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
+              <span>{isCreatingProduct ? "保存中" : "新增产品"}</span>
+            </button>
+          </div>
+        </form>
+        {error ? <div className="error-banner">{error}</div> : null}
+      </section>
+
+      <section className="result-pane">
+        <div className="result-header">
+          <div>
+            <h2>{selectedProduct?.title || "产品详情"}</h2>
+            <p>{selectedProduct ? `${selectedProduct.md_name} · ${formatTime(selectedProduct.updated_at)}` : "保存产品后可在这里查看详情。"}</p>
+          </div>
+          {selectedProduct ? <span className="status-pill success">可用于任务</span> : null}
+        </div>
+        {selectedProduct ? (
+          <div className="product-detail">
+            <div className="detail-row">
+              <span>产品 ID</span>
+              <strong>{selectedProduct.id}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Markdown 文件</span>
+              <strong>{selectedProduct.md_name}</strong>
+            </div>
+            <div className="detail-row">
+              <span>更新时间</span>
+              <strong>{formatTime(selectedProduct.updated_at)}</strong>
+            </div>
+          </div>
+        ) : (
+          <EmptyState text="暂无产品详情" />
+        )}
+      </section>
+    </>
+  );
+}
+
+function SettingsWorkspace({ modelSettings, isSaving, error, onSave }) {
+  return (
+    <section className="result-pane full-height">
+      <div className="result-header">
+        <div>
+          <h2>模型配置</h2>
+          <p>部署给其他用户使用时，每个用户可在这里配置自己的 DashScope 模型。</p>
+        </div>
+        <span className={`status-pill ${modelSettings?.configured ? "success" : "danger"}`}>
+          <KeyRound size={13} />
+          {modelSettings?.configured ? "已配置" : "未配置"}
+        </span>
+      </div>
+      <form className="settings-form" onSubmit={onSave}>
+        {error ? <div className="error-banner">{error}</div> : null}
+        <div className="form-section">
+          <div className="section-heading">
+            <span>DashScope</span>
+            <small>{modelSettings?.api_key_mask ? `当前 Key：${modelSettings.api_key_mask}` : "保存后立即生效"}</small>
+          </div>
+          <label>
+            <span>API Key</span>
+            <input name="api_key" type="password" placeholder={modelSettings?.configured ? "留空则保留当前 Key" : "请输入 DashScope API Key"} autoComplete="new-password" />
+          </label>
+          <div className="upload-grid">
+            <label>
+              <span>模型</span>
+              <input name="model" type="text" defaultValue={modelSettings?.model || "qwen3.6-plus"} />
+            </label>
+            <label>
+              <span>Endpoint</span>
+              <input name="endpoint" type="text" defaultValue={modelSettings?.endpoint || "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"} />
+            </label>
+          </div>
+        </div>
+        <div className="config-note">
+          <p>API Key 会保存在当前部署的 SQLite 数据库中；不要把这个数据库文件公开分享。生产环境建议增加用户登录和密钥加密。</p>
+        </div>
+        <div className="submit-row">
+          <div>
+            <span>运行时配置</span>
+            <small>用户配置优先于服务器环境变量</small>
+          </div>
+          <button className="primary-button" type="submit" disabled={isSaving}>
+            {isSaving ? <Loader2 className="spin" size={16} /> : <Settings size={16} />}
+            <span>{isSaving ? "保存中" : "保存配置"}</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function ModelCallsWorkspace({ call, error }) {
   if (!call) {
     return (
@@ -591,13 +870,13 @@ function ModelCallsWorkspace({ call, error }) {
   );
 }
 
-function FileField({ name, label, accept, icon }) {
+function FileField({ name, label, accept, icon, required = true }) {
   return (
     <label className="file-field">
       <span>{label}</span>
       <div className="file-input">
         {icon}
-        <input name={name} type="file" accept={accept} required />
+        <input name={name} type="file" accept={accept} required={required} />
         <Upload size={16} />
       </div>
     </label>

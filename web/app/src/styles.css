@@ -320,6 +320,30 @@ button:disabled {
   align-content: start;
 }
 
+.selected-product-note,
+.config-note {
+  display: flex;
+  align-items: center;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
+  border: 1px solid rgba(139, 78, 239, 0.14);
+  border-radius: var(--cbi-radius-sm);
+  background: rgba(246, 240, 250, 0.48);
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.config-note {
+  align-items: flex-start;
+  background: var(--cbi-bg-2);
+  border-color: var(--cbi-divider-subtle);
+}
+
+.config-note p {
+  margin: 0;
+  line-height: var(--cbi-lh-relaxed);
+}
+
 label {
   display: grid;
   gap: var(--cbi-space-1);
@@ -484,6 +508,61 @@ textarea:focus {
 .submit-row div {
   display: grid;
   gap: 2px;
+}
+
+.product-composer {
+  min-height: 0;
+}
+
+.product-detail,
+.settings-form {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-2);
+  background: var(--cbi-bg-1);
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: var(--cbi-space-2);
+  padding: var(--cbi-space-1-5);
+  border: 1px solid var(--cbi-divider-subtle);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-2);
+}
+
+.detail-row span {
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.detail-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cbi-fg-1);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-card {
+  display: grid;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1-5);
+  border: 1px solid var(--cbi-divider-subtle);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+}
+
+.config-card p {
+  margin: 0;
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
 }
 
 .result-pane {
@@ -930,6 +1009,7 @@ textarea:focus {
   .settings-row,
   .split-section,
   .direction-row,
+  .detail-row,
   .chat-form,
   .call-detail {
     grid-template-columns: 1fr;

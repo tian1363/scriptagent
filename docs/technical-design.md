@@ -172,8 +172,11 @@ Top NavBar
 
 主工作区包含：
 
+- 产品资料库入口。
+- 模型配置入口。
 - 参考视频上传。
 - 产品 Markdown 上传。
+- 已有产品选择。
 - 补充要求输入框。
 - 裂变脚本数量输入。
 - 裂变方向前置选项：按裂变数量生成 N 行单选下拉，每行对应 1 条裂变脚本。
@@ -187,6 +190,7 @@ Top NavBar
   - CreatiBI 写入
 
 创建任务区按素材输入、补充要求、生成设置和裂变方向分组。结果区按内容类型展示：运行日志渲染为步骤时间线，视频分析 Markdown 渲染标题和表格，JSON 结果展示脚本摘要卡片并保留原始 JSON。
+产品资料库用于保存产品名称和产品 Markdown 文件。模型配置页用于保存用户自己的 DashScope API Key、Endpoint 和模型名；用户配置优先于环境变量。
 
 历史记录包含：
 
@@ -327,7 +331,9 @@ POST /api/jobs
 表单字段：
 
 - `video`: 视频文件。
-- `product_md`: 产品 Markdown 文件。
+- `product_id`: 可选，已有产品 ID。
+- `product_md`: 可选，未选择 `product_id` 时必须上传产品 Markdown 文件。
+- `product_title`: 可选，上传新产品 Markdown 时的产品名称。
 - `requirement`: 用户补充要求。
 - `industry`: `auto` / `game` / `ecommerce`。
 - `fission_count`: 裂变数量。
@@ -341,6 +347,33 @@ POST /api/jobs
   "status": "pending"
 }
 ```
+
+### 10.1A 产品资料库
+
+```http
+GET /api/products
+POST /api/products
+```
+
+`POST /api/products` 使用 multipart 表单：
+
+- `title`: 产品名称，可选。
+- `product_md`: 产品 Markdown 文件，必填。
+
+### 10.1B 模型配置
+
+```http
+GET /api/settings/model
+PUT /api/settings/model
+```
+
+`PUT /api/settings/model` JSON 字段：
+
+- `api_key`: DashScope API Key，留空时保留原 Key。
+- `endpoint`: DashScope Endpoint。
+- `model`: 模型名，例如 `qwen3.6-plus`。
+
+接口响应只返回脱敏 Key，不返回完整 API Key。
 
 ### 10.2 获取历史记录
 
@@ -400,6 +433,25 @@ CREATE TABLE jobs (
   error_message TEXT,
   run_log TEXT,
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+```sql
+CREATE TABLE products (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  md_path TEXT NOT NULL,
+  md_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE model_settings (
+  id TEXT PRIMARY KEY,
+  api_key TEXT,
+  endpoint TEXT NOT NULL,
+  model TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 ```

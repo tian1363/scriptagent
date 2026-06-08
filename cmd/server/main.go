@@ -60,7 +60,7 @@ func buildPublisher() webserver.Publisher {
 
 func buildAgent(client *model.DashScopeClient) jobs.Agent {
 	mode := env("SCRIPT_AGENT_MODE", "auto")
-	if mode == "mock" || (mode == "auto" && client == nil) {
+	if mode == "mock" {
 		log.Printf("ScriptAgent model mode: mock")
 		return agent.NewMockScriptAgent()
 	}
@@ -74,14 +74,12 @@ func buildAgent(client *model.DashScopeClient) jobs.Agent {
 
 func buildModelClient(store *jobs.Store) *model.DashScopeClient {
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
-	if apiKey == "" {
-		return nil
-	}
 	return model.NewDashScopeClient(model.DashScopeConfig{
 		APIKey:   apiKey,
 		Endpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
 		Model:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
 		Recorder: store,
+		Provider: store,
 	})
 }
 
