@@ -899,6 +899,10 @@ textarea:focus {
   justify-self: start;
 }
 
+.chat-message.thinking {
+  color: var(--cbi-fg-2);
+}
+
 .chat-message span {
   color: var(--cbi-fg-2);
   font-size: var(--cbi-fs-sm);
@@ -909,6 +913,46 @@ textarea:focus {
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.65;
+}
+
+.chat-message.thinking p {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cbi-space-1);
+}
+
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thinking-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cbi-primary);
+  opacity: 0.36;
+  animation: thinkingPulse 1s ease-in-out infinite;
+}
+
+.thinking-dots i:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.thinking-dots i:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.typing-cursor {
+  width: 7px;
+  height: 1.15em;
+  display: inline-block;
+  margin-left: 2px;
+  vertical-align: -0.18em;
+  border-radius: var(--cbi-radius-pill);
+  background: var(--cbi-primary);
+  animation: cursorBlink 900ms steps(2, start) infinite;
 }
 
 .chat-form {
@@ -1031,6 +1075,30 @@ textarea:focus {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes thinkingPulse {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.32;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 0.9;
+  }
+}
+
+@keyframes cursorBlink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  46%,
+  100% {
+    opacity: 0;
   }
 }
 

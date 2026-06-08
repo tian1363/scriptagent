@@ -18,7 +18,7 @@ import {
   Upload,
   Video,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createJob,
   createProduct,
@@ -84,6 +84,20 @@ function defaultFissionDirection(index) {
   return fissionDirections[index % fissionDirections.length]?.value || "";
 }
 
+function typingStep(length) {
+  if (length > 1800) return 8;
+  if (length > 900) return 5;
+  if (length > 360) return 3;
+  return 2;
+}
+
+function lastAssistantMessage(messages = []) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "assistant") return messages[index];
+  }
+  return null;
+}
+
 export function App() {
   const [view, setView] = useState("jobs");
   const [jobs, setJobs] = useState([]);
@@ -104,6 +118,9 @@ export function App() {
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatDraft, setChatDraft] = useState("");
   const [chatProductId, setChatProductId] = useState("");
+  const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
+  const [typingMessage, setTypingMessage] = useState(null);
+  const [isChatThinking, setIsChatThinking] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
   const [modelCalls, setModelCalls] = useState([]);
@@ -198,6 +215,31 @@ export function App() {
     };
   }, [view, selectedProductId]);
 
+  useEffect(() => {
+    if (!typingMessage || typingMessage.visible.length >= typingMessage.content.length) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setTypingMessage((current) => {
+        if (!current) return current;
+        const nextLength = Math.min(current.content.length, current.visible.length + typingStep(current.content.length));
+        return { ...current, visible: current.content.slice(0, nextLength) };
+      });
+    }, 18);
+    return () => window.clearTimeout(timer);
+  }, [typingMessage]);
+
+  useEffect(() => {
+    if (!typingMessage || typingMessage.visible.length < typingMessage.content.length) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setTypingMessage(null);
+      setOptimisticChatMessages(null);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [typingMessage]);
+
   async function handleCreate(event) {
     event.preventDefault();
     const formEl = event.currentTarget;
@@ -256,7 +298,18 @@ export function App() {
 
   async function handleSelectChat(id) {
     setError("");
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setIsChatThinking(false);
     setSelectedChat(await getChat(id));
+  }
+
+  function handleNewChat() {
+    setError("");
+    setSelectedChat(null);
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setIsChatThinking(false);
   }
 
   async function handleSendChat(event) {
@@ -265,17 +318,45 @@ export function App() {
     if (!content) return;
     setError("");
     setIsSending(true);
+    setIsChatThinking(true);
+    setTypingMessage(null);
+    const tempUserMessage = {
+      id: `temp-user-${Date.now()}`,
+      role: "user",
+      content,
+      created_at: new Date().toISOString(),
+    };
+    const baseMessages = selectedChat?.messages || [];
+    setOptimisticChatMessages([...baseMessages, tempUserMessage]);
+    setChatDraft("");
     try {
       const thread = selectedChat?.conversation?.id
         ? await sendChatMessage(selectedChat.conversation.id, content, chatProductId)
         : await sendNewChatMessage(content, chatProductId);
+      const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
-      setChatDraft("");
+      if (assistantMessage) {
+        setOptimisticChatMessages(thread.messages.filter((message) => message.id !== assistantMessage.id));
+        setTypingMessage({ ...assistantMessage, visible: "" });
+      } else {
+        setOptimisticChatMessages(null);
+      }
       await refreshChats(thread.conversation.id);
       await refreshModelCalls();
     } catch (err) {
       setError(err.message);
+      setTypingMessage(null);
+      setOptimisticChatMessages((current) => [
+        ...(current || [tempUserMessage]),
+        {
+          id: `temp-error-${Date.now()}`,
+          role: "assistant",
+          content: `模型响应失败：${err.message}`,
+          created_at: new Date().toISOString(),
+        },
+      ]);
     } finally {
+      setIsChatThinking(false);
       setIsSending(false);
     }
   }
@@ -362,7 +443,7 @@ export function App() {
           <ProductsSidebar products={products} selectedProductId={selectedProductId} onSelect={setSelectedProductId} />
         ) : null}
         {view === "chat" ? (
-          <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={() => setSelectedChat(null)} />
+          <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={handleNewChat} />
         ) : null}
         {view === "calls" ? (
           <CallsSidebar calls={modelCalls} selectedCallId={selectedCall?.id} onSelect={setSelectedCallId} />
@@ -402,6 +483,9 @@ export function App() {
           {view === "chat" ? (
             <ChatWorkspace
               thread={selectedChat}
+              optimisticMessages={optimisticChatMessages}
+              typingMessage={typingMessage}
+              isThinking={isChatThinking}
               draft={chatDraft}
               products={products}
               selectedProductId={chatProductId}
@@ -671,9 +755,15 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
-  const messages = thread?.messages || [];
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+  const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, isThinking, typingMessage?.visible]);
+
   return (
     <section className="chat-pane">
       <div className="result-header">
@@ -704,13 +794,27 @@ function ChatWorkspace({ thread, draft, products, selectedProductId, isSending, 
         </div>
       </div>
       <div className="chat-messages">
-        {messages.length ? (
-          messages.map((message) => (
-            <div key={message.id} className={`chat-message ${message.role}`}>
-              <span>{message.role === "assistant" ? "助手" : "用户"}</span>
-              <p>{message.content}</p>
-            </div>
-          ))
+        {messages.length || isThinking || typingMessage ? (
+          <>
+            {messages.map((message) => (
+              <ChatMessageBubble key={message.id} message={message} />
+            ))}
+            {isThinking ? (
+              <div className="chat-message assistant thinking">
+                <span>助手</span>
+                <p>
+                  <span className="thinking-dots" aria-label="模型思考中">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  <span>模型思考中</span>
+                </p>
+              </div>
+            ) : null}
+            {typingMessage ? <ChatMessageBubble message={{ ...typingMessage, content: typingMessage.visible }} isTyping /> : null}
+            <div ref={messagesEndRef} />
+          </>
         ) : (
           <EmptyState text="输入第一条消息开始对话" />
         )}
@@ -724,6 +828,18 @@ function ChatWorkspace({ thread, draft, products, selectedProductId, isSending, 
         </button>
       </form>
     </section>
+  );
+}
+
+function ChatMessageBubble({ message, isTyping = false }) {
+  return (
+    <div className={`chat-message ${message.role} ${isTyping ? "typing" : ""}`}>
+      <span>{message.role === "assistant" ? "助手" : "用户"}</span>
+      <p>
+        {message.content}
+        {isTyping ? <b className="typing-cursor" /> : null}
+      </p>
+    </div>
   );
 }
 
