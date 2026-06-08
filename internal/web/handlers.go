@@ -109,6 +109,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		Requirement:       r.FormValue("requirement"),
 		Industry:          industry,
 		FissionCount:      fissionCount,
+		FissionDirections: parseFissionDirections(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -307,6 +308,21 @@ func parseFissionCount(raw string) (int, error) {
 		return 0, errors.New("fission_count must be between 1 and 20")
 	}
 	return value, nil
+}
+
+func parseFissionDirections(r *http.Request) string {
+	values := r.MultipartForm.Value["fission_directions"]
+	result := []string{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return strings.Join(result, "\n")
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

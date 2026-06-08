@@ -176,6 +176,7 @@ Top NavBar
 - 产品 Markdown 上传。
 - 补充要求输入框。
 - 裂变脚本数量输入。
+- 裂变方向前置可选项：视听层、结构层、元素层。
 - 行业选择：自动判断 / 游戏 / 电商。
 - 生成按钮。
 - 任务进度。
@@ -193,6 +194,7 @@ Top NavBar
 - 视频文件名。
 - 产品 Markdown 文件名。
 - 裂变数量。
+- 裂变方向选择。
 - 是否已写入 CreatiBI。
 
 ### 8.2 CreatiBI 设计规范约束
@@ -268,15 +270,13 @@ ScriptAgent 将视频和产品 Markdown 输入模型，使用固定视频理解 
 
 生成 N 条裂变脚本。
 
-默认裂变维度：
+裂变维度以前置可选项展示给用户：
 
-- 钩子裂变。
-- 卖点裂变。
-- 场景裂变。
-- 用户人群裂变。
-- 节奏裂变。
-- CTA 裂变。
-- 表现形式轻变体。
+- 视听层：换BGM、换音效、换色调/滤镜、换字幕&花字、换画幅、换配音(语速/声线)。
+- 结构层：换开头钩子、换CTA、时长压缩/拉伸、变速·节奏调整、换首帧/封面、同素材高光重剪。
+- 元素层：换局部角色/群演、换局部场景贴片、换局部道具/UI、字幕语言本地化。
+
+如果用户选择了方向，裂变提示词只允许从所选方向生成；如果未选择，则允许从全部方向自动选择。
 
 每条裂变脚本必须标注：
 
@@ -387,6 +387,7 @@ CREATE TABLE jobs (
   requirement TEXT,
   industry TEXT NOT NULL,
   fission_count INTEGER NOT NULL,
+  fission_directions TEXT,
   analysis_markdown TEXT,
   replica_script_json TEXT,
   fission_scripts_json TEXT,

@@ -27,6 +27,7 @@ type Job struct {
 	Requirement        string    `json:"requirement"`
 	Industry           string    `json:"industry"`
 	FissionCount       int       `json:"fission_count"`
+	FissionDirections  string    `json:"fission_directions,omitempty"`
 	AnalysisMarkdown   string    `json:"analysis_markdown,omitempty"`
 	ReplicaScriptJSON  string    `json:"replica_script_json,omitempty"`
 	FissionScriptsJSON string    `json:"fission_scripts_json,omitempty"`
@@ -46,6 +47,7 @@ type CreateJobInput struct {
 	Requirement       string
 	Industry          string
 	FissionCount      int
+	FissionDirections string
 }
 
 type ScriptResult struct {

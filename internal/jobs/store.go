@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS jobs (
 	if err := s.ensureColumn("jobs", "run_log", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("jobs", "fission_directions", "TEXT"); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id TEXT PRIMARY KEY,
@@ -146,17 +149,18 @@ func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
 		Requirement:       input.Requirement,
 		Industry:          input.Industry,
 		FissionCount:      input.FissionCount,
+		FissionDirections: input.FissionDirections,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	_, err := s.db.Exec(`
 INSERT INTO jobs (
   id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-  requirement, industry, fission_count, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  requirement, industry, fission_count, fission_directions, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Title, job.Status, job.VideoPath, job.VideoOriginalName,
 		job.ProductMDPath, job.ProductMDName, job.Requirement, job.Industry,
-		job.FissionCount, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
+		job.FissionCount, job.FissionDirections, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -167,7 +171,7 @@ INSERT INTO jobs (
 func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
@@ -189,7 +193,7 @@ FROM jobs ORDER BY created_at DESC`)
 func (s *Store) ListUnfinishedJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs
 WHERE status IN (?, ?, ?, ?, ?, ?, ?)
@@ -215,7 +219,7 @@ ORDER BY created_at ASC`,
 func (s *Store) GetJob(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
@@ -461,11 +465,11 @@ func scanJob(row scanner) (*Job, error) {
 	var job Job
 	var createdAt, updatedAt string
 	var analysisMarkdown, replicaScriptJSON, fissionScriptsJSON sql.NullString
-	var creatibiResultJSON, errorMessage, runLog sql.NullString
+	var fissionDirections, creatibiResultJSON, errorMessage, runLog sql.NullString
 	err := row.Scan(
 		&job.ID, &job.Title, &job.Status, &job.VideoPath, &job.VideoOriginalName,
 		&job.ProductMDPath, &job.ProductMDName, &job.Requirement, &job.Industry,
-		&job.FissionCount, &analysisMarkdown, &replicaScriptJSON,
+		&job.FissionCount, &fissionDirections, &analysisMarkdown, &replicaScriptJSON,
 		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog,
 		&createdAt, &updatedAt,
 	)
@@ -473,6 +477,7 @@ func scanJob(row scanner) (*Job, error) {
 		return nil, err
 	}
 	job.AnalysisMarkdown = analysisMarkdown.String
+	job.FissionDirections = fissionDirections.String
 	job.ReplicaScriptJSON = replicaScriptJSON.String
 	job.FissionScriptsJSON = fissionScriptsJSON.String
 	job.CreatiBIResultJSON = creatibiResultJSON.String

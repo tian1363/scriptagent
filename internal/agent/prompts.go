@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
 )
@@ -189,10 +190,14 @@ func fissionScriptPrompt(job jobs.Job, productMD, analysisMarkdown, replicaScrip
 复刻脚本 JSON：
 %s
 
+用户选择的裂变方向：
+%s
+
 裂变生成原则：
 
 - 裂变脚本必须以复刻脚本为母版，先继承每个分镜的 scene_index、time_range、镜头功能、叙事节奏和转场顺序。
-- 每条裂变只选择一个清晰裂变维度，必须从下方“允许裂变维度”中选择，metadata.fission_dimension 必须使用“层级-维度”格式，例如“视听层-换BGM”。
+- 每条裂变只选择一个清晰裂变维度；如果用户选择了裂变方向，必须只从“用户选择的裂变方向”中选择。
+- metadata.fission_dimension 必须使用“层级-维度”格式，例如“视听层-换BGM”。
 - 如果需要生成多条裂变，应优先覆盖不同层级；不要连续多条都只改同一种元素。
 - 每条裂变的 storyboards 数量和复刻脚本保持一致；每个分镜的 time_range 尽量保持一致。
 - 每个裂变分镜必须保留原分镜的 purpose，但改写 visual、action、voiceover、subtitle、props_scene、audio 中与裂变维度相关的内容。
@@ -258,5 +263,13 @@ JSON Schema：
       }
     }
   ]
-}`, job.FissionCount, productMD, job.Requirement, analysisMarkdown, replicaScriptJSON, job.FissionCount)
+}`, job.FissionCount, productMD, job.Requirement, analysisMarkdown, replicaScriptJSON, selectedFissionDirections(job.FissionDirections), job.FissionCount)
+}
+
+func selectedFissionDirections(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "未选择，允许从下方全部裂变维度中自动选择。"
+	}
+	return raw
 }

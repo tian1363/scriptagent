@@ -295,6 +295,78 @@ textarea:focus {
   align-items: end;
 }
 
+.direction-panel {
+  display: grid;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1-5);
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-2);
+}
+
+.direction-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cbi-space-2);
+}
+
+.direction-heading span {
+  color: var(--cbi-fg-1);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.direction-heading small {
+  color: var(--cbi-fg-3);
+  font-size: var(--cbi-fs-sm);
+}
+
+.direction-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--cbi-space-1);
+}
+
+.direction-group {
+  min-width: 0;
+  margin: 0;
+  padding: var(--cbi-space-1);
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+}
+
+.direction-group legend {
+  padding: 0 4px;
+  color: var(--cbi-fg-1);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.check-option {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--cbi-fg-2);
+}
+
+.check-option input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+}
+
+.check-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-input {
   height: 56px;
   display: grid;
@@ -581,6 +653,7 @@ textarea:focus {
 
   .upload-grid,
   .settings-row,
+  .direction-grid,
   .chat-form,
   .call-detail {
     grid-template-columns: 1fr;

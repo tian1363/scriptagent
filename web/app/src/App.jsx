@@ -48,6 +48,21 @@ const runningStatuses = new Set([
   "publishing",
 ]);
 
+const fissionDirectionGroups = [
+  {
+    layer: "视听层",
+    items: ["换BGM", "换音效", "换色调/滤镜", "换字幕&花字", "换画幅", "换配音(语速/声线)"],
+  },
+  {
+    layer: "结构层",
+    items: ["换开头钩子", "换CTA", "时长压缩/拉伸", "变速·节奏调整", "换首帧/封面", "同素材高光重剪"],
+  },
+  {
+    layer: "元素层",
+    items: ["换局部角色/群演", "换局部场景贴片", "换局部道具/UI", "字幕语言本地化"],
+  },
+];
+
 export function App() {
   const [view, setView] = useState("jobs");
   const [jobs, setJobs] = useState([]);
@@ -405,6 +420,7 @@ function JobsWorkspace(props) {
               <span>{props.isCreating ? "创建中" : "生成"}</span>
             </button>
           </div>
+          <FissionDirectionPicker />
         </form>
         {props.error ? <div className="error-banner">{props.error}</div> : null}
       </section>
@@ -459,6 +475,33 @@ function ChatWorkspace({ thread, draft, isSending, error, onDraft, onSend }) {
         </button>
       </form>
     </section>
+  );
+}
+
+function FissionDirectionPicker() {
+  return (
+    <div className="direction-panel">
+      <div className="direction-heading">
+        <span>裂变方向</span>
+        <small>默认全选，可按本次任务收窄生成范围</small>
+      </div>
+      <div className="direction-grid">
+        {fissionDirectionGroups.map((group) => (
+          <fieldset key={group.layer} className="direction-group">
+            <legend>{group.layer}</legend>
+            {group.items.map((item) => {
+              const value = `${group.layer}-${item}`;
+              return (
+                <label key={value} className="check-option">
+                  <input name="fission_directions" type="checkbox" value={value} defaultChecked />
+                  <span>{item}</span>
+                </label>
+              );
+            })}
+          </fieldset>
+        ))}
+      </div>
+    </div>
   );
 }
 
