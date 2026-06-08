@@ -431,7 +431,7 @@ DASHSCOPE_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/aigc/multimoda
 SCRIPT_AGENT_MODEL=qwen3.6-plus
 SCRIPT_AGENT_VIDEO_FPS=2
 SCRIPT_AGENT_MODE=auto
-SCRIPT_AGENT_MAX_VIDEO_MB=80
+SCRIPT_AGENT_MAX_DATA_URI_MB=20
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi
@@ -448,7 +448,9 @@ CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
 当前实现路线：
 
 - 本地视频转换为 Base64 data URL，传入 DashScope 多模态接口。
-- 默认 `SCRIPT_AGENT_MAX_VIDEO_MB=80`，超过限制会提示用户使用更小视频或等待后续临时 URL 上传方案。
+- 默认 `SCRIPT_AGENT_MAX_DATA_URI_MB=20`，按 DashScope data-uri 上限控制编码后体积。
+- 如果本地视频编码后会超过 data-uri 上限，后端使用 `ffmpeg` 生成临时压缩 MP4，再转换为 Base64 data URL。
+- 临时压缩文件只用于本次模型请求，读取后立即删除。
 
 后续允许两种升级路线：
 

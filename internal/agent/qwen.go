@@ -8,38 +8,43 @@ import (
 	"fmt"
 	"mime"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 )
 
 type QwenScriptAgent struct {
-	client       *model.DashScopeClient
-	videoFPS     int
-	maxVideoSize int64
+	client          *model.DashScopeClient
+	videoFPS        int
+	maxDataURIBytes int64
 }
 
 type QwenConfig struct {
-	Client       *model.DashScopeClient
-	VideoFPS     int
-	MaxVideoSize int64
+	Client          *model.DashScopeClient
+	VideoFPS        int
+	MaxDataURIBytes int64
 }
+
+const defaultMaxDataURIBytes int64 = 20 * 1024 * 1024
 
 func NewQwenScriptAgent(cfg QwenConfig) *QwenScriptAgent {
 	videoFPS := cfg.VideoFPS
 	if videoFPS <= 0 {
 		videoFPS = 2
 	}
-	maxVideoSize := cfg.MaxVideoSize
-	if maxVideoSize <= 0 {
-		maxVideoSize = 80 * 1024 * 1024
+	maxDataURIBytes := cfg.MaxDataURIBytes
+	if maxDataURIBytes <= 0 {
+		maxDataURIBytes = defaultMaxDataURIBytes
 	}
 	return &QwenScriptAgent{
-		client:       cfg.Client,
-		videoFPS:     videoFPS,
-		maxVideoSize: maxVideoSize,
+		client:          cfg.Client,
+		videoFPS:        videoFPS,
+		maxDataURIBytes: maxDataURIBytes,
 	}
 }
 
@@ -52,7 +57,7 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	if err != nil {
 		return jobs.ScriptResult{}, err
 	}
-	videoDataURL, err := videoDataURL(job.VideoPath, a.maxVideoSize)
+	videoDataURL, err := videoDataURL(ctx, job.VideoPath, a.maxDataURIBytes, progress)
 	if err != nil {
 		return jobs.ScriptResult{}, err
 	}
@@ -131,23 +136,179 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	}, nil
 }
 
-func videoDataURL(path string, maxSize int64) (string, error) {
+func videoDataURL(ctx context.Context, path string, maxDataURIBytes int64, progress jobs.Progress) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
-	if info.Size() > maxSize {
-		return "", fmt.Errorf("video file is %.1fMB, exceeds qwen base64 limit %.1fMB; use a smaller video or configure temporary URL upload later", float64(info.Size())/1024/1024, float64(maxSize)/1024/1024)
+	mimeType := videoMimeType(path)
+	if dataURLByteLen(info.Size(), mimeType) <= maxDataURIBytes {
+		return readVideoDataURL(path, mimeType, maxDataURIBytes)
+	}
+
+	if progress != nil {
+		progress(jobs.StatusAnalyzingVideo, fmt.Sprintf("参考视频 %.1fMB 超过 DashScope data-uri 上限，正在自动压缩为临时 MP4。", mb(info.Size())))
+	}
+	compressedPath, cleanup, err := compressVideoForDataURI(ctx, path, maxDataURIBytes)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return "", err
+	}
+	compressedInfo, err := os.Stat(compressedPath)
+	if err != nil {
+		return "", err
+	}
+	if progress != nil {
+		progress(jobs.StatusAnalyzingVideo, fmt.Sprintf("视频压缩完成：%.1fMB -> %.1fMB。", mb(info.Size()), mb(compressedInfo.Size())))
+	}
+	return readVideoDataURL(compressedPath, "video/mp4", maxDataURIBytes)
+}
+
+func readVideoDataURL(path, mimeType string, maxDataURIBytes int64) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if dataURLByteLen(info.Size(), mimeType) > maxDataURIBytes {
+		return "", fmt.Errorf("video data-uri would be %.1fMB, exceeds DashScope data-uri limit %.1fMB; configure OSS/public URL upload or lower the video size", mb(dataURLByteLen(info.Size(), mimeType)), mb(maxDataURIBytes))
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+func videoMimeType(path string) string {
 	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
 	if mimeType == "" {
 		mimeType = "video/mp4"
 	}
-	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+	return mimeType
+}
+
+func dataURLByteLen(rawBytes int64, mimeType string) int64 {
+	return int64(len("data:"+mimeType+";base64,")) + int64(base64.StdEncoding.EncodedLen(int(rawBytes)))
+}
+
+func maxRawBytesForDataURI(maxDataURIBytes int64, mimeType string) int64 {
+	prefixBytes := int64(len("data:" + mimeType + ";base64,"))
+	if maxDataURIBytes <= prefixBytes {
+		return 0
+	}
+	return ((maxDataURIBytes - prefixBytes) / 4) * 3
+}
+
+func compressVideoForDataURI(ctx context.Context, inputPath string, maxDataURIBytes int64) (string, func(), error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", nil, errors.New("video exceeds DashScope data-uri limit and ffmpeg is not installed; install ffmpeg or use a smaller video")
+	}
+	duration := probeVideoDuration(inputPath)
+	if duration <= 0 {
+		duration = 30
+	}
+	targetRawBytes := maxRawBytesForDataURI(maxDataURIBytes, "video/mp4") - 768*1024
+	if targetRawBytes < 2*1024*1024 {
+		return "", nil, errors.New("SCRIPT_AGENT_MAX_DATA_URI_MB is too small for video compression")
+	}
+
+	tempDir, err := os.MkdirTemp("", "scriptagent-video-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tempDir) }
+
+	profiles := []struct {
+		width  int
+		fps    int
+		factor float64
+	}{
+		{width: 720, fps: 15, factor: 0.90},
+		{width: 540, fps: 12, factor: 0.70},
+		{width: 360, fps: 10, factor: 0.50},
+	}
+
+	var lastErr error
+	var lastSize int64
+	for i, profile := range profiles {
+		outputPath := filepath.Join(tempDir, fmt.Sprintf("compressed-%d.mp4", i+1))
+		totalKbps := int(float64(targetRawBytes*8) / duration.Seconds() / 1000 * profile.factor)
+		if totalKbps < 260 {
+			totalKbps = 260
+		}
+		audioKbps := 48
+		videoKbps := totalKbps - audioKbps
+		if videoKbps < 180 {
+			videoKbps = 180
+		}
+
+		cmdCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+		args := []string{
+			"-nostdin", "-y", "-hide_banner",
+			"-i", inputPath,
+			"-vf", fmt.Sprintf("scale=trunc(min(iw\\,%d)/2)*2:-2,fps=%d", profile.width, profile.fps),
+			"-c:v", "libx264",
+			"-preset", "veryfast",
+			"-b:v", fmt.Sprintf("%dk", videoKbps),
+			"-maxrate", fmt.Sprintf("%dk", videoKbps),
+			"-bufsize", fmt.Sprintf("%dk", videoKbps*2),
+			"-c:a", "aac",
+			"-b:a", fmt.Sprintf("%dk", audioKbps),
+			"-movflags", "+faststart",
+			"-pix_fmt", "yuv420p",
+			outputPath,
+		}
+		output, err := exec.CommandContext(cmdCtx, ffmpegPath, args...).CombinedOutput()
+		cancel()
+		if err != nil {
+			lastErr = fmt.Errorf("ffmpeg compression failed: %w: %s", err, strings.TrimSpace(string(output)))
+			continue
+		}
+		info, err := os.Stat(outputPath)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		lastSize = info.Size()
+		if dataURLByteLen(info.Size(), "video/mp4") <= maxDataURIBytes {
+			return outputPath, cleanup, nil
+		}
+		lastErr = fmt.Errorf("compressed video data-uri is still too large: %.1fMB", mb(dataURLByteLen(info.Size(), "video/mp4")))
+	}
+
+	cleanup()
+	if lastErr != nil {
+		if lastSize > 0 {
+			return "", nil, fmt.Errorf("%w; final compressed file size %.1fMB", lastErr, mb(lastSize))
+		}
+		return "", nil, lastErr
+	}
+	return "", nil, errors.New("video compression failed")
+}
+
+func probeVideoDuration(path string) time.Duration {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path).Output()
+	if err != nil {
+		return 0
+	}
+	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds * float64(time.Second))
+}
+
+func mb(bytes int64) float64 {
+	return float64(bytes) / 1024 / 1024
 }
 
 func parseReplicaScript(raw string) (scriptPayload, error) {

@@ -66,9 +66,9 @@ func buildAgent(client *model.DashScopeClient) jobs.Agent {
 	}
 	log.Printf("ScriptAgent model mode: qwen")
 	return agent.NewQwenScriptAgent(agent.QwenConfig{
-		Client:       client,
-		VideoFPS:     envInt("SCRIPT_AGENT_VIDEO_FPS", 2),
-		MaxVideoSize: int64(envInt("SCRIPT_AGENT_MAX_VIDEO_MB", 80)) * 1024 * 1024,
+		Client:          client,
+		VideoFPS:        envInt("SCRIPT_AGENT_VIDEO_FPS", 2),
+		MaxDataURIBytes: int64(envInt("SCRIPT_AGENT_MAX_DATA_URI_MB", 20)) * 1024 * 1024,
 	})
 }
 

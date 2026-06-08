@@ -409,7 +409,7 @@ failed
 - CreatiBI CLI/API 的实际调用方式。
 - 视频临时 URL 或文件上传到 DashScope 的实现方式。
 - `qwen3.6-plus` 当前账号地域的视频输入能力。
-- Qwen 当前实现使用 Base64 data URL 传本地视频，默认限制 80MB。
+- Qwen 当前实现使用 Base64 data URL 传本地视频，默认 data-uri 上限 20MB；超限时后端使用 `ffmpeg` 自动压缩临时 MP4。
 - 第一版默认裂变数量。
 - 第一版最大视频大小和最大视频时长。
 - 是否需要多语言脚本。

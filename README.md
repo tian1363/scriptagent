@@ -53,10 +53,10 @@ When `DASHSCOPE_API_KEY` is present, the server uses Qwen mode automatically. To
 export SCRIPT_AGENT_MODE="mock"
 ```
 
-The first Qwen implementation sends local videos as Base64 data URLs. Keep videos modest in size, or set a different limit:
+The Qwen implementation sends local videos as Base64 data URLs. If a video would exceed the DashScope data-uri limit, ScriptAgent automatically creates a temporary compressed MP4 with `ffmpeg` and sends that instead. You can tune the data-uri ceiling:
 
 ```bash
-export SCRIPT_AGENT_MAX_VIDEO_MB="80"
+export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
 ```
 
 ## Configure CreatiBI Publishing
