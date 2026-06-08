@@ -409,37 +409,54 @@ function JobsWorkspace(props) {
           <p>上传参考视频和产品 Markdown，生成复刻脚本与裂变脚本。</p>
         </div>
         <form className="task-form" onSubmit={props.onCreate}>
-          <label>
-            <span>任务标题</span>
-            <input name="title" type="text" placeholder="默认使用产品 Markdown 文件名" />
-          </label>
-          <div className="upload-grid">
-            <FileField name="video" label="参考视频" accept="video/mp4,video/quicktime,video/webm" icon={<Video size={16} />} />
-            <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} />
+          <div className="form-section">
+            <div className="section-heading">
+              <span>素材输入</span>
+              <small>视频 + 产品信息是脚本生成的核心上下文</small>
+            </div>
+            <label>
+              <span>任务标题</span>
+              <input name="title" type="text" placeholder="默认使用产品 Markdown 文件名" />
+            </label>
+            <div className="upload-grid">
+              <FileField name="video" label="参考视频" accept="video/mp4,video/quicktime,video/webm" icon={<Video size={16} />} />
+              <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} />
+            </div>
           </div>
-          <label>
-            <span>补充要求</span>
-            <textarea name="requirement" rows="4" placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。" />
-          </label>
-          <div className="settings-row">
-            <label>
-              <span>行业</span>
-              <select name="industry" defaultValue="auto">
-                <option value="auto">自动判断</option>
-                <option value="game">游戏</option>
-                <option value="ecommerce">电商</option>
-              </select>
+
+          <div className="form-section split-section">
+            <label className="requirement-field">
+              <span>补充要求</span>
+              <textarea name="requirement" rows="4" placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。" />
             </label>
-            <label>
-              <span>裂变数量</span>
-              <input name="fission_count" type="number" min="1" max="20" value={fissionCount} onChange={handleFissionCountChange} />
-            </label>
+            <div className="settings-panel">
+              <label>
+                <span>行业</span>
+                <select name="industry" defaultValue="auto">
+                  <option value="auto">自动判断</option>
+                  <option value="game">游戏</option>
+                  <option value="ecommerce">电商</option>
+                </select>
+              </label>
+              <label>
+                <span>裂变数量</span>
+                <input name="fission_count" type="number" min="1" max="20" value={fissionCount} onChange={handleFissionCountChange} />
+              </label>
+            </div>
+          </div>
+
+          <FissionDirectionPicker count={fissionCount} />
+
+          <div className="submit-row">
+            <div>
+              <span>生成流程</span>
+              <small>视频理解 / 复刻脚本 / {fissionCount} 条裂变脚本</small>
+            </div>
             <button className="primary-button" type="submit" disabled={props.isCreating}>
               {props.isCreating ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
               <span>{props.isCreating ? "创建中" : "生成"}</span>
             </button>
           </div>
-          <FissionDirectionPicker count={fissionCount} />
         </form>
         {props.error ? <div className="error-banner">{props.error}</div> : null}
       </section>
@@ -509,7 +526,8 @@ function FissionDirectionPicker({ count }) {
       <div className="direction-list">
         {rows.map((index) => (
           <label key={index} className="direction-row">
-            <span>裂变脚本 {String(index + 1).padStart(2, "0")}</span>
+            <span className="direction-index">{String(index + 1).padStart(2, "0")}</span>
+            <span className="direction-title">裂变脚本</span>
             <select name="fission_directions" defaultValue={defaultFissionDirection(index)} required>
               {fissionDirectionGroups.map((group) => (
                 <optgroup key={group.layer} label={group.layer}>
@@ -622,8 +640,86 @@ function ResultContent({ job, content, activeTab }) {
   if (!job) return <EmptyState text="暂无任务结果" />;
   if (job.error_message && job.status === "failed") return <pre className="result-output error-output">{job.error_message}</pre>;
   if (!content) return <EmptyState text={runningStatuses.has(job.status) ? "任务执行中" : "当前页暂无内容"} />;
-  const mode = activeTab === "analysis_markdown" || activeTab === "run_log" ? "markdown" : "json";
-  return <pre className={`result-output ${mode}`}>{content}</pre>;
+  if (activeTab === "run_log") return <TimelineContent content={content} />;
+  if (activeTab === "analysis_markdown") return <MarkdownContent content={content} />;
+  return <ScriptJSONContent content={content} activeTab={activeTab} />;
+}
+
+function TimelineContent({ content }) {
+  const lines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    <div className="timeline-output">
+      {lines.map((line, index) => (
+        <div key={`${line}-${index}`} className="timeline-item">
+          <span>{String(index + 1).padStart(2, "0")}</span>
+          <p>{line}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MarkdownContent({ content }) {
+  const blocks = markdownBlocks(content);
+  return (
+    <div className="markdown-output">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level <= 2 ? "h3" : "h4";
+          return <Tag key={index}>{block.text}</Tag>;
+        }
+        if (block.type === "table") {
+          return (
+            <div key={index} className="table-wrap">
+              <table>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => {
+                        const Cell = rowIndex === 0 ? "th" : "td";
+                        return <Cell key={cellIndex}>{cell}</Cell>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        return <p key={index}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
+function ScriptJSONContent({ content, activeTab }) {
+  const parsed = parseJSONValue(content);
+  const scripts = extractScripts(parsed, activeTab);
+  return (
+    <div className="json-review">
+      {scripts.length ? (
+        <div className="script-card-list">
+          {scripts.map((script, index) => (
+            <article key={index} className="script-card">
+              <div>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <h3>{script.metadata?.title || script.title || (activeTab === "replica_script_json" ? "复刻脚本" : "裂变脚本")}</h3>
+                <p>{script.metadata?.fission_dimension || script.metadata?.industry || "分镜脚本"}</p>
+              </div>
+              <strong>{Array.isArray(script.storyboards) ? script.storyboards.length : 0} 镜</strong>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      <details className="raw-json" open={!scripts.length}>
+        <summary>原始 JSON</summary>
+        <pre className="result-output json">{pretty(content)}</pre>
+      </details>
+    </div>
+  );
 }
 
 function EmptyState({ text, compact = false }) {
@@ -656,6 +752,61 @@ function statusTone(status) {
   if (status === "failed") return "danger";
   if (status === "completed" || status === "published") return "success";
   return "neutral";
+}
+
+function markdownBlocks(content) {
+  const lines = content.split("\n");
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    if (line.startsWith("|")) {
+      const rows = [];
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        const row = splitMarkdownRow(lines[index]);
+        if (!row.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+          rows.push(row);
+        }
+        index += 1;
+      }
+      index -= 1;
+      if (rows.length) blocks.push({ type: "table", rows });
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      continue;
+    }
+    blocks.push({ type: "paragraph", text: line.replace(/^\s*[-*]\s+/, "") });
+  }
+  return blocks;
+}
+
+function splitMarkdownRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim() || "-");
+}
+
+function parseJSONValue(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractScripts(parsed, activeTab) {
+  if (!parsed) return [];
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed.fission_scripts)) return parsed.fission_scripts;
+  if (parsed.replica_script) return [parsed.replica_script];
+  if (activeTab === "replica_script_json" && Array.isArray(parsed.storyboards)) return [parsed];
+  return [];
 }
 
 function pretty(value) {
