@@ -116,6 +116,9 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	if len(fissions) != job.FissionCount {
 		return jobs.ScriptResult{}, fmt.Errorf("fission scripts count mismatch: want %d, got %d", job.FissionCount, len(fissions))
 	}
+	if err := validateFissionDimensions(fissions, job.FissionDirections); err != nil {
+		return jobs.ScriptResult{}, err
+	}
 	fissionJSON, err := marshalPretty(fissions)
 	if err != nil {
 		return jobs.ScriptResult{}, err
@@ -199,4 +202,54 @@ func parseJSON(raw string, target any) error {
 		clean = clean[start : end+1]
 	}
 	return json.Unmarshal([]byte(clean), target)
+}
+
+func validateFissionDimensions(scripts []scriptPayload, selectedDirections string) error {
+	allowed := allowedFissionDirections(selectedDirections)
+	for i, script := range scripts {
+		dimension := strings.TrimSpace(script.Metadata.FissionDimension)
+		if dimension == "" {
+			return fmt.Errorf("fission script %d has empty fission_dimension", i+1)
+		}
+		if !allowed[dimension] {
+			return fmt.Errorf("fission script %d uses invalid or mixed fission_dimension: %s", i+1, dimension)
+		}
+	}
+	return nil
+}
+
+func allowedFissionDirections(selectedDirections string) map[string]bool {
+	values := strings.Split(strings.TrimSpace(selectedDirections), "\n")
+	if strings.TrimSpace(selectedDirections) == "" {
+		values = allFissionDirections()
+	}
+	allowed := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			allowed[value] = true
+		}
+	}
+	return allowed
+}
+
+func allFissionDirections() []string {
+	return []string{
+		"视听层-换BGM",
+		"视听层-换音效",
+		"视听层-换色调/滤镜",
+		"视听层-换字幕&花字",
+		"视听层-换画幅",
+		"视听层-换配音(语速/声线)",
+		"结构层-换开头钩子",
+		"结构层-换CTA",
+		"结构层-时长压缩/拉伸",
+		"结构层-变速·节奏调整",
+		"结构层-换首帧/封面",
+		"结构层-同素材高光重剪",
+		"元素层-换局部角色/群演",
+		"元素层-换局部场景贴片",
+		"元素层-换局部道具/UI",
+		"元素层-字幕语言本地化",
+	}
 }
