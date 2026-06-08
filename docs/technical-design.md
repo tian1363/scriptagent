@@ -490,7 +490,7 @@ CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
 
 - CreatiBI 写入逻辑必须封装在 `internal/creatibi` 中。
 - 上层业务不直接拼 CLI 命令。
-- 发布使用 `cbi project script-create` 创建复刻脚本和裂变子脚本。
+- 发布使用 `cbi project script-create` 创建复刻脚本和裂变子脚本；复刻脚本只传 `project-id/name`，裂变脚本通过 `parent-id` 挂载到复刻脚本下。
 - 发布使用 `cbi project script-save --format 2 --script ...` 保存分镜内容。
 - `CREATIBI_PROJECT_ID` 可指定目标专案；未指定时使用 `cbi project list` 返回的第一个专案。
 - CLI/API 返回结果必须保存到 `creatibi_result_json`。

@@ -75,7 +75,7 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 	if replicaTitle == "" {
 		replicaTitle = job.Title + " 复刻脚本"
 	}
-	parentID, raw, err := p.createScript(projectID, replicaTitle, 0, "scriptagent:"+job.ID+":replica")
+	parentID, raw, err := p.createScript(projectID, replicaTitle, 0)
 	if err != nil {
 		return "", fmt.Errorf("create replica script: %w", err)
 	}
@@ -96,7 +96,7 @@ func (p *CLIPublisher) Publish(job jobs.Job) (string, error) {
 		if strings.TrimSpace(title) == "" {
 			title = fmt.Sprintf("%s 裂变脚本 %02d", job.Title, i+1)
 		}
-		childID, raw, err := p.createScript(projectID, title, parentID, "scriptagent:"+job.ID+":fission")
+		childID, raw, err := p.createScript(projectID, title, parentID)
 		if err != nil {
 			return "", fmt.Errorf("create fission script %d: %w", i+1, err)
 		}
@@ -143,8 +143,8 @@ func (p *CLIPublisher) resolveProject() (int, string, error) {
 	return parsed.Projects[0].ID, parsed.Projects[0].Name, nil
 }
 
-func (p *CLIPublisher) createScript(projectID int, name string, parentID int, sourceObject string) (int, string, error) {
-	args := []string{"project", "script-create", "--project-id", strconv.Itoa(projectID), "--name", name, "--source-object", sourceObject, "--format", "json", "-q"}
+func (p *CLIPublisher) createScript(projectID int, name string, parentID int) (int, string, error) {
+	args := []string{"project", "script-create", "--project-id", strconv.Itoa(projectID), "--name", name, "--format", "json", "-q"}
 	if parentID > 0 {
 		args = append(args, "--parent-id", strconv.Itoa(parentID))
 	}
