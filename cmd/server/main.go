@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/tian1363/scriptagent/internal/agent"
+	"github.com/tian1363/scriptagent/internal/creatibi"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/storage"
@@ -37,13 +39,21 @@ func main() {
 
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
 	runner := jobs.NewRunner(store, buildAgent())
-	handler := webserver.NewHandler(cfg, store, fileStore, runner)
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher())
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func buildPublisher() webserver.Publisher {
+	return creatibi.NewCLIPublisher(creatibi.Config{
+		Bin:       env("CREATIBI_CLI_BIN", "cbi"),
+		ProjectID: envInt("CREATIBI_PROJECT_ID", 0),
+		Timeout:   time.Duration(envInt("CREATIBI_PUBLISH_TIMEOUT_SECONDS", 120)) * time.Second,
+	})
 }
 
 func buildAgent() jobs.Agent {

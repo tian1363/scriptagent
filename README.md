@@ -59,6 +59,21 @@ The first Qwen implementation sends local videos as Base64 data URLs. Keep video
 export SCRIPT_AGENT_MAX_VIDEO_MB="80"
 ```
 
+## Configure CreatiBI Publishing
+
+The publish action uses the local `cbi` CLI. Make sure you are logged in:
+
+```bash
+cbi auth whoami
+```
+
+Optionally pin the target project. If omitted, ScriptAgent uses the first project returned by `cbi project list`.
+
+```bash
+export CREATIBI_PROJECT_ID="9944"
+export CREATIBI_CLI_BIN="cbi"
+```
+
 ## Persistence
 
 Runtime data is persisted locally:

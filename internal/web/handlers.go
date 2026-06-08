@@ -25,13 +25,16 @@ type Publisher interface {
 	Publish(job jobs.Job) (string, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner) *Handler {
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher) *Handler {
+	if publisher == nil {
+		publisher = disabledPublisher{}
+	}
 	return &Handler{
 		cfg:       cfg,
 		store:     store,
 		files:     files,
 		runner:    runner,
-		publisher: noopPublisher{},
+		publisher: publisher,
 	}
 }
 
@@ -125,12 +128,15 @@ func (h *Handler) publishJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	_ = h.store.AppendLog(job.ID, "开始发布至 CreatiBI。")
 	result, err := h.publisher.Publish(*job)
 	if err != nil {
+		_ = h.store.AppendLog(job.ID, "发布至 CreatiBI 失败："+err.Error())
 		_ = h.store.SavePublishResult(job.ID, jobs.StatusCompleted, "", err.Error())
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
+	_ = h.store.AppendLog(job.ID, "发布至 CreatiBI 成功。")
 	if err := h.store.SavePublishResult(job.ID, jobs.StatusPublished, result, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -216,18 +222,8 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-type noopPublisher struct{}
+type disabledPublisher struct{}
 
-func (noopPublisher) Publish(job jobs.Job) (string, error) {
-	payload, err := json.MarshalIndent(map[string]any{
-		"mode":        "noop",
-		"job_id":      job.ID,
-		"message":     "CreatiBI publisher is not configured yet.",
-		"script_ids":  []string{},
-		"script_link": "",
-	}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(payload), nil
+func (disabledPublisher) Publish(job jobs.Job) (string, error) {
+	return "", errors.New("CreatiBI publisher is not configured")
 }

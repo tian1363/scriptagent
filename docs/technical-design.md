@@ -429,6 +429,8 @@ SCRIPT_AGENT_MAX_VIDEO_MB=80
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi
+CREATIBI_PROJECT_ID=
+CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
 ```
 
 ## 13. 模型输入输出约束
@@ -488,6 +490,9 @@ CREATIBI_CLI_BIN=cbi
 
 - CreatiBI 写入逻辑必须封装在 `internal/creatibi` 中。
 - 上层业务不直接拼 CLI 命令。
+- 发布使用 `cbi project script-create` 创建复刻脚本和裂变子脚本。
+- 发布使用 `cbi project script-save --format 2 --script ...` 保存分镜内容。
+- `CREATIBI_PROJECT_ID` 可指定目标专案；未指定时使用 `cbi project list` 返回的第一个专案。
 - CLI/API 返回结果必须保存到 `creatibi_result_json`。
 - 写入失败不能删除本地生成结果。
 - 写入失败后允许用户重试发布。
