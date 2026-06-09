@@ -98,6 +98,21 @@ function lastAssistantMessage(messages = []) {
   return null;
 }
 
+const chatQuickTasks = [
+  {
+    title: "生成裂变方向",
+    description: "基于当前产品，先给我 3 个适合短视频的裂变方向，并说明每个方向改哪里。",
+  },
+  {
+    title: "写产品 Markdown",
+    description: "帮我把这个产品整理成可用于生成脚本的 Markdown，需要包含卖点、用户、场景、限制和素材备注。",
+  },
+  {
+    title: "优化脚本",
+    description: "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。",
+  },
+];
+
 export function App() {
   const [view, setView] = useState("jobs");
   const [jobs, setJobs] = useState([]);
@@ -113,6 +128,7 @@ export function App() {
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [modelSettings, setModelSettings] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(() => window.localStorage.getItem("scriptagent:debug-panel") === "true");
 
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -171,7 +187,7 @@ export function App() {
     setError("");
     if (view === "jobs") await refreshJobs();
     if (view === "chat") await refreshChats();
-    if (view === "calls") await refreshModelCalls();
+    if (view === "calls" && showDebugPanel) await refreshModelCalls();
     if (view === "products") await refreshProducts();
     if (view === "settings") await refreshModelSettings();
   }
@@ -179,10 +195,20 @@ export function App() {
   useEffect(() => {
     refreshJobs().catch((err) => setError(err.message));
     refreshChats().catch(() => {});
-    refreshModelCalls().catch(() => {});
+    if (showDebugPanel) refreshModelCalls().catch(() => {});
     refreshProducts().catch(() => {});
     refreshModelSettings().catch(() => {});
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("scriptagent:debug-panel", showDebugPanel ? "true" : "false");
+    if (!showDebugPanel && view === "calls") {
+      setView("settings");
+    }
+    if (showDebugPanel) {
+      refreshModelCalls().catch(() => {});
+    }
+  }, [showDebugPanel]);
 
   useEffect(() => {
     if (!selectedJob || !runningStatuses.has(selectedJob.status)) {
@@ -347,7 +373,9 @@ export function App() {
         setOptimisticChatMessages(null);
       }
       await refreshChats(thread.conversation.id);
-      await refreshModelCalls();
+      if (showDebugPanel) {
+        await refreshModelCalls();
+      }
     } catch (err) {
       setError(err.message);
       setTypingMessage(null);
@@ -426,10 +454,12 @@ export function App() {
             <MessageSquare size={15} />
             <span>通用对话</span>
           </button>
-          <button className={view === "calls" ? "active" : ""} type="button" onClick={() => setView("calls")}>
-            <Activity size={15} />
-            <span>模型调用</span>
-          </button>
+          {showDebugPanel ? (
+            <button className={view === "calls" ? "active" : ""} type="button" onClick={() => setView("calls")}>
+              <Activity size={15} />
+              <span>调试台</span>
+            </button>
+          ) : null}
           <button className={view === "settings" ? "active" : ""} type="button" onClick={() => setView("settings")}>
             <Settings size={15} />
             <span>配置</span>
@@ -450,7 +480,7 @@ export function App() {
         {view === "chat" ? (
           <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={handleNewChat} />
         ) : null}
-        {view === "calls" ? (
+        {view === "calls" && showDebugPanel ? (
           <CallsSidebar calls={modelCalls} selectedCallId={selectedCall?.id} onSelect={setSelectedCallId} />
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
@@ -502,9 +532,16 @@ export function App() {
               onSend={handleSendChat}
             />
           ) : null}
-          {view === "calls" ? <ModelCallsWorkspace call={selectedCall} error={error} /> : null}
+          {view === "calls" && showDebugPanel ? <ModelCallsWorkspace call={selectedCall} error={error} /> : null}
           {view === "settings" ? (
-            <SettingsWorkspace modelSettings={modelSettings} isSaving={isSavingSettings} error={error} onSave={handleSaveModelSettings} />
+            <SettingsWorkspace
+              modelSettings={modelSettings}
+              showDebugPanel={showDebugPanel}
+              isSaving={isSavingSettings}
+              error={error}
+              onDebugPanel={setShowDebugPanel}
+              onSave={handleSaveModelSettings}
+            />
           ) : null}
         </section>
       </main>
@@ -667,32 +704,25 @@ function JobsWorkspace(props) {
       <section className="composer">
         <div>
           <h1>创建脚本任务</h1>
-          <p>上传参考视频和产品 Markdown，生成复刻脚本与裂变脚本。</p>
+          <p>先确认产品资产，再上传参考视频生成复刻脚本与裂变脚本。</p>
         </div>
         <form className="task-form" onSubmit={props.onCreate}>
           <div className="form-section">
             <div className="section-heading">
-              <span>素材输入</span>
-              <small>视频 + 产品信息是脚本生成的核心上下文</small>
+              <span>1. 产品资产</span>
+              <small>产品信息决定脚本是否有卖点和细节</small>
             </div>
             <label>
-              <span>任务标题</span>
-              <input name="title" type="text" placeholder="默认使用产品 Markdown 文件名" />
+              <span>选择产品</span>
+              <select name="product_id" value={selectedProductID} onChange={(event) => setSelectedProductID(event.target.value)}>
+                <option value="">上传新产品 Markdown</option>
+                {props.products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.title}
+                  </option>
+                ))}
+              </select>
             </label>
-            <div className="upload-grid">
-              <FileField name="video" label="参考视频" accept="video/mp4,video/quicktime,video/webm" icon={<Video size={16} />} />
-              <label>
-                <span>选择产品</span>
-                <select name="product_id" value={selectedProductID} onChange={(event) => setSelectedProductID(event.target.value)}>
-                  <option value="">上传新产品 Markdown</option>
-                  {props.products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
             {selectedProductID ? (
               <div className="selected-product-note">
                 <Package size={15} />
@@ -710,11 +740,22 @@ function JobsWorkspace(props) {
           </div>
 
           <div className="form-section split-section">
-            <label className="requirement-field">
-              <span>补充要求</span>
-              <textarea name="requirement" rows="4" placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。" />
-            </label>
             <div className="settings-panel">
+              <div className="section-heading compact-heading">
+                <span>2. 参考视频</span>
+                <small>上传要复刻结构和节奏的视频</small>
+              </div>
+              <label>
+                <span>任务标题</span>
+                <input name="title" type="text" placeholder="默认使用产品 Markdown 文件名" />
+              </label>
+              <FileField name="video" label="参考视频" accept="video/mp4,video/quicktime,video/webm" icon={<Video size={16} />} />
+            </div>
+            <div className="settings-panel">
+              <div className="section-heading compact-heading">
+                <span>3. 生成设置</span>
+                <small>不确定时保持默认</small>
+              </div>
               <label>
                 <span>行业</span>
                 <select name="industry" defaultValue="auto">
@@ -728,6 +769,17 @@ function JobsWorkspace(props) {
                 <input name="fission_count" type="number" min="1" max="20" value={fissionCount} onChange={handleFissionCountChange} />
               </label>
             </div>
+          </div>
+
+          <div className="form-section">
+            <div className="section-heading">
+              <span>4. 补充要求</span>
+              <small>可写平台、风格、禁用表达或目标人群</small>
+            </div>
+            <label className="requirement-field">
+              <span>补充要求</span>
+              <textarea name="requirement" rows="4" placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。" />
+            </label>
           </div>
 
           <FissionDirectionPicker count={fissionCount} />
@@ -823,7 +875,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, i
             <div ref={messagesEndRef} />
           </>
         ) : (
-          <EmptyState text="输入第一条消息开始对话" />
+          <ChatTaskStarter onSelect={onDraft} />
         )}
       </div>
       <form className="chat-form" onSubmit={onSend}>
@@ -834,6 +886,25 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, i
           <span>{isSending ? "发送中" : "发送"}</span>
         </button>
       </form>
+    </section>
+  );
+}
+
+function ChatTaskStarter({ onSelect }) {
+  return (
+    <section className="chat-starter">
+      <div>
+        <h3>从一个具体任务开始</h3>
+        <p>选一个常见任务，我会把问题放进输入框，你可以补充产品、平台或素材限制。</p>
+      </div>
+      <div className="starter-list">
+        {chatQuickTasks.map((task) => (
+          <button key={task.title} type="button" onClick={() => onSelect(task.description)}>
+            <strong>{task.title}</strong>
+            <span>{task.description}</span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -878,14 +949,14 @@ function FissionDirectionPicker({ count }) {
   return (
     <div className="direction-panel">
       <div className="direction-heading">
-        <span>裂变方向</span>
-        <small>每条脚本只选择 1 个裂变元素，可重复使用同一元素</small>
+        <span>5. 裂变方向</span>
+        <small>每一行对应一条脚本，只使用这一行选择的 1 个裂变元素</small>
       </div>
       <div className="direction-list">
         {rows.map((index) => (
           <label key={index} className="direction-row">
             <span className="direction-index">{String(index + 1).padStart(2, "0")}</span>
-            <span className="direction-title">裂变脚本</span>
+            <span className="direction-title">第 {index + 1} 条</span>
             <select name="fission_directions" defaultValue={defaultFissionDirection(index)} required>
               {fissionDirectionGroups.map((group) => (
                 <optgroup key={group.layer} label={group.layer}>
@@ -986,7 +1057,7 @@ function ProductsWorkspace({ products, selectedProductId, productPreview, isLoad
   );
 }
 
-function SettingsWorkspace({ modelSettings, isSaving, error, onSave }) {
+function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onDebugPanel, onSave }) {
   return (
     <section className="result-pane full-height">
       <div className="result-header">
@@ -1001,6 +1072,13 @@ function SettingsWorkspace({ modelSettings, isSaving, error, onSave }) {
       </div>
       <form className="settings-form" onSubmit={onSave}>
         {error ? <div className="error-banner">{error}</div> : null}
+        <div className="security-callout">
+          <KeyRound size={18} />
+          <div>
+            <strong>API Key 只保存在当前部署的本地数据库</strong>
+            <p>不要公开分享 `data/scriptagent.db`。给团队使用时，建议增加登录和密钥加密。</p>
+          </div>
+        </div>
         <div className="form-section">
           <div className="section-heading">
             <span>DashScope</span>
@@ -1021,8 +1099,18 @@ function SettingsWorkspace({ modelSettings, isSaving, error, onSave }) {
             </label>
           </div>
         </div>
-        <div className="config-note">
-          <p>API Key 会保存在当前部署的 SQLite 数据库中；不要把这个数据库文件公开分享。生产环境建议增加用户登录和密钥加密。</p>
+        <div className="form-section developer-options">
+          <div className="section-heading">
+            <span>开发者选项</span>
+            <small>普通运营用户不需要开启</small>
+          </div>
+          <label className="toggle-row">
+            <span>
+              <strong>显示调试台</strong>
+              <small>查看模型输入输出、token、原始响应。</small>
+            </span>
+            <input type="checkbox" checked={showDebugPanel} onChange={(event) => onDebugPanel(event.target.checked)} />
+          </label>
         </div>
         <div className="submit-row">
           <div>
