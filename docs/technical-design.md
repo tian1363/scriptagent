@@ -450,6 +450,7 @@ POST /api/chats/{id}/messages
 - 产品 Markdown 首次参与语义检索时，后端按 Markdown 标题和段落切块，调用 DashScope `text-embedding-v4` 建索引，并把向量保存到 `product_chunks`。
 - 本轮用户问题会单独生成 query embedding，后端在当前产品 chunks 内计算 cosine similarity，默认取 Top-K 相关片段。
 - embedding 调用失败、索引为空或检索无结果时，系统回退到本地关键词章节筛选。
+- 通用对话响应包含 `citations`，用于前端展示“本轮引用”的产品章节。引用字段包括产品 ID、产品名、chunk ID、标题、摘要、相似度和来源。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 

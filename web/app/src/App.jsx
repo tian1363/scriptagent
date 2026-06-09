@@ -120,6 +120,7 @@ export function App() {
   const [chatProductId, setChatProductId] = useState("");
   const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
   const [typingMessage, setTypingMessage] = useState(null);
+  const [chatCitations, setChatCitations] = useState([]);
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
@@ -300,6 +301,7 @@ export function App() {
     setError("");
     setOptimisticChatMessages(null);
     setTypingMessage(null);
+    setChatCitations([]);
     setIsChatThinking(false);
     setSelectedChat(await getChat(id));
   }
@@ -309,6 +311,7 @@ export function App() {
     setSelectedChat(null);
     setOptimisticChatMessages(null);
     setTypingMessage(null);
+    setChatCitations([]);
     setIsChatThinking(false);
   }
 
@@ -320,6 +323,7 @@ export function App() {
     setIsSending(true);
     setIsChatThinking(true);
     setTypingMessage(null);
+    setChatCitations([]);
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
       role: "user",
@@ -335,6 +339,7 @@ export function App() {
         : await sendNewChatMessage(content, chatProductId);
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
+      setChatCitations(thread.citations || []);
       if (assistantMessage) {
         setOptimisticChatMessages(thread.messages.filter((message) => message.id !== assistantMessage.id));
         setTypingMessage({ ...assistantMessage, visible: "" });
@@ -485,6 +490,7 @@ export function App() {
               thread={selectedChat}
               optimisticMessages={optimisticChatMessages}
               typingMessage={typingMessage}
+              citations={chatCitations}
               isThinking={isChatThinking}
               draft={chatDraft}
               products={products}
@@ -755,7 +761,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
@@ -796,6 +802,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, isThinking, 
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>
+            {citations?.length ? <CitationPanel citations={citations} /> : null}
             {messages.map((message) => (
               <ChatMessageBubble key={message.id} message={message} />
             ))}
@@ -827,6 +834,28 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, isThinking, 
           <span>{isSending ? "发送中" : "发送"}</span>
         </button>
       </form>
+    </section>
+  );
+}
+
+function CitationPanel({ citations }) {
+  return (
+    <section className="citation-panel">
+      <div className="section-heading">
+        <span>本轮引用</span>
+        <small>{citations.length} 个产品章节</small>
+      </div>
+      <div className="citation-list">
+        {citations.map((citation, index) => (
+          <article key={`${citation.chunk_id || citation.chunk_index}-${index}`} className="citation-card">
+            <div>
+              <strong>{citation.heading || "产品资料"}</strong>
+              <span>{citation.product_name} · {citation.source === "embedding" ? `相似度 ${Number(citation.score || 0).toFixed(3)}` : citation.source}</span>
+            </div>
+            <p>{citation.snippet}</p>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

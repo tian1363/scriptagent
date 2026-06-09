@@ -65,7 +65,7 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	messages = append(messages, *userMessage)
 
 	summary := s.refreshSummary(ctx, conversationID, conversation, messages)
-	productContext, err := s.productContext(ctx, conversationID, productID, content)
+	productContext, citations, err := s.productContext(ctx, conversationID, productID, content)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +88,7 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	if conversation != nil {
 		thread.Conversation.Title = conversation.Title
 	}
+	thread.Citations = citations
 	return thread, nil
 }
 
@@ -139,37 +140,45 @@ func (s *Service) refreshSummary(ctx context.Context, conversationID string, con
 	return summary
 }
 
-func (s *Service) productContext(ctx context.Context, conversationID, productID, query string) (string, error) {
+func (s *Service) productContext(ctx context.Context, conversationID, productID, query string) (string, []jobs.ProductCitation, error) {
 	productID = strings.TrimSpace(productID)
 	if productID == "" {
-		return "", nil
+		return "", nil, nil
 	}
 	product, err := s.store.GetProduct(productID)
 	if err != nil {
-		return "", fmt.Errorf("get product: %w", err)
+		return "", nil, fmt.Errorf("get product: %w", err)
 	}
 	content, err := os.ReadFile(product.MDPath)
 	if err != nil {
-		return "", fmt.Errorf("read product Markdown: %w", err)
+		return "", nil, fmt.Errorf("read product Markdown: %w", err)
 	}
 	markdown := strings.TrimSpace(string(content))
 	if len([]rune(markdown)) <= maxProductContextChars {
-		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, markdown), nil
+		citation := jobs.ProductCitation{
+			ProductID:   product.ID,
+			ProductName: product.Title,
+			ChunkIndex:  0,
+			Heading:     "全文",
+			Snippet:     citationSnippet(markdown),
+			Source:      "full",
+		}
+		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, markdown), []jobs.ProductCitation{citation}, nil
 	}
-	if semantic, err := s.semanticProductContext(ctx, conversationID, *product, markdown, query); err == nil && strings.TrimSpace(semantic) != "" {
-		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, semantic), nil
+	if semantic, semanticCitations, err := s.semanticProductContext(ctx, conversationID, *product, markdown, query); err == nil && strings.TrimSpace(semantic) != "" {
+		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, semantic), semanticCitations, nil
 	}
-	selected := selectProductMarkdownContext(markdown, query)
-	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), nil
+	selected, fallbackCitations := selectProductMarkdownContext(markdown, query, *product)
+	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), fallbackCitations, nil
 }
 
-func (s *Service) semanticProductContext(ctx context.Context, conversationID string, product jobs.Product, markdown, query string) (string, error) {
+func (s *Service) semanticProductContext(ctx context.Context, conversationID string, product jobs.Product, markdown, query string) (string, []jobs.ProductCitation, error) {
 	chunks, err := s.ensureProductEmbeddings(ctx, product, markdown)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(chunks) == 0 {
-		return "", errors.New("product has no embedded chunks")
+		return "", nil, errors.New("product has no embedded chunks")
 	}
 	queryEmbedding, err := s.client.EmbedDetailed(ctx, model.CallContext{
 		Scope: "chat",
@@ -177,10 +186,10 @@ func (s *Service) semanticProductContext(ctx context.Context, conversationID str
 		Step:  "product_embed_query",
 	}, []string{query}, "query")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(queryEmbedding.Vectors) == 0 {
-		return "", errors.New("query embedding is empty")
+		return "", nil, errors.New("query embedding is empty")
 	}
 	queryVector := queryEmbedding.Vectors[0].Vector
 	scored := make([]scoredProductChunk, 0, len(chunks))
@@ -191,7 +200,7 @@ func (s *Service) semanticProductContext(ctx context.Context, conversationID str
 		}
 	}
 	if len(scored) == 0 {
-		return "", errors.New("no relevant product chunks")
+		return "", nil, errors.New("no relevant product chunks")
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
 		if scored[i].Score == scored[j].Score {
@@ -207,10 +216,21 @@ func (s *Service) semanticProductContext(ctx context.Context, conversationID str
 	})
 
 	lines := []string{"以下为 embedding 语义检索出的产品 Markdown Top-K 相关章节："}
+	citations := make([]jobs.ProductCitation, 0, len(scored))
 	for _, item := range scored {
 		lines = append(lines, "", fmt.Sprintf("[相似度 %.3f] %s", item.Score, item.Chunk.Heading), item.Chunk.Content)
+		citations = append(citations, jobs.ProductCitation{
+			ProductID:   product.ID,
+			ProductName: product.Title,
+			ChunkID:     item.Chunk.ID,
+			ChunkIndex:  item.Chunk.ChunkIndex,
+			Heading:     item.Chunk.Heading,
+			Snippet:     citationSnippet(item.Chunk.Content),
+			Score:       item.Score,
+			Source:      "embedding",
+		})
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+	return strings.TrimSpace(strings.Join(lines, "\n")), citations, nil
 }
 
 func (s *Service) ensureProductEmbeddings(ctx context.Context, product jobs.Product, markdown string) ([]jobs.ProductChunk, error) {
@@ -421,10 +441,17 @@ func cosineSimilarity(a, b []float64) float64 {
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
-func selectProductMarkdownContext(content, query string) string {
+func selectProductMarkdownContext(content, query string, product jobs.Product) (string, []jobs.ProductCitation) {
 	content = strings.TrimSpace(content)
 	if len([]rune(content)) <= maxProductContextChars {
-		return content
+		return content, []jobs.ProductCitation{{
+			ProductID:   product.ID,
+			ProductName: product.Title,
+			ChunkIndex:  0,
+			Heading:     "全文",
+			Snippet:     citationSnippet(content),
+			Source:      "full",
+		}}
 	}
 	sections := splitMarkdownSections(content)
 	terms := queryTerms(query)
@@ -461,10 +488,20 @@ func selectProductMarkdownContext(content, query string) string {
 	})
 
 	lines := []string{"以下为按当前问题筛选出的产品 Markdown 相关章节："}
+	citations := make([]jobs.ProductCitation, 0, len(selected))
 	for _, section := range selected {
 		lines = append(lines, "", section.Content)
+		citations = append(citations, jobs.ProductCitation{
+			ProductID:   product.ID,
+			ProductName: product.Title,
+			ChunkIndex:  section.Order,
+			Heading:     section.Title,
+			Snippet:     citationSnippet(section.Content),
+			Score:       float64(section.Score),
+			Source:      "keyword",
+		})
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	return strings.TrimSpace(strings.Join(lines, "\n")), citations
 }
 
 func splitMarkdownSections(content string) []markdownSection {
@@ -546,4 +583,8 @@ func truncateRunes(value string, limit int) string {
 		return string(runes)
 	}
 	return string(runes[:limit]) + "\n..."
+}
+
+func citationSnippet(value string) string {
+	return strings.ReplaceAll(truncateRunes(value, 160), "\n", " ")
 }

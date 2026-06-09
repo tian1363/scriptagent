@@ -59,6 +59,17 @@ type ProductChunk struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type ProductCitation struct {
+	ProductID   string  `json:"product_id"`
+	ProductName string  `json:"product_name"`
+	ChunkID     string  `json:"chunk_id,omitempty"`
+	ChunkIndex  int     `json:"chunk_index"`
+	Heading     string  `json:"heading"`
+	Snippet     string  `json:"snippet"`
+	Score       float64 `json:"score,omitempty"`
+	Source      string  `json:"source"`
+}
+
 type ProductChunkInput struct {
 	ChunkIndex     int
 	Heading        string
@@ -126,8 +137,9 @@ type ChatMessage struct {
 }
 
 type ChatThread struct {
-	Conversation ChatConversation `json:"conversation"`
-	Messages     []ChatMessage    `json:"messages"`
+	Conversation ChatConversation  `json:"conversation"`
+	Messages     []ChatMessage     `json:"messages"`
+	Citations    []ProductCitation `json:"citations,omitempty"`
 }
 
 type ModelCall struct {

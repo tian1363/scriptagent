@@ -47,9 +47,12 @@ func TestSelectProductMarkdownContextPrefersRelevantSections(t *testing.T) {
 		"礼包、金币、体力。",
 	}, "\n")
 
-	selected := selectProductMarkdownContext(content, "这个游戏的玩法机制是什么？")
+	selected, citations := selectProductMarkdownContext(content, "这个游戏的玩法机制是什么？", jobs.Product{ID: "p1", Title: "测试产品"})
 	if !strings.Contains(selected, "三消排序") {
 		t.Fatal("expected relevant gameplay section")
+	}
+	if len(citations) == 0 || citations[0].ProductID != "p1" {
+		t.Fatalf("expected product citations, got %+v", citations)
 	}
 }
 

@@ -889,6 +889,67 @@ textarea:focus {
   background: var(--cbi-bg-1);
 }
 
+.citation-panel {
+  max-width: 920px;
+  display: grid;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
+  border: 1px solid rgba(139, 78, 239, 0.16);
+  border-radius: var(--cbi-radius-sm);
+  background: rgba(246, 240, 250, 0.42);
+}
+
+.citation-panel .section-heading {
+  padding: 0 var(--cbi-space-1);
+}
+
+.citation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--cbi-space-1);
+}
+
+.citation-card {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: var(--cbi-space-1);
+  border: 1px solid rgba(139, 78, 239, 0.14);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+}
+
+.citation-card div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.citation-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cbi-fg-1);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-card span,
+.citation-card p {
+  margin: 0;
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+  line-height: var(--cbi-lh-relaxed);
+}
+
+.citation-card p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .chat-message.user {
   justify-self: end;
   background: rgba(132, 78, 239, 0.06);
