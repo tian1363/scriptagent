@@ -75,11 +75,14 @@ func buildAgent(client *model.DashScopeClient) jobs.Agent {
 func buildModelClient(store *jobs.Store) *model.DashScopeClient {
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
 	return model.NewDashScopeClient(model.DashScopeConfig{
-		APIKey:   apiKey,
-		Endpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
-		Model:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
-		Recorder: store,
-		Provider: store,
+		APIKey:              apiKey,
+		Endpoint:            env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
+		Model:               env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
+		EmbeddingEndpoint:   env("DASHSCOPE_EMBEDDING_ENDPOINT", model.DefaultDashScopeEmbeddingEndpoint),
+		EmbeddingModel:      env("SCRIPT_AGENT_EMBEDDING_MODEL", "text-embedding-v4"),
+		EmbeddingDimensions: envInt("SCRIPT_AGENT_EMBEDDING_DIMENSIONS", 1024),
+		Recorder:            store,
+		Provider:            store,
 	})
 }
 

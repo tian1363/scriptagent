@@ -47,6 +47,27 @@ type Product struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type ProductChunk struct {
+	ID             string    `json:"id"`
+	ProductID      string    `json:"product_id"`
+	ChunkIndex     int       `json:"chunk_index"`
+	Heading        string    `json:"heading"`
+	Content        string    `json:"content"`
+	Embedding      []float64 `json:"-"`
+	EmbeddingModel string    `json:"embedding_model"`
+	EmbeddingDim   int       `json:"embedding_dim"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type ProductChunkInput struct {
+	ChunkIndex     int
+	Heading        string
+	Content        string
+	Embedding      []float64
+	EmbeddingModel string
+	EmbeddingDim   int
+}
+
 type CreateJobInput struct {
 	Title             string
 	VideoPath         string

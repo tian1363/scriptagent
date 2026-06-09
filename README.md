@@ -45,6 +45,8 @@ You can configure Qwen from the app UI at `配置 -> 模型配置`. For server-l
 export DASHSCOPE_API_KEY="sk-your-key"
 export SCRIPT_AGENT_MODEL="qwen3.6-plus"
 export SCRIPT_AGENT_VIDEO_FPS="2"
+export SCRIPT_AGENT_EMBEDDING_MODEL="text-embedding-v4"
+export SCRIPT_AGENT_EMBEDDING_DIMENSIONS="1024"
 go run ./cmd/server
 ```
 
@@ -59,6 +61,8 @@ The Qwen implementation sends local videos as Base64 data URLs. If a video would
 ```bash
 export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
 ```
+
+Product Markdown retrieval uses embeddings for long documents. ScriptAgent stores product chunks in SQLite and uses DashScope embeddings for semantic Top-K retrieval; if embedding fails, it falls back to local keyword section matching.
 
 ## Configure CreatiBI Publishing
 

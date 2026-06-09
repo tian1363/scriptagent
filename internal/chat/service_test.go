@@ -52,3 +52,25 @@ func TestSelectProductMarkdownContextPrefersRelevantSections(t *testing.T) {
 		t.Fatal("expected relevant gameplay section")
 	}
 }
+
+func TestBuildEmbeddingSectionsSplitsLongMarkdown(t *testing.T) {
+	content := "# 概览\n" + strings.Repeat("这一段用于测试分块。\n\n", 120)
+	sections := buildEmbeddingSections(content)
+	if len(sections) < 2 {
+		t.Fatalf("expected long markdown to split into multiple chunks, got %d", len(sections))
+	}
+	if sections[0].Order != 0 || sections[1].Order != 1 {
+		t.Fatalf("unexpected section order: %+v", sections[:2])
+	}
+}
+
+func TestCosineSimilarity(t *testing.T) {
+	same := cosineSimilarity([]float64{1, 0}, []float64{1, 0})
+	if same < 0.99 {
+		t.Fatalf("expected same vectors to be close to 1, got %f", same)
+	}
+	orthogonal := cosineSimilarity([]float64{1, 0}, []float64{0, 1})
+	if orthogonal != 0 {
+		t.Fatalf("expected orthogonal vectors to be 0, got %f", orthogonal)
+	}
+}

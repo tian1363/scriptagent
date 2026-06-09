@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -64,7 +65,7 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	messages = append(messages, *userMessage)
 
 	summary := s.refreshSummary(ctx, conversationID, conversation, messages)
-	productContext, err := s.productContext(productID, content)
+	productContext, err := s.productContext(ctx, conversationID, productID, content)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (s *Service) refreshSummary(ctx context.Context, conversationID string, con
 	return summary
 }
 
-func (s *Service) productContext(productID, query string) (string, error) {
+func (s *Service) productContext(ctx context.Context, conversationID, productID, query string) (string, error) {
 	productID = strings.TrimSpace(productID)
 	if productID == "" {
 		return "", nil
@@ -151,8 +152,117 @@ func (s *Service) productContext(productID, query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read product Markdown: %w", err)
 	}
-	selected := selectProductMarkdownContext(string(content), query)
+	markdown := strings.TrimSpace(string(content))
+	if len([]rune(markdown)) <= maxProductContextChars {
+		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, markdown), nil
+	}
+	if semantic, err := s.semanticProductContext(ctx, conversationID, *product, markdown, query); err == nil && strings.TrimSpace(semantic) != "" {
+		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, semantic), nil
+	}
+	selected := selectProductMarkdownContext(markdown, query)
 	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), nil
+}
+
+func (s *Service) semanticProductContext(ctx context.Context, conversationID string, product jobs.Product, markdown, query string) (string, error) {
+	chunks, err := s.ensureProductEmbeddings(ctx, product, markdown)
+	if err != nil {
+		return "", err
+	}
+	if len(chunks) == 0 {
+		return "", errors.New("product has no embedded chunks")
+	}
+	queryEmbedding, err := s.client.EmbedDetailed(ctx, model.CallContext{
+		Scope: "chat",
+		RefID: conversationID,
+		Step:  "product_embed_query",
+	}, []string{query}, "query")
+	if err != nil {
+		return "", err
+	}
+	if len(queryEmbedding.Vectors) == 0 {
+		return "", errors.New("query embedding is empty")
+	}
+	queryVector := queryEmbedding.Vectors[0].Vector
+	scored := make([]scoredProductChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		score := cosineSimilarity(queryVector, chunk.Embedding)
+		if score > 0 {
+			scored = append(scored, scoredProductChunk{Chunk: chunk, Score: score})
+		}
+	}
+	if len(scored) == 0 {
+		return "", errors.New("no relevant product chunks")
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].Score == scored[j].Score {
+			return scored[i].Chunk.ChunkIndex < scored[j].Chunk.ChunkIndex
+		}
+		return scored[i].Score > scored[j].Score
+	})
+	if len(scored) > 5 {
+		scored = scored[:5]
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].Chunk.ChunkIndex < scored[j].Chunk.ChunkIndex
+	})
+
+	lines := []string{"以下为 embedding 语义检索出的产品 Markdown Top-K 相关章节："}
+	for _, item := range scored {
+		lines = append(lines, "", fmt.Sprintf("[相似度 %.3f] %s", item.Score, item.Chunk.Heading), item.Chunk.Content)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+}
+
+func (s *Service) ensureProductEmbeddings(ctx context.Context, product jobs.Product, markdown string) ([]jobs.ProductChunk, error) {
+	existing, err := s.store.ListProductChunks(product.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		return existing, nil
+	}
+	sections := buildEmbeddingSections(markdown)
+	if len(sections) == 0 {
+		return nil, errors.New("product Markdown has no chunks")
+	}
+	inputs := []jobs.ProductChunkInput{}
+	for start := 0; start < len(sections); start += 10 {
+		end := min(start+10, len(sections))
+		texts := make([]string, 0, end-start)
+		for _, section := range sections[start:end] {
+			texts = append(texts, section.Content)
+		}
+		result, err := s.client.EmbedDetailed(ctx, model.CallContext{
+			Scope: "product",
+			RefID: product.ID,
+			Step:  "product_embed_index",
+		}, texts, "document")
+		if err != nil {
+			return nil, err
+		}
+		vectorsByIndex := map[int][]float64{}
+		for _, vector := range result.Vectors {
+			vectorsByIndex[vector.Index] = vector.Vector
+		}
+		for batchIndex, section := range sections[start:end] {
+			vector := vectorsByIndex[batchIndex]
+			if len(vector) == 0 {
+				return nil, errors.New("embedding response missing vector")
+			}
+			inputs = append(inputs, jobs.ProductChunkInput{
+				ChunkIndex:     section.Order,
+				Heading:        section.Title,
+				Content:        section.Content,
+				Embedding:      vector,
+				EmbeddingModel: result.Model,
+				EmbeddingDim:   len(vector),
+			})
+		}
+	}
+	if err := s.store.ReplaceProductChunks(product.ID, inputs); err != nil {
+		return nil, err
+	}
+	return s.store.ListProductChunks(product.ID)
 }
 
 func chatPrompt(messages []jobs.ChatMessage, summary, productContext string) string {
@@ -221,6 +331,94 @@ type markdownSection struct {
 	Content string
 	Score   int
 	Order   int
+}
+
+type scoredProductChunk struct {
+	Chunk jobs.ProductChunk
+	Score float64
+}
+
+func buildEmbeddingSections(content string) []markdownSection {
+	sections := splitMarkdownSections(content)
+	result := []markdownSection{}
+	for _, section := range sections {
+		for _, chunk := range splitSectionForEmbedding(section) {
+			chunk.Order = len(result)
+			result = append(result, chunk)
+		}
+	}
+	return result
+}
+
+func splitSectionForEmbedding(section markdownSection) []markdownSection {
+	const maxChunkChars = 1200
+	const minChunkChars = 280
+	content := strings.TrimSpace(section.Content)
+	if len([]rune(content)) <= maxChunkChars {
+		return []markdownSection{{Title: section.Title, Content: content}}
+	}
+	paragraphs := strings.Split(content, "\n\n")
+	chunks := []markdownSection{}
+	current := []string{}
+	currentLen := 0
+	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			continue
+		}
+		if len([]rune(paragraph)) > maxChunkChars {
+			if len(current) > 0 {
+				chunks = append(chunks, markdownSection{Title: section.Title, Content: strings.Join(current, "\n\n")})
+				current = []string{}
+				currentLen = 0
+			}
+			for _, part := range splitRunes(paragraph, maxChunkChars) {
+				chunks = append(chunks, markdownSection{Title: section.Title, Content: part})
+			}
+			continue
+		}
+		paragraphLen := len([]rune(paragraph))
+		if currentLen+paragraphLen > maxChunkChars && currentLen >= minChunkChars {
+			chunks = append(chunks, markdownSection{Title: section.Title, Content: strings.Join(current, "\n\n")})
+			current = []string{}
+			currentLen = 0
+		}
+		current = append(current, paragraph)
+		currentLen += paragraphLen
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, markdownSection{Title: section.Title, Content: strings.Join(current, "\n\n")})
+	}
+	return chunks
+}
+
+func splitRunes(value string, limit int) []string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return []string{string(runes)}
+	}
+	parts := []string{}
+	for start := 0; start < len(runes); start += limit {
+		end := min(start+limit, len(runes))
+		parts = append(parts, string(runes[start:end]))
+	}
+	return parts
+}
+
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, normA, normB float64
+	for index := range a {
+		dot += a[index] * b[index]
+		normA += a[index] * a[index]
+		normB += b[index] * b[index]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func selectProductMarkdownContext(content, query string) string {

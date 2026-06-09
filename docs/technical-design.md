@@ -446,7 +446,10 @@ POST /api/chats/{id}/messages
 - Prompt 上下文按“系统角色 -> 长期会话摘要 -> 产品资料相关章节 -> 最近 12 条消息 -> 最后一条用户问题”的顺序组织。
 - 当会话消息超过阈值时，后端调用模型生成长期会话摘要，并保存到 `chat_conversations.summary`。
 - 摘要只压缩上次摘要之后、且不属于最近尾部窗口的旧消息；摘要失败不阻断本轮正常回复。
-- 产品 Markdown 短文档直接注入；长文档按 Markdown 标题切块，并用当前用户问题进行关键词评分，只注入相关章节。
+- 产品 Markdown 短文档直接注入；长文档优先使用 embedding + Top-K 语义检索，只注入相关 chunk。
+- 产品 Markdown 首次参与语义检索时，后端按 Markdown 标题和段落切块，调用 DashScope `text-embedding-v4` 建索引，并把向量保存到 `product_chunks`。
+- 本轮用户问题会单独生成 query embedding，后端在当前产品 chunks 内计算 cosine similarity，默认取 Top-K 相关片段。
+- embedding 调用失败、索引为空或检索无结果时，系统回退到本地关键词章节筛选。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 
@@ -484,6 +487,18 @@ CREATE TABLE products (
   md_name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE product_chunks (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  heading TEXT,
+  content TEXT NOT NULL,
+  embedding_json TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  embedding_dim INTEGER NOT NULL,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE chat_conversations (
@@ -542,6 +557,9 @@ SCRIPT_AGENT_MODEL=qwen3.6-plus
 SCRIPT_AGENT_VIDEO_FPS=2
 SCRIPT_AGENT_MODE=auto
 SCRIPT_AGENT_MAX_DATA_URI_MB=20
+SCRIPT_AGENT_EMBEDDING_MODEL=text-embedding-v4
+SCRIPT_AGENT_EMBEDDING_DIMENSIONS=1024
+DASHSCOPE_EMBEDDING_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi

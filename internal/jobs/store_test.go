@@ -38,6 +38,46 @@ func TestStoreProducts(t *testing.T) {
 	}
 }
 
+func TestStoreProductChunks(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	product, err := store.CreateProduct(CreateProductInput{
+		Title:  "测试产品",
+		MDPath: "/tmp/product.md",
+		MDName: "product.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceProductChunks(product.ID, []ProductChunkInput{
+		{
+			ChunkIndex:     0,
+			Heading:        "玩法",
+			Content:        "三消排序",
+			Embedding:      []float64{0.1, 0.2, 0.3},
+			EmbeddingModel: "text-embedding-v4",
+			EmbeddingDim:   3,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	chunks, err := store.ListProductChunks(product.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(chunks))
+	}
+	if chunks[0].Heading != "玩法" || chunks[0].EmbeddingDim != 3 || len(chunks[0].Embedding) != 3 {
+		t.Fatalf("unexpected chunk: %+v", chunks[0])
+	}
+}
+
 func TestStoreModelRuntimeConfig(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

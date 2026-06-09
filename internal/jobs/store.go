@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -141,6 +142,19 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_chunks (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  heading TEXT,
+  content TEXT NOT NULL,
+  embedding_json TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  embedding_dim INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS model_settings (
   id TEXT PRIMARY KEY,
   api_key TEXT,
@@ -150,6 +164,7 @@ CREATE TABLE IF NOT EXISTS model_settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
+CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_id, chunk_index);
 `)
 	if err != nil {
 		return err
@@ -219,6 +234,59 @@ func (s *Store) GetProduct(id string) (*Product, error) {
 	return scanProduct(s.db.QueryRow(`
 SELECT id, title, md_path, md_name, created_at, updated_at
 FROM products WHERE id = ?`, id))
+}
+
+func (s *Store) ReplaceProductChunks(productID string, chunks []ProductChunkInput) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM product_chunks WHERE product_id = ?`, productID); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, chunk := range chunks {
+		embeddingJSON, err := json.Marshal(chunk.Embedding)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+INSERT INTO product_chunks (
+  id, product_id, chunk_index, heading, content, embedding_json, embedding_model, embedding_dim, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			newID(), productID, chunk.ChunkIndex, chunk.Heading, chunk.Content, string(embeddingJSON),
+			chunk.EmbeddingModel, chunk.EmbeddingDim, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListProductChunks(productID string) ([]ProductChunk, error) {
+	rows, err := s.db.Query(`
+SELECT id, product_id, chunk_index, heading, content, embedding_json, embedding_model, embedding_dim, created_at
+FROM product_chunks
+WHERE product_id = ?
+ORDER BY chunk_index ASC`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []ProductChunk{}
+	for rows.Next() {
+		chunk, err := scanProductChunk(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *chunk)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error) {
@@ -676,6 +744,22 @@ func scanProduct(row scanner) (*Product, error) {
 	product.CreatedAt = parseTime(createdAt)
 	product.UpdatedAt = parseTime(updatedAt)
 	return &product, nil
+}
+
+func scanProductChunk(row scanner) (*ProductChunk, error) {
+	var chunk ProductChunk
+	var embeddingJSON, createdAt string
+	if err := row.Scan(
+		&chunk.ID, &chunk.ProductID, &chunk.ChunkIndex, &chunk.Heading, &chunk.Content,
+		&embeddingJSON, &chunk.EmbeddingModel, &chunk.EmbeddingDim, &createdAt,
+	); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(embeddingJSON), &chunk.Embedding); err != nil {
+		return nil, err
+	}
+	chunk.CreatedAt = parseTime(createdAt)
+	return &chunk, nil
 }
 
 func scanChatMessage(row scanner) (*ChatMessage, error) {
