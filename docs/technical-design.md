@@ -443,12 +443,16 @@ POST /api/chats/{id}/messages
 - `product_id` 只影响本次消息的模型上下文，不强制绑定整个会话。
 - 未传 `product_id` 时执行普通通用对话。
 - 模型调用日志中记录的是脱敏后的可见请求体，不记录 API Key。
+- Prompt 上下文按“系统角色 -> 长期会话摘要 -> 产品资料相关章节 -> 最近 12 条消息 -> 最后一条用户问题”的顺序组织。
+- 当会话消息超过阈值时，后端调用模型生成长期会话摘要，并保存到 `chat_conversations.summary`。
+- 摘要只压缩上次摘要之后、且不属于最近尾部窗口的旧消息；摘要失败不阻断本轮正常回复。
+- 产品 Markdown 短文档直接注入；长文档按 Markdown 标题切块，并用当前用户问题进行关键词评分，只注入相关章节。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 
 ## 11. 数据库设计
 
-第一版使用单表即可。
+第一版使用 SQLite，多表保存任务、产品、模型配置、对话和模型调用记录。
 
 ```sql
 CREATE TABLE jobs (
@@ -480,6 +484,23 @@ CREATE TABLE products (
   md_name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE chat_conversations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  summary TEXT,
+  summary_message_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE chat_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE model_settings (

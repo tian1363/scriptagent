@@ -88,10 +88,12 @@ type ScriptResult struct {
 }
 
 type ChatConversation struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	Title            string    `json:"title"`
+	Summary          string    `json:"summary,omitempty"`
+	SummaryMessageID string    `json:"summary_message_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type ChatMessage struct {

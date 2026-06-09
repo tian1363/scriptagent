@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
+  summary TEXT,
+  summary_message_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -149,6 +151,15 @@ CREATE TABLE IF NOT EXISTS model_settings (
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 `)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "summary", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "summary_message_id", "TEXT"); err != nil {
+		return err
+	}
 	return err
 }
 
@@ -461,7 +472,7 @@ VALUES (?, ?, ?, ?)`,
 
 func (s *Store) ListChatConversations() ([]ChatConversation, error) {
 	rows, err := s.db.Query(`
-SELECT id, title, created_at, updated_at
+SELECT id, title, summary, summary_message_id, created_at, updated_at
 FROM chat_conversations
 ORDER BY updated_at DESC`)
 	if err != nil {
@@ -482,7 +493,7 @@ ORDER BY updated_at DESC`)
 
 func (s *Store) GetChatThread(id string) (*ChatThread, error) {
 	conversation, err := scanChatConversation(s.db.QueryRow(`
-SELECT id, title, created_at, updated_at
+SELECT id, title, summary, summary_message_id, created_at, updated_at
 FROM chat_conversations WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
@@ -514,6 +525,21 @@ ORDER BY created_at ASC`, conversationID)
 		result = append(result, *message)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) SaveChatSummary(conversationID, summary, summaryMessageID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	res, err := s.db.Exec(`
+UPDATE chat_conversations
+SET summary = ?, summary_message_id = ?
+WHERE id = ?`,
+		summary, summaryMessageID, conversationID)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
 }
 
 func (s *Store) AddChatMessage(conversationID, role, content string) (*ChatMessage, error) {
@@ -630,9 +656,12 @@ func scanJob(row scanner) (*Job, error) {
 func scanChatConversation(row scanner) (*ChatConversation, error) {
 	var conversation ChatConversation
 	var createdAt, updatedAt string
-	if err := row.Scan(&conversation.ID, &conversation.Title, &createdAt, &updatedAt); err != nil {
+	var summary, summaryMessageID sql.NullString
+	if err := row.Scan(&conversation.ID, &conversation.Title, &summary, &summaryMessageID, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
+	conversation.Summary = summary.String
+	conversation.SummaryMessageID = summaryMessageID.String
 	conversation.CreatedAt = parseTime(createdAt)
 	conversation.UpdatedAt = parseTime(updatedAt)
 	return &conversation, nil
