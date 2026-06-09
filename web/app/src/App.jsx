@@ -84,6 +84,38 @@ function defaultFissionDirection(index) {
   return fissionDirections[index % fissionDirections.length]?.value || "";
 }
 
+function hashText(text = "") {
+  return Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+function productCoverVariant(product) {
+  return hashText(`${product?.id || ""}${product?.title || ""}`) % 5;
+}
+
+function productInitial(title = "") {
+  return title.trim().slice(0, 1).toUpperCase() || "S";
+}
+
+function buildProductStats(products, jobs) {
+  const result = new Map();
+  products.forEach((product) => {
+    const matchedJobs = jobs.filter((job) => job.product_md_name === product.md_name);
+    const usableJobs = matchedJobs.filter((job) => job.status !== "failed");
+    const scriptCount = usableJobs.reduce((total, job) => total + 1 + Number(job.fission_count || 0), 0);
+    const latestJob = matchedJobs.reduce((latest, job) => {
+      if (!latest) return job;
+      return new Date(job.updated_at).getTime() > new Date(latest.updated_at).getTime() ? job : latest;
+    }, null);
+    result.set(product.id, {
+      taskCount: matchedJobs.length,
+      scriptCount,
+      latestJob,
+      latestAt: latestJob?.updated_at || "",
+    });
+  });
+  return result;
+}
+
 function typingStep(length) {
   if (length > 1800) return 8;
   if (length > 900) return 5;
@@ -114,7 +146,7 @@ const chatQuickTasks = [
 ];
 
 export function App() {
-  const [view, setView] = useState("jobs");
+  const [view, setView] = useState("products");
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [activeTab, setActiveTab] = useState("run_log");
@@ -434,6 +466,12 @@ export function App() {
   const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
   const selectedCall = modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
+  const productStats = useMemo(() => buildProductStats(products, jobs), [products, jobs]);
+
+  function handleStartProductJob(productId) {
+    setSelectedProductId(productId);
+    setView("jobs");
+  }
 
   return (
     <div className="app-shell">
@@ -470,12 +508,9 @@ export function App() {
         </button>
       </header>
 
-      <main className="workspace">
+      <main className={`workspace ${view === "products" ? "workspace-home" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
-        ) : null}
-        {view === "products" ? (
-          <ProductsSidebar products={products} selectedProductId={selectedProductId} onSelect={setSelectedProductId} />
         ) : null}
         {view === "chat" ? (
           <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={handleNewChat} />
@@ -485,7 +520,7 @@ export function App() {
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
-        <section className="main-pane">
+        <section className={`main-pane ${view === "products" ? "main-pane-home" : ""}`}>
           {view === "jobs" ? (
             <JobsWorkspace
               selectedJob={selectedJob}
@@ -497,6 +532,7 @@ export function App() {
               canPublish={canPublish}
               canRetry={canRetry}
               products={products}
+              initialProductId={selectedProductId}
               error={error}
               onCreate={handleCreate}
               onPublish={handlePublish}
@@ -511,7 +547,10 @@ export function App() {
               productPreview={productPreview}
               isLoadingProductPreview={isLoadingProductPreview}
               isCreatingProduct={isCreatingProduct}
+              productStats={productStats}
               error={error}
+              onSelect={setSelectedProductId}
+              onStartJob={handleStartProductJob}
               onCreate={handleCreateProduct}
             />
           ) : null}
@@ -572,35 +611,6 @@ function JobsSidebar({ jobs, selectedJob, onSelect }) {
           ))
         ) : (
           <EmptyState text="暂无生成记录" compact />
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function ProductsSidebar({ products, selectedProductId, onSelect }) {
-  return (
-    <aside className="history-pane">
-      <div className="pane-heading">
-        <Package size={16} />
-        <span>产品资料库</span>
-      </div>
-      <div className="history-list">
-        {products.length ? (
-          products.map((product) => (
-            <button
-              key={product.id}
-              className={`history-item ${selectedProductId === product.id ? "active" : ""}`}
-              type="button"
-              onClick={() => onSelect(product.id)}
-            >
-              <span className="history-title">{product.title}</span>
-              <span className="history-meta">{product.md_name}</span>
-              <span className="history-meta">{formatTime(product.updated_at)}</span>
-            </button>
-          ))
-        ) : (
-          <EmptyState text="暂无产品" compact />
         )}
       </div>
     </aside>
@@ -692,7 +702,11 @@ function CallsSidebar({ calls, selectedCallId, onSelect }) {
 
 function JobsWorkspace(props) {
   const [fissionCount, setFissionCount] = useState(5);
-  const [selectedProductID, setSelectedProductID] = useState("");
+  const [selectedProductID, setSelectedProductID] = useState(props.initialProductId || "");
+
+  useEffect(() => {
+    setSelectedProductID(props.initialProductId || "");
+  }, [props.initialProductId]);
 
   function handleFissionCountChange(event) {
     const next = Number.parseInt(event.target.value, 10);
@@ -945,6 +959,19 @@ function ChatMessageBubble({ message, isTyping = false }) {
 
 function FissionDirectionPicker({ count }) {
   const rows = Array.from({ length: count }, (_, index) => index);
+  const [directions, setDirections] = useState(() => rows.map((index) => defaultFissionDirection(index)));
+
+  useEffect(() => {
+    setDirections((current) => rows.map((index) => current[index] || defaultFissionDirection(index)));
+  }, [count]);
+
+  function updateDirection(index, value) {
+    setDirections((current) => {
+      const next = [...current];
+      next[index] = value;
+      return next;
+    });
+  }
 
   return (
     <div className="direction-panel">
@@ -954,83 +981,194 @@ function FissionDirectionPicker({ count }) {
       </div>
       <div className="direction-list">
         {rows.map((index) => (
-          <label key={index} className="direction-row">
-            <span className="direction-index">{String(index + 1).padStart(2, "0")}</span>
-            <span className="direction-title">第 {index + 1} 条</span>
-            <select name="fission_directions" defaultValue={defaultFissionDirection(index)} required>
+          <section key={index} className="direction-card-row">
+            <input type="hidden" name="fission_directions" value={directions[index] || defaultFissionDirection(index)} />
+            <div className="direction-card-title">
+              <span className="direction-index">{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <strong>第 {index + 1} 条裂变脚本</strong>
+                <small>{directions[index] || defaultFissionDirection(index)}</small>
+              </div>
+            </div>
+            <div className="direction-option-board">
               {fissionDirectionGroups.map((group) => (
-                <optgroup key={group.layer} label={group.layer}>
-                  {group.items.map((item) => {
-                    const value = `${group.layer}-${item}`;
-                    return (
-                      <option key={value} value={value}>
-                        {item}
-                      </option>
-                    );
-                  })}
-                </optgroup>
+                <div key={group.layer} className="direction-option-group">
+                  <span>{group.layer}</span>
+                  <div>
+                    {group.items.map((item) => {
+                      const value = `${group.layer}-${item}`;
+                      const active = (directions[index] || defaultFissionDirection(index)) === value;
+                      return (
+                        <button key={value} className={active ? "active" : ""} type="button" onClick={() => updateDirection(index, value)}>
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
-            </select>
-          </label>
+            </div>
+          </section>
         ))}
       </div>
     </div>
   );
 }
 
-function ProductsWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, error, onCreate }) {
-  const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
+function ProductCover({ product, compact = false }) {
+  const variant = productCoverVariant(product);
   return (
-    <>
-      <section className="composer product-composer">
+    <div className={`product-cover cover-${variant} ${compact ? "compact" : ""}`}>
+      <div className="cover-noise" />
+      <div className="cover-frame">
+        <span>{productInitial(product?.title)}</span>
+        <strong>{product?.title || "新产品"}</strong>
+      </div>
+      <div className="cover-strip">
+        <i />
+        <i />
+        <i />
+      </div>
+    </div>
+  );
+}
+
+function ProductAssetCard({ product, stats, isActive, onSelect, onStartJob }) {
+  return (
+    <article className={`product-asset-card ${isActive ? "active" : ""}`} onClick={() => onSelect(product.id)}>
+      <ProductCover product={product} />
+      <div className="asset-card-body">
         <div>
-          <h1>产品资料库</h1>
-          <p>统一维护产品和产品 Markdown。创建脚本任务时可直接选择已有产品。</p>
+          <h3>{product.title}</h3>
+          <p>{product.md_name}</p>
         </div>
-        <form className="task-form" onSubmit={onCreate}>
-          <div className="form-section split-section">
+        <div className="asset-metrics">
+          <span>
+            <strong>{stats?.scriptCount || 0}</strong>
+            脚本
+          </span>
+          <span>
+            <strong>{stats?.taskCount || 0}</strong>
+            任务
+          </span>
+        </div>
+        <div className="asset-card-footer">
+          <small>{stats?.latestAt ? `最近生成 ${formatTime(stats.latestAt)}` : `更新 ${formatTime(product.updated_at)}`}</small>
+          <button
+            className="primary-button compact-action"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onStartJob(product.id);
+            }}
+          >
+            <Play size={15} />
+            <span>生成新脚本</span>
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ProductsWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, productStats, error, onSelect, onStartJob, onCreate }) {
+  const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
+  const selectedStats = selectedProduct ? productStats.get(selectedProduct.id) : null;
+  const totalScripts = Array.from(productStats.values()).reduce((total, stats) => total + (stats.scriptCount || 0), 0);
+  return (
+    <section className="product-home">
+      <div className="product-home-hero">
+        <div>
+          <span className="eyebrow">产品资产库</span>
+          <h1>先把产品放进来，再批量裂变脚本</h1>
+          <p>每个产品都对应一份 Markdown 资料、历史任务和可复用脚本。运营同学进来先看到自己的产品，而不是一张空表单。</p>
+        </div>
+        <div className="home-stats">
+          <div>
+            <strong>{products.length}</strong>
+            <span>产品</span>
+          </div>
+          <div>
+            <strong>{totalScripts}</strong>
+            <span>脚本</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="product-home-grid">
+        <section className="asset-board">
+          <div>
+            <h2>我的产品</h2>
+            <p>选择一个产品查看资料，或直接生成新的复刻/裂变脚本。</p>
+          </div>
+          {products.length ? (
+            <div className="product-asset-grid">
+              {products.map((product) => (
+                <ProductAssetCard
+                  key={product.id}
+                  product={product}
+                  stats={productStats.get(product.id)}
+                  isActive={selectedProduct?.id === product.id}
+                  onSelect={onSelect}
+                  onStartJob={onStartJob}
+                />
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="暂无产品，先上传一份产品 Markdown" />
+          )}
+        </section>
+
+        <aside className="new-product-panel">
+          <div>
+            <h2>新增产品</h2>
+            <p>上传一份产品 Markdown，后续任务直接复用。</p>
+          </div>
+          <form className="task-form" onSubmit={onCreate}>
             <label>
               <span>产品名称</span>
-              <input name="title" type="text" placeholder="例如：无尽冬日 - 游戏信息总结" />
+              <input name="title" type="text" placeholder="例如：无尽冬日" />
             </label>
             <FileField name="product_md" label="产品 Markdown" accept=".md,.markdown,text/markdown" icon={<FileText size={16} />} required />
-          </div>
-          <div className="submit-row">
-            <div>
-              <span>保存产品</span>
-              <small>Markdown 会保存到本地资料库，后续任务可复用</small>
-            </div>
-            <button className="primary-button" type="submit" disabled={isCreatingProduct}>
+            <button className="primary-button wide-button" type="submit" disabled={isCreatingProduct}>
               {isCreatingProduct ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
-              <span>{isCreatingProduct ? "保存中" : "新增产品"}</span>
+              <span>{isCreatingProduct ? "保存中" : "保存产品"}</span>
             </button>
-          </div>
-        </form>
-        {error ? <div className="error-banner">{error}</div> : null}
-      </section>
+          </form>
+          {error ? <div className="error-banner">{error}</div> : null}
+        </aside>
+      </div>
 
-      <section className="result-pane">
-        <div className="result-header">
-          <div>
-            <h2>{selectedProduct?.title || "产品详情"}</h2>
-            <p>{selectedProduct ? `${selectedProduct.md_name} · ${formatTime(selectedProduct.updated_at)}` : "保存产品后可在这里查看详情。"}</p>
-          </div>
-          {selectedProduct ? <span className="status-pill success">可用于任务</span> : null}
-        </div>
+      <section className="product-dossier">
         {selectedProduct ? (
-          <div className="product-detail">
+          <>
+            <div className="dossier-summary">
+              <ProductCover product={selectedProduct} compact />
+              <div>
+                <span className="eyebrow">产品档案</span>
+                <h2>{selectedProduct.title}</h2>
+                <p>{selectedProduct.md_name} · 更新 {formatTime(selectedProduct.updated_at)}</p>
+              </div>
+              <div className="dossier-actions">
+                <span className="status-pill success">可用于任务</span>
+                <button className="secondary-button" type="button" onClick={() => onStartJob(selectedProduct.id)}>
+                  <Play size={15} />
+                  <span>生成新脚本</span>
+                </button>
+              </div>
+            </div>
             <div className="product-meta-grid">
               <div className="detail-row">
-                <span>产品 ID</span>
-                <strong>{selectedProduct.id}</strong>
+                <span>已生成脚本</span>
+                <strong>{selectedStats?.scriptCount || 0}</strong>
               </div>
               <div className="detail-row">
-                <span>Markdown 文件</span>
-                <strong>{selectedProduct.md_name}</strong>
+                <span>历史任务</span>
+                <strong>{selectedStats?.taskCount || 0}</strong>
               </div>
               <div className="detail-row">
-                <span>更新时间</span>
-                <strong>{formatTime(selectedProduct.updated_at)}</strong>
+                <span>最近生成</span>
+                <strong>{selectedStats?.latestAt ? formatTime(selectedStats.latestAt) : "-"}</strong>
               </div>
             </div>
             <section className="product-preview">
@@ -1048,12 +1186,12 @@ function ProductsWorkspace({ products, selectedProductId, productPreview, isLoad
                 <EmptyState text="暂无可预览内容" compact />
               )}
             </section>
-          </div>
+          </>
         ) : (
-          <EmptyState text="暂无产品详情" />
+          <EmptyState text="保存产品后可在这里查看档案" />
         )}
       </section>
-    </>
+    </section>
   );
 }
 
