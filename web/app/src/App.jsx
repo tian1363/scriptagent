@@ -169,6 +169,7 @@ export function App() {
   const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
   const [typingMessage, setTypingMessage] = useState(null);
   const [chatCitations, setChatCitations] = useState([]);
+  const [chatAgentSteps, setChatAgentSteps] = useState([]);
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
@@ -360,6 +361,7 @@ export function App() {
     setOptimisticChatMessages(null);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatAgentSteps([]);
     setIsChatThinking(false);
     setSelectedChat(await getChat(id));
   }
@@ -370,6 +372,7 @@ export function App() {
     setOptimisticChatMessages(null);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatAgentSteps([]);
     setIsChatThinking(false);
   }
 
@@ -382,6 +385,7 @@ export function App() {
     setIsChatThinking(true);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatAgentSteps([]);
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
       role: "user",
@@ -398,6 +402,7 @@ export function App() {
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
       setChatCitations(thread.citations || []);
+      setChatAgentSteps(thread.agent_steps || []);
       if (assistantMessage) {
         setOptimisticChatMessages(thread.messages.filter((message) => message.id !== assistantMessage.id));
         setTypingMessage({ ...assistantMessage, visible: "" });
@@ -560,6 +565,7 @@ export function App() {
               optimisticMessages={optimisticChatMessages}
               typingMessage={typingMessage}
               citations={chatCitations}
+              agentSteps={chatAgentSteps}
               isThinking={isChatThinking}
               draft={chatDraft}
               products={products}
@@ -827,7 +833,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
@@ -845,7 +851,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, i
         </div>
         <span className="status-pill neutral">
           <Bot size={13} />
-          非 ReAct 工作流
+          ReAct 工作流
         </span>
       </div>
       <div className="chat-context-bar">
@@ -868,6 +874,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, i
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>
+            {agentSteps?.length ? <AgentStepsPanel steps={agentSteps} /> : null}
             {citations?.length ? <CitationPanel citations={citations} /> : null}
             {messages.map((message) => (
               <ChatMessageBubble key={message.id} message={message} />
@@ -917,6 +924,40 @@ function ChatTaskStarter({ onSelect }) {
             <strong>{task.title}</strong>
             <span>{task.description}</span>
           </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentStepsPanel({ steps }) {
+  return (
+    <section className="agent-steps-panel">
+      <div className="section-heading">
+        <span>本轮 Agent 步骤</span>
+        <small>{steps.length} 步</small>
+      </div>
+      <div className="agent-step-list">
+        {steps.map((step) => (
+          <details key={`${step.index}-${step.kind}-${step.tool || "final"}`} className="agent-step-card">
+            <summary>
+              <span>{String(step.index).padStart(2, "0")}</span>
+              <strong>{step.kind === "tool" ? step.tool : "final"}</strong>
+              <small>{step.reason || (step.kind === "tool" ? "调用工具" : "最终回答")}</small>
+            </summary>
+            {step.input ? (
+              <div>
+                <b>输入</b>
+                <pre>{pretty(step.input)}</pre>
+              </div>
+            ) : null}
+            {step.observation ? (
+              <div>
+                <b>{step.error ? "错误" : "观察"}</b>
+                <pre>{step.observation}</pre>
+              </div>
+            ) : null}
+          </details>
         ))}
       </div>
     </section>

@@ -33,7 +33,7 @@ ScriptAgent 是一个用于生成 CreatiBI 分镜脚本的工作台型应用。�
 
 ## 4. Agent 类型与架构选择
 
-第一版采用单 Agent 工作流：
+当前采用“顺序脚本 Agent + ReAct 通用对话 Agent”并存：
 
 ```text
 ScriptAgent
@@ -48,7 +48,7 @@ ScriptAgent
 └── 用户确认后写入 CreatiBI
 ```
 
-选择单 Agent 工作流的原因：
+脚本任务仍保留顺序工作流的原因：
 
 - 当前流程顺序固定，不需要多个 Agent 自主协商。
 - 视频理解、结构提取、脚本生成可通过明确 Prompt 和 Schema 顺序执行。
@@ -56,9 +56,25 @@ ScriptAgent
 - 延迟和成本更低。
 - 更适合 Go 后端实现任务编排。
 
+通用对话升级为 ReAct 编排：
+
+```text
+用户消息
+  ↓
+ReAct Runner
+  ├── qwen3.6-plus 输出下一步 JSON 动作
+  ├── Tool: list_products
+  ├── Tool: retrieve_product_sections
+  ├── Tool: read_product_markdown
+  ├── Tool: call_skill
+  └── qwen3.6-plus 输出 final answer
+  ↓
+保存助手回复 + 返回 Agent steps / citations
+```
+
 后续只有在游戏、电商、审核、批处理、投放策略等能力显著复杂化时，才考虑升级为主控编排型 Multi-Agent。
 
-当前前端使用 React。当前 Agent 编排不是 ReAct（Reason + Act）框架，而是固定步骤的单 Agent 顺序工作流：视频理解 -> 复刻脚本 -> 裂变脚本 -> 用户确认发布。通用对话也是普通上下文对话，不执行工具行动循环；发送消息时可选产品库产品，后端读取对应 Markdown 并作为本次模型调用上下文注入。对话前端采用乐观消息展示，用户消息发送后立即上屏，等待模型期间展示思考状态，模型返回后用打字机效果渲染助手回复。
+当前前端使用 React。通用对话后端使用 ReAct（Reason + Act）循环，但前端只展示可审计的决策摘要、工具名、工具输入和工具观察，不展示或要求模型隐式逐字思维链。对话前端采用乐观消息展示，用户消息发送后立即上屏，等待模型期间展示思考状态，模型返回后用打字机效果渲染助手回复，并展示本轮 Agent 工具步骤。
 
 ## 5. 总体系统架构
 
@@ -445,21 +461,27 @@ POST /api/chats/{id}/messages
 `POST /api/chats/messages` 和 `POST /api/chats/{id}/messages` 使用 JSON：
 
 - `content`: 用户消息，必填。
-- `product_id`: 可选，产品库产品 ID。传入后，后端读取该产品 Markdown 并注入本次模型调用 prompt。
+- `product_id`: 可选，产品库产品 ID。传入后，ReAct Agent 可在需要产品资料时优先使用该产品调用检索工具。
 
 约束：
 
-- `product_id` 只影响本次消息的模型上下文，不强制绑定整个会话。
-- 未传 `product_id` 时执行普通通用对话。
+- `product_id` 只影响本次消息的 ReAct 工具默认产品，不强制绑定整个会话。
+- 未传 `product_id` 时仍执行 ReAct 通用对话；如果问题依赖产品资料，Agent 可先调用 `list_products`。
 - 模型调用日志中记录的是脱敏后的可见请求体，不记录 API Key。
-- Prompt 上下文按“系统角色 -> 长期会话摘要 -> 产品资料相关章节 -> 最近 12 条消息 -> 最后一条用户问题”的顺序组织。
+- ReAct Runner 要求模型每轮只输出一个严格 JSON 动作：`type=tool` 调用工具，或 `type=final` 输出最终答案。
+- ReAct 动作中的 `reason` 字段只保存可见决策摘要，不保存隐式逐字思维链。
+- Prompt 上下文按“系统角色 -> ReAct 协议 -> 长期会话摘要 -> 最近 12 条消息 -> 可用工具 -> 已执行步骤观察 -> 最后一条用户目标”的顺序组织。
 - 当会话消息超过阈值时，后端调用模型生成长期会话摘要，并保存到 `chat_conversations.summary`。
 - 摘要只压缩上次摘要之后、且不属于最近尾部窗口的旧消息；摘要失败不阻断本轮正常回复。
-- 产品 Markdown 短文档直接注入；长文档优先使用 embedding + Top-K 语义检索，只注入相关 chunk。
+- 产品 Markdown 不再默认注入每轮 prompt；Agent 需要产品事实时调用 `retrieve_product_sections` 或 `read_product_markdown`。
+- `retrieve_product_sections` 对长文档优先使用 embedding + Top-K 语义检索，只返回相关 chunk。
 - 产品 Markdown 首次参与语义检索时，后端按 Markdown 标题和段落切块，调用 DashScope `text-embedding-v4` 建索引，并把向量保存到 `product_chunks`。
 - 本轮用户问题会单独生成 query embedding，后端在当前产品 chunks 内计算 cosine similarity，默认取 Top-K 相关片段。
 - embedding 调用失败、索引为空或检索无结果时，系统回退到本地关键词章节筛选。
 - 通用对话响应包含 `citations`，用于前端展示“本轮引用”的产品章节。引用字段包括产品 ID、产品名、chunk ID、标题、摘要、相似度和来源。
+- 通用对话响应包含 `agent_steps`，用于前端展示本轮 ReAct 步骤。步骤字段包括序号、类型、可见决策摘要、工具名、工具输入、工具观察和错误信息。
+- 第一版 ReAct 工具为只读能力：`list_products`、`retrieve_product_sections`、`read_product_markdown`、`call_skill`。
+- `call_skill` 调用的是内置工作流/提示词模板，不执行外部命令或系统工具。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 

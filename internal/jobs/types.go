@@ -140,6 +140,17 @@ type ChatThread struct {
 	Conversation ChatConversation  `json:"conversation"`
 	Messages     []ChatMessage     `json:"messages"`
 	Citations    []ProductCitation `json:"citations,omitempty"`
+	AgentSteps   []AgentStep       `json:"agent_steps,omitempty"`
+}
+
+type AgentStep struct {
+	Index       int    `json:"index"`
+	Kind        string `json:"kind"`
+	Reason      string `json:"reason,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Input       string `json:"input,omitempty"`
+	Observation string `json:"observation,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type ModelCall struct {

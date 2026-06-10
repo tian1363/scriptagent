@@ -1420,6 +1420,100 @@ textarea:focus {
   background: var(--cbi-bg-1);
 }
 
+.agent-steps-panel {
+  max-width: 920px;
+  display: grid;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
+  border: 1px solid rgba(30, 31, 33, 0.08);
+  border-radius: var(--cbi-radius-sm);
+  background: #fffaf5;
+}
+
+.agent-steps-panel .section-heading {
+  padding: 0 var(--cbi-space-1);
+}
+
+.agent-step-list {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-step-card {
+  border: 1px solid rgba(30, 31, 33, 0.08);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+  overflow: hidden;
+}
+
+.agent-step-card summary {
+  display: grid;
+  grid-template-columns: 34px minmax(80px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-step-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-step-card summary span {
+  width: 28px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cbi-radius-sm);
+  background: rgba(255, 118, 71, 0.12);
+  color: #9b3f22;
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-step-card summary strong {
+  color: var(--cbi-fg-1);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.agent-step-card summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-step-card div {
+  display: grid;
+  gap: 4px;
+  padding: 0 var(--cbi-space-1) var(--cbi-space-1);
+}
+
+.agent-step-card b {
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.agent-step-card pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--cbi-space-1);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-2);
+  color: var(--cbi-fg-1);
+  font-family: var(--cbi-font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .citation-panel {
   max-width: 920px;
   display: grid;

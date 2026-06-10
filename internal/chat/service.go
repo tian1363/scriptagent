@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
+	"github.com/tian1363/scriptagent/internal/reactagent"
 )
 
 const (
@@ -23,12 +25,13 @@ const (
 )
 
 type Service struct {
-	store  *jobs.Store
-	client *model.DashScopeClient
+	store       *jobs.Store
+	client      *model.DashScopeClient
+	reactRunner *reactagent.Runner
 }
 
 func NewService(store *jobs.Store, client *model.DashScopeClient) *Service {
-	return &Service{store: store, client: client}
+	return &Service{store: store, client: client, reactRunner: reactagent.New(client, 6)}
 }
 
 func (s *Service) Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error) {
@@ -65,20 +68,18 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	messages = append(messages, *userMessage)
 
 	summary := s.refreshSummary(ctx, conversationID, conversation, messages)
-	productContext, citations, err := s.productContext(ctx, conversationID, productID, content)
+	citations := []jobs.ProductCitation{}
+	reactResult, err := s.reactRunner.Run(ctx, reactagent.RunInput{
+		Scope:         "chat",
+		RefID:         conversationID,
+		Goal:          content,
+		ContextPrompt: reactChatContextPrompt(messages, summary, productID),
+		Tools:         s.reactTools(conversationID, productID, content, &citations),
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	reply, err := s.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "chat",
-		RefID: conversationID,
-		Step:  "chat_reply",
-	}, []model.ContentItem{{Text: chatPrompt(messages, summary, productContext)}})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := s.store.AddChatMessage(conversationID, "assistant", reply.Text); err != nil {
+	if _, err := s.store.AddChatMessage(conversationID, "assistant", reactResult.Answer); err != nil {
 		return nil, err
 	}
 	thread, err := s.store.GetChatThread(conversationID)
@@ -89,6 +90,7 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 		thread.Conversation.Title = conversation.Title
 	}
 	thread.Citations = citations
+	thread.AgentSteps = toJobAgentSteps(reactResult.Steps)
 	return thread, nil
 }
 
@@ -170,6 +172,111 @@ func (s *Service) productContext(ctx context.Context, conversationID, productID,
 	}
 	selected, fallbackCitations := selectProductMarkdownContext(markdown, query, *product)
 	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), fallbackCitations, nil
+}
+
+func (s *Service) reactTools(conversationID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
+	return []reactagent.Tool{
+		{
+			Name:        "list_products",
+			Description: "列出产品库中的产品，适合在用户没有明确产品时先确认可用产品。",
+			InputSchema: `{}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				products, err := s.store.ListProducts()
+				if err != nil {
+					return "", err
+				}
+				rows := make([]map[string]string, 0, len(products))
+				for _, product := range products {
+					rows = append(rows, map[string]string{
+						"id":         product.ID,
+						"title":      product.Title,
+						"md_name":    product.MDName,
+						"updated_at": product.UpdatedAt.Format("2006-01-02 15:04:05"),
+					})
+				}
+				data, err := json.MarshalIndent(rows, "", "  ")
+				if err != nil {
+					return "", err
+				}
+				if len(rows) == 0 {
+					return "产品库为空。", nil
+				}
+				return string(data), nil
+			},
+		},
+		{
+			Name:        "retrieve_product_sections",
+			Description: "按当前问题从产品 Markdown 中检索相关章节。适合回答产品卖点、玩法、受众、脚本方向等问题。",
+			InputSchema: `{"product_id":"可选；为空时使用当前已选产品","query":"检索问题；为空时使用用户最后问题"}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var input struct {
+					ProductID string `json:"product_id"`
+					Query     string `json:"query"`
+				}
+				_ = json.Unmarshal(raw, &input)
+				productID := strings.TrimSpace(input.ProductID)
+				if productID == "" {
+					productID = selectedProductID
+				}
+				query := strings.TrimSpace(input.Query)
+				if query == "" {
+					query = userQuery
+				}
+				contextText, foundCitations, err := s.productContext(ctx, conversationID, productID, query)
+				if err != nil {
+					return "", err
+				}
+				if citations != nil {
+					*citations = append(*citations, foundCitations...)
+				}
+				return contextText, nil
+			},
+		},
+		{
+			Name:        "read_product_markdown",
+			Description: "读取某个产品 Markdown 的开头摘要。适合需要先了解产品资料整体结构时使用。",
+			InputSchema: `{"product_id":"可选；为空时使用当前已选产品","max_chars":"可选数字，默认 4000"}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var input struct {
+					ProductID string `json:"product_id"`
+					MaxChars  int    `json:"max_chars"`
+				}
+				_ = json.Unmarshal(raw, &input)
+				productID := strings.TrimSpace(input.ProductID)
+				if productID == "" {
+					productID = selectedProductID
+				}
+				if productID == "" {
+					return "", errors.New("product_id is required when no product is selected")
+				}
+				product, err := s.store.GetProduct(productID)
+				if err != nil {
+					return "", err
+				}
+				content, err := os.ReadFile(product.MDPath)
+				if err != nil {
+					return "", err
+				}
+				limit := input.MaxChars
+				if limit <= 0 || limit > 8000 {
+					limit = 4000
+				}
+				return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, truncateRunes(string(content), limit)), nil
+			},
+		},
+		{
+			Name:        "call_skill",
+			Description: "调用 ScriptAgent 内置 skill 模板，获得某类任务的工作流、提示词约束或输出结构。",
+			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping"}`,
+			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+				var input struct {
+					Skill string `json:"skill"`
+				}
+				_ = json.Unmarshal(raw, &input)
+				return builtInSkill(input.Skill)
+			},
+		},
+	}
 }
 
 func (s *Service) semanticProductContext(ctx context.Context, conversationID string, product jobs.Product, markdown, query string) (string, []jobs.ProductCitation, error) {
@@ -323,6 +430,112 @@ func chatPrompt(messages []jobs.ChatMessage, summary, productContext string) str
 	}
 	lines = append(lines, "", "请回复最后一条用户消息。")
 	return strings.Join(lines, "\n")
+}
+
+func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProductID string) string {
+	recent := messages
+	if len(recent) > recentChatMessageLimit {
+		recent = recent[len(recent)-recentChatMessageLimit:]
+	}
+	lines := []string{
+		"你是 ScriptAgent 的通用创作与脚本策略助手。",
+		"当前后端已启用 ReAct：你可以先调用工具/skill，再给最终答案。",
+		"你主要服务短视频运营、广告素材生产和 CreatiBI 分镜脚本工作流。",
+		"回答必须直接、可执行；如果工具没有提供依据，必须说明无法从资料判断。",
+		"",
+	}
+	if strings.TrimSpace(selectedProductID) != "" {
+		lines = append(lines, "当前用户在前端选择的产品 ID："+selectedProductID, "需要产品事实时优先调用 retrieve_product_sections。", "")
+	} else {
+		lines = append(lines, "当前用户未选择产品；如问题依赖产品事实，可先调用 list_products。", "")
+	}
+	if strings.TrimSpace(summary) != "" {
+		lines = append(lines, "长期会话摘要：", summary, "")
+	}
+	lines = append(lines, "最近对话：")
+	for _, message := range recent {
+		role := "用户"
+		if message.Role == "assistant" {
+			role = "助手"
+		}
+		lines = append(lines, fmt.Sprintf("%s：%s", role, message.Content))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func builtInSkill(name string) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(name))
+	skills := map[string]string{
+		"fission_strategy": strings.TrimSpace(`
+# Skill: fission_strategy
+用途：为短视频广告素材设计裂变脚本方向。
+规则：
+- 每条裂变脚本只能基于 1 个裂变元素。
+- 三层分类：视听层、结构层、元素层。
+- 视听层：换 BGM、换音效、换色调/滤镜、换字幕&花字、换画幅、换配音。
+- 结构层：换开头钩子、换 CTA、时长压缩/拉伸、变速节奏、换首帧/封面、同素材高光重剪。
+- 元素层：换局部角色/群演、换局部场景贴片、换局部道具/UI、字幕语言本地化。
+输出建议：先列适配方向，再说明为什么适合该产品/素材，最后给每条脚本的具体改动点。
+`),
+		"product_markdown_writer": strings.TrimSpace(`
+# Skill: product_markdown_writer
+用途：把产品资料整理成 ScriptAgent 可用的产品 Markdown。
+建议结构：
+1. 产品概览：品类、目标用户、核心场景。
+2. 核心卖点：卖点、证据、限制。
+3. 用户痛点：用户为什么需要它。
+4. 素材可用信息：画面元素、道具、角色、UI、场景。
+5. 禁用表达：夸大、违规、版权、敏感点。
+6. 脚本生成备注：目标平台、语气、CTA、素材约束。
+`),
+		"script_review": strings.TrimSpace(`
+# Skill: script_review
+用途：检查复刻/裂变脚本是否适合投放和制作。
+检查维度：
+- 前 3 秒钩子是否明确。
+- 产品卖点是否具体，不是泛泛而谈。
+- 分镜是否能被剪辑/拍摄执行。
+- 裂变点是否单一、可 A/B 测试。
+- CTA 是否只有一个清晰动作。
+- 是否存在版权、夸大、无法实现的画面。
+输出建议：先给结论，再列问题，再给可替换文案/分镜。
+`),
+		"creatibi_storyboard_mapping": strings.TrimSpace(`
+# Skill: creatibi_storyboard_mapping
+用途：把脚本字段映射到 CreatiBI 分镜脚本格式。
+字段映射：
+- voiceover/subtitle -> Copy
+- visual/action/props_scene/shot_size -> Description
+- time_range/camera_intent/purpose/audio -> Note
+- action/props_scene/shot_size/audio -> property.Movement/Prop/ShotSize/text.SoundEffec
+约束：保存脚本内容时必须保留脚本名称和目标专案 ID；裂变脚本应作为复刻脚本的子任务。
+`),
+	}
+	if value, ok := skills[key]; ok {
+		return value, nil
+	}
+	available := []string{}
+	for skill := range skills {
+		available = append(available, skill)
+	}
+	sort.Strings(available)
+	return "", fmt.Errorf("unknown skill %q, available: %s", name, strings.Join(available, ", "))
+}
+
+func toJobAgentSteps(steps []reactagent.Step) []jobs.AgentStep {
+	result := make([]jobs.AgentStep, 0, len(steps))
+	for _, step := range steps {
+		result = append(result, jobs.AgentStep{
+			Index:       step.Index,
+			Kind:        step.Kind,
+			Reason:      step.Reason,
+			Tool:        step.Tool,
+			Input:       string(step.Input),
+			Observation: step.Observation,
+			Error:       step.Error,
+		})
+	}
+	return result
 }
 
 func summaryPrompt(existingSummary string, messages []jobs.ChatMessage) string {
