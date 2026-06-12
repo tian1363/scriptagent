@@ -78,6 +78,47 @@ func TestStoreProductChunks(t *testing.T) {
 	}
 }
 
+func TestStoreCreativeReports(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	product, err := store.CreateProduct(CreateProductInput{
+		Title:  "测试产品",
+		MDPath: "/tmp/product.md",
+		MDName: "product.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateCreativeReport(CreateCreativeReportInput{
+		ProductID:        product.ID,
+		ProductTitle:     product.Title,
+		SourceConfigJSON: `{"range":"30d"}`,
+		ReportMarkdown:   "# 报告\n创意方向",
+		ReportSummary:    "创意方向摘要",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetCreativeReport(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ProductID != product.ID || got.ReportSummary != "创意方向摘要" {
+		t.Fatalf("unexpected report: %+v", got)
+	}
+	reports, err := store.ListCreativeReports(product.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(reports))
+	}
+}
+
 func TestStoreModelRuntimeConfig(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

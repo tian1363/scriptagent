@@ -28,6 +28,8 @@ func (h *Handler) Routes() http.Handler {
 		api.Get("/products", h.listProducts)
 		api.Post("/products", h.createProduct)
 		api.Get("/products/{id}/markdown", h.getProductMarkdown)
+		api.Get("/products/{id}/creative-reports", h.listCreativeReports)
+		api.Post("/products/{id}/creative-reports", h.createCreativeReport)
 		api.Get("/jobs", h.listJobs)
 		api.Post("/jobs", h.createJob)
 		api.Get("/jobs/{id}", h.getJob)

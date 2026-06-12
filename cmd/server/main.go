@@ -11,6 +11,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/agent"
 	"github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creatibi"
+	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/storage"
@@ -41,7 +42,7 @@ func main() {
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
 	modelClient := buildModelClient(store)
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient))
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient))
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)

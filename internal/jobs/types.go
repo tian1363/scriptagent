@@ -47,6 +47,25 @@ type Product struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type CreativeReport struct {
+	ID               string    `json:"id"`
+	ProductID        string    `json:"product_id"`
+	ProductTitle     string    `json:"product_title"`
+	SourceConfigJSON string    `json:"source_config_json"`
+	ReportMarkdown   string    `json:"report_markdown"`
+	ReportSummary    string    `json:"report_summary"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type CreateCreativeReportInput struct {
+	ProductID        string
+	ProductTitle     string
+	SourceConfigJSON string
+	ReportMarkdown   string
+	ReportSummary    string
+}
+
 type ProductChunk struct {
 	ID             string    `json:"id"`
 	ProductID      string    `json:"product_id"`

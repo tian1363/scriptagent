@@ -142,6 +142,18 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS creative_reports (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  product_title TEXT NOT NULL,
+  source_config_json TEXT NOT NULL,
+  report_markdown TEXT NOT NULL,
+  report_summary TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS product_chunks (
   id TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
@@ -164,6 +176,7 @@ CREATE TABLE IF NOT EXISTS model_settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
+CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_id, chunk_index);
 `)
 	if err != nil {
@@ -234,6 +247,62 @@ func (s *Store) GetProduct(id string) (*Product, error) {
 	return scanProduct(s.db.QueryRow(`
 SELECT id, title, md_path, md_name, created_at, updated_at
 FROM products WHERE id = ?`, id))
+}
+
+func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	report := &CreativeReport{
+		ID:               newID(),
+		ProductID:        strings.TrimSpace(input.ProductID),
+		ProductTitle:     normalizeTitle(input.ProductTitle),
+		SourceConfigJSON: strings.TrimSpace(input.SourceConfigJSON),
+		ReportMarkdown:   strings.TrimSpace(input.ReportMarkdown),
+		ReportSummary:    strings.TrimSpace(input.ReportSummary),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	_, err := s.db.Exec(`
+INSERT INTO creative_reports (
+  id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		report.ID, report.ProductID, report.ProductTitle, report.SourceConfigJSON, report.ReportMarkdown,
+		report.ReportSummary, now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func (s *Store) ListCreativeReports(productID string) ([]CreativeReport, error) {
+	rows, err := s.db.Query(`
+SELECT id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+FROM creative_reports
+WHERE product_id = ?
+ORDER BY created_at DESC`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []CreativeReport{}
+	for rows.Next() {
+		report, err := scanCreativeReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *report)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetCreativeReport(id string) (*CreativeReport, error) {
+	return scanCreativeReport(s.db.QueryRow(`
+SELECT id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+FROM creative_reports WHERE id = ?`, id))
 }
 
 func (s *Store) ReplaceProductChunks(productID string, chunks []ProductChunkInput) error {
@@ -744,6 +813,26 @@ func scanProduct(row scanner) (*Product, error) {
 	product.CreatedAt = parseTime(createdAt)
 	product.UpdatedAt = parseTime(updatedAt)
 	return &product, nil
+}
+
+func scanCreativeReport(row scanner) (*CreativeReport, error) {
+	var report CreativeReport
+	var createdAt, updatedAt string
+	if err := row.Scan(
+		&report.ID,
+		&report.ProductID,
+		&report.ProductTitle,
+		&report.SourceConfigJSON,
+		&report.ReportMarkdown,
+		&report.ReportSummary,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return nil, err
+	}
+	report.CreatedAt = parseTime(createdAt)
+	report.UpdatedAt = parseTime(updatedAt)
+	return &report, nil
 }
 
 func scanProductChunk(row scanner) (*ProductChunk, error) {

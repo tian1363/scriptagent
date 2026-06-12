@@ -553,6 +553,37 @@ POST /api/jobs/{id}/video-prompts
 - 报告中必须展示数据口径和缺失字段，禁止模型补造指标。
 - 没有指标数据时，只能标记为“素材内容分析”，不能标记为“爆款表现分析”。
 
+### 10.10 产品创意策略报告
+
+产品库支持从产品详情直接生成创意策略报告，并把报告转入裂变脚本任务。
+
+```http
+GET /api/products/{id}/creative-reports
+POST /api/products/{id}/creative-reports
+```
+
+`POST /api/products/{id}/creative-reports` 使用 JSON：
+
+- `source_type`: 来源类型，第一版固定为 `dataeye`。
+- `dataeye_url`: DataEye 产品或素材页面 URL，可为空。
+- `dataeye_id`: DataEye 产品 ID，可为空。
+- `product_name`: DataEye 中的产品名，默认产品库名称。
+- `date_range`: 时间范围，默认近 30 天。
+- `media`: 媒体过滤，例如 TikTok、Meta。
+- `country`: 国家/地区过滤。
+- `sort_metric`: 排序指标，例如热度、曝光、播放。
+- `sample_count`: 样本数，默认 50。
+- `requirement`: 用户补充分析要求。
+- `material_note`: 用户手动补充的素材观察或 DataEye 导出摘要。
+
+实现约束：
+
+- 第一版生成报告时读取产品 Markdown 与 DataEye 来源配置，调用当前模型生成创意策略报告。
+- 在真实 DataEye 白名单拉取任务接入前，报告必须标注为策略预案，不得编造素材指标。
+- 模型调用 scope 为 `creative_report`，ref_id 为产品 ID，方便调试台追踪 token 与输入输出。
+- 报告保存到 `creative_reports` 表，产品详情读取历史报告并默认选中最新报告。
+- 前端“转裂变任务”只做工作流跳转：进入脚本任务页，自动选中产品，并把 `report_summary` 填入补充要求；创建任务仍需要用户上传参考视频。
+
 ## 11. 数据库设计
 
 第一版使用 SQLite，多表保存任务、产品、模型配置、对话和模型调用记录。
@@ -585,6 +616,17 @@ CREATE TABLE products (
   title TEXT NOT NULL,
   md_path TEXT NOT NULL,
   md_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE creative_reports (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  product_title TEXT NOT NULL,
+  source_config_json TEXT NOT NULL,
+  report_markdown TEXT NOT NULL,
+  report_summary TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

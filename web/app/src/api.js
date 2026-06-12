@@ -32,6 +32,18 @@ export async function getProductMarkdown(id) {
   return request(`/api/products/${id}/markdown`);
 }
 
+export async function listCreativeReports(productId) {
+  return request(`/api/products/${productId}/creative-reports`);
+}
+
+export async function createCreativeReport(productId, input) {
+  return request(`/api/products/${productId}/creative-reports`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  });
+}
+
 export async function getModelSettings() {
   return request("/api/settings/model");
 }

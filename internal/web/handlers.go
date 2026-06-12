@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/storage"
 	"github.com/tian1363/scriptagent/internal/videoprompt"
@@ -24,6 +25,7 @@ type Handler struct {
 	runner    *jobs.Runner
 	publisher Publisher
 	chat      ChatResponder
+	creative  *creative.Service
 }
 
 type Publisher interface {
@@ -34,7 +36,7 @@ type ChatResponder interface {
 	Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder) *Handler {
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service) *Handler {
 	if publisher == nil {
 		publisher = disabledPublisher{}
 	}
@@ -45,6 +47,7 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		runner:    runner,
 		publisher: publisher,
 		chat:      chat,
+		creative:  creativeReports,
 	}
 }
 
@@ -129,6 +132,38 @@ func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
 		"md_name": product.MDName,
 		"content": string(content),
 	})
+}
+
+func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
+	productID := chi.URLParam(r, "id")
+	if _, err := h.store.GetProduct(productID); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	reports, err := h.store.ListCreativeReports(productID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, reports)
+}
+
+func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
+	if h.creative == nil {
+		writeError(w, http.StatusBadRequest, errors.New("creative report service is not configured"))
+		return
+	}
+	var input creative.DataEyeConfig
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	report, err := h.creative.GenerateReport(r.Context(), chi.URLParam(r, "id"), input)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, report)
 }
 
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {

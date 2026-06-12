@@ -21,12 +21,14 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createJob,
+  createCreativeReport,
   createProduct,
   generateVideoPrompts,
   getModelSettings,
   getChat,
   getJob,
   getProductMarkdown,
+  listCreativeReports,
   listProducts,
   listChats,
   listJobs,
@@ -168,8 +170,13 @@ export function App() {
   const [products, setProducts] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productPreview, setProductPreview] = useState(null);
+  const [creativeReports, setCreativeReports] = useState([]);
+  const [selectedCreativeReportId, setSelectedCreativeReportId] = useState("");
   const [isLoadingProductPreview, setIsLoadingProductPreview] = useState(false);
+  const [isLoadingCreativeReports, setIsLoadingCreativeReports] = useState(false);
+  const [isCreatingCreativeReport, setIsCreatingCreativeReport] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [jobInitialRequirement, setJobInitialRequirement] = useState("");
   const [modelSettings, setModelSettings] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(() => window.localStorage.getItem("scriptagent:debug-panel") === "true");
@@ -292,10 +299,13 @@ export function App() {
   useEffect(() => {
     if (view !== "products" || !selectedProductId) {
       setProductPreview(null);
+      setCreativeReports([]);
+      setSelectedCreativeReportId("");
       return undefined;
     }
     let cancelled = false;
     setIsLoadingProductPreview(true);
+    setIsLoadingCreativeReports(true);
     getProductMarkdown(selectedProductId)
       .then((preview) => {
         if (!cancelled) setProductPreview(preview);
@@ -305,6 +315,19 @@ export function App() {
       })
       .finally(() => {
         if (!cancelled) setIsLoadingProductPreview(false);
+      });
+    listCreativeReports(selectedProductId)
+      .then((reports) => {
+        if (!cancelled) {
+          setCreativeReports(reports);
+          setSelectedCreativeReportId(reports[0]?.id || "");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCreativeReports([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingCreativeReports(false);
       });
     return () => {
       cancelled = true;
@@ -347,6 +370,7 @@ export function App() {
       formEl.reset();
       setActiveTab("run_log");
       setVideoPromptContent("");
+      setJobInitialRequirement("");
       await refreshJobs(created.job_id);
       await refreshProducts();
     } catch (err) {
@@ -513,9 +537,53 @@ export function App() {
   const selectedCall = modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
   const productStats = useMemo(() => buildProductStats(products, jobs), [products, jobs]);
 
-  function handleStartProductJob(productId) {
+  function handleStartProductJob(productId, requirement = "") {
     setSelectedProductId(productId);
+    setJobInitialRequirement(requirement);
     setView("jobs");
+  }
+
+  async function handleCreateCreativeReport(event) {
+    event.preventDefault();
+    const selectedProduct = products.find((product) => product.id === selectedProductId);
+    if (!selectedProduct) return;
+    const form = new FormData(event.currentTarget);
+    setError("");
+    setIsCreatingCreativeReport(true);
+    try {
+      const report = await createCreativeReport(selectedProduct.id, {
+        source_type: "dataeye",
+        dataeye_url: form.get("dataeye_url") || "",
+        dataeye_id: form.get("dataeye_id") || "",
+        product_name: form.get("product_name") || selectedProduct.title,
+        date_range: form.get("date_range") || "近 30 天",
+        media: form.get("media") || "",
+        country: form.get("country") || "",
+        sort_metric: form.get("sort_metric") || "热度/曝光/播放优先",
+        sample_count: Number(form.get("sample_count") || 50),
+        requirement: form.get("requirement") || "",
+        material_note: form.get("material_note") || "",
+      });
+      const reports = await listCreativeReports(selectedProduct.id);
+      setCreativeReports(reports);
+      setSelectedCreativeReportId(report.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsCreatingCreativeReport(false);
+    }
+  }
+
+  function handleReportToJob(report) {
+    if (!report) return;
+    const requirement = [
+      "基于产品创意策略报告生成裂变脚本。",
+      report.report_summary ? `报告摘要：${report.report_summary}` : "",
+      "优先沿用报告中的创意方向、钩子、卖点呈现和验收指标；每条裂变脚本仍只能选择 1 个裂变元素。",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    handleStartProductJob(report.product_id, requirement);
   }
 
   return (
@@ -579,6 +647,7 @@ export function App() {
               canRetry={canRetry}
               products={products}
               initialProductId={selectedProductId}
+              initialRequirement={jobInitialRequirement}
               error={error}
               onCreate={handleCreate}
               onPublish={handlePublish}
@@ -591,12 +660,19 @@ export function App() {
               products={products}
               selectedProductId={selectedProductId}
               productPreview={productPreview}
+              creativeReports={creativeReports}
+              selectedCreativeReportId={selectedCreativeReportId}
               isLoadingProductPreview={isLoadingProductPreview}
+              isLoadingCreativeReports={isLoadingCreativeReports}
+              isCreatingCreativeReport={isCreatingCreativeReport}
               isCreatingProduct={isCreatingProduct}
               productStats={productStats}
               error={error}
               onSelect={setSelectedProductId}
+              onReportSelect={setSelectedCreativeReportId}
               onStartJob={handleStartProductJob}
+              onCreateCreativeReport={handleCreateCreativeReport}
+              onReportToJob={handleReportToJob}
               onCreate={handleCreateProduct}
             />
           ) : null}
@@ -750,10 +826,15 @@ function CallsSidebar({ calls, selectedCallId, onSelect }) {
 function JobsWorkspace(props) {
   const [fissionCount, setFissionCount] = useState(5);
   const [selectedProductID, setSelectedProductID] = useState(props.initialProductId || "");
+  const [requirementDraft, setRequirementDraft] = useState(props.initialRequirement || "");
 
   useEffect(() => {
     setSelectedProductID(props.initialProductId || "");
   }, [props.initialProductId]);
+
+  useEffect(() => {
+    setRequirementDraft(props.initialRequirement || "");
+  }, [props.initialRequirement]);
 
   function handleFissionCountChange(event) {
     const next = Number.parseInt(event.target.value, 10);
@@ -839,7 +920,13 @@ function JobsWorkspace(props) {
             </div>
             <label className="requirement-field">
               <span>补充要求</span>
-              <textarea name="requirement" rows="4" placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。" />
+              <textarea
+                name="requirement"
+                rows="4"
+                value={requirementDraft}
+                onChange={(event) => setRequirementDraft(event.target.value)}
+                placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。"
+              />
             </label>
           </div>
 
@@ -1158,9 +1245,28 @@ function ProductAssetCard({ product, stats, isActive, onSelect, onStartJob }) {
   );
 }
 
-function ProductsWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, productStats, error, onSelect, onStartJob, onCreate }) {
+function ProductsWorkspace({
+  products,
+  selectedProductId,
+  productPreview,
+  creativeReports,
+  selectedCreativeReportId,
+  isLoadingProductPreview,
+  isLoadingCreativeReports,
+  isCreatingCreativeReport,
+  isCreatingProduct,
+  productStats,
+  error,
+  onSelect,
+  onReportSelect,
+  onStartJob,
+  onCreateCreativeReport,
+  onReportToJob,
+  onCreate,
+}) {
   const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
   const selectedStats = selectedProduct ? productStats.get(selectedProduct.id) : null;
+  const selectedReport = creativeReports.find((report) => report.id === selectedCreativeReportId) || creativeReports[0];
   const totalScripts = Array.from(productStats.values()).reduce((total, stats) => total + (stats.scriptCount || 0), 0);
   return (
     <section className="product-home">
@@ -1258,6 +1364,104 @@ function ProductsWorkspace({ products, selectedProductId, productPreview, isLoad
                 <strong>{selectedStats?.latestAt ? formatTime(selectedStats.latestAt) : "-"}</strong>
               </div>
             </div>
+            <section className="creative-report-panel">
+              <div className="section-heading">
+                <span>创意策略报告</span>
+                <small>配置 DataEye 来源，生成后可转为裂变脚本任务</small>
+              </div>
+              <div className="creative-report-grid">
+                <form className="task-form compact-form" onSubmit={onCreateCreativeReport}>
+                  <div className="upload-grid">
+                    <label>
+                      <span>DataEye URL</span>
+                      <input name="dataeye_url" type="url" placeholder="https://..." />
+                    </label>
+                    <label>
+                      <span>DataEye 产品 ID</span>
+                      <input name="dataeye_id" type="text" placeholder="可选" />
+                    </label>
+                  </div>
+                  <div className="upload-grid">
+                    <label>
+                      <span>产品名</span>
+                      <input name="product_name" type="text" defaultValue={selectedProduct.title} />
+                    </label>
+                    <label>
+                      <span>时间范围</span>
+                      <input name="date_range" type="text" defaultValue="近 30 天" />
+                    </label>
+                  </div>
+                  <div className="upload-grid three-cols">
+                    <label>
+                      <span>媒体</span>
+                      <input name="media" type="text" placeholder="TikTok / Meta" />
+                    </label>
+                    <label>
+                      <span>国家/地区</span>
+                      <input name="country" type="text" placeholder="美国 / 日本" />
+                    </label>
+                    <label>
+                      <span>样本数</span>
+                      <input name="sample_count" type="number" min="5" max="200" defaultValue="50" />
+                    </label>
+                  </div>
+                  <label>
+                    <span>排序指标</span>
+                    <input name="sort_metric" type="text" defaultValue="热度/曝光/播放优先" />
+                  </label>
+                  <label>
+                    <span>补充要求</span>
+                    <textarea name="requirement" rows="3" placeholder="例如：重点看开头钩子、节奏和可复制素材结构。" />
+                  </label>
+                  <label>
+                    <span>素材备注</span>
+                    <textarea name="material_note" rows="3" placeholder="如已有素材观察、DataEye 导出摘要，可贴在这里。" />
+                  </label>
+                  <button className="primary-button wide-button" type="submit" disabled={isCreatingCreativeReport}>
+                    {isCreatingCreativeReport ? <Loader2 className="spin" size={16} /> : <Activity size={16} />}
+                    <span>{isCreatingCreativeReport ? "生成中" : "生成创意策略报告"}</span>
+                  </button>
+                </form>
+                <div className="creative-report-list">
+                  {isLoadingCreativeReports ? (
+                    <EmptyState text="正在读取创意策略报告" compact />
+                  ) : creativeReports.length ? (
+                    <>
+                      <div className="report-switcher">
+                        {creativeReports.map((report) => (
+                          <button
+                            key={report.id}
+                            className={selectedReport?.id === report.id ? "active" : ""}
+                            type="button"
+                            onClick={() => onReportSelect(report.id)}
+                          >
+                            <strong>{formatTime(report.created_at)}</strong>
+                            <span>{reportConfigLabel(report.source_config_json)}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {selectedReport ? (
+                        <article className="creative-report-preview">
+                          <div className="report-actions">
+                            <div>
+                              <strong>报告摘要</strong>
+                              <p>{selectedReport.report_summary || "报告已生成，可查看完整内容。"}</p>
+                            </div>
+                            <button className="secondary-button" type="button" onClick={() => onReportToJob(selectedReport)}>
+                              <Play size={15} />
+                              <span>转裂变任务</span>
+                            </button>
+                          </div>
+                          <MarkdownContent content={selectedReport.report_markdown} />
+                        </article>
+                      ) : null}
+                    </>
+                  ) : (
+                    <EmptyState text="暂无报告，先生成一份创意策略报告" compact />
+                  )}
+                </div>
+              </div>
+            </section>
             <section className="product-preview">
               <div className="section-heading">
                 <span>Markdown 预览</span>
@@ -1626,4 +1830,9 @@ function pretty(value) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function reportConfigLabel(raw) {
+  const config = parseJSONValue(raw) || {};
+  return [config.date_range, config.media, config.country, config.sort_metric].filter(Boolean).join(" · ") || "创意策略报告";
 }
