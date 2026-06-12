@@ -267,7 +267,7 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 		{
 			Name:        "call_skill",
 			Description: "调用 ScriptAgent 内置 skill 模板，获得某类任务的工作流、提示词约束或输出结构。",
-			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping"}`,
+			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping | dataeye_hot_material_analysis"}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var input struct {
 					Skill string `json:"skill"`
@@ -509,6 +509,42 @@ func builtInSkill(name string) (string, error) {
 - time_range/camera_intent/purpose/audio -> Note
 - action/props_scene/shot_size/audio -> property.Movement/Prop/ShotSize/text.SoundEffec
 约束：保存脚本内容时必须保留脚本名称和目标专案 ID；裂变脚本应作为复刻脚本的子任务。
+`),
+		"dataeye_hot_material_analysis": strings.TrimSpace(`
+# Skill: dataeye_hot_material_analysis
+用途：基于 DataEye 近 30 天表现好的素材，提炼爆款特征，并输出下一批短视频创意方向指导。
+
+适用输入：
+- 产品名称、产品 ID 或 DataEye 产品页 URL。
+- 时间范围，默认近 30 天。
+- 样本数量，建议 30-100 条。
+- 排序指标，优先使用热度、曝光、播放、点赞、评论、转发、下载等 DataEye 可见指标。
+- 可选过滤：媒体、国家/地区、语言、素材类型、投放平台。
+
+数据源规则：
+- 优先使用 DataEye 导出的 materials_raw.json、manifest_fast.json 和已下载视频。
+- 如果当前对话没有素材数据，先要求用户提供 DataEye 产品 URL/ID/名称，或上传 DataEye 导出结果。
+- 不得编造播放、曝光、热度、下载、投放时间等指标；无法确认时必须写“数据源未提供”。
+- 若只拿到视频文件而没有指标，只能做创意内容特征分析，不能声称“高表现”。
+
+分析步骤：
+1. 样本筛选：锁定近 30 天，按可用指标筛出 Top 素材，并记录样本范围、排序口径和缺失字段。
+2. 单条拆解：抽取首帧、前 3 秒钩子、主体画面、节奏、字幕/花字、BGM/音效、产品卖点、角色/场景/道具/UI、CTA、画幅、语言和平台。
+3. 聚类归因：把相似素材归为创意母题，例如问题钩子、反差演示、强结果展示、口播种草、剧情冲突、UGC 实拍、游戏高光重剪。
+4. 爆款特征：总结共性、差异化、可复用元素、不可复用/风险元素。
+5. 创意方向：给出 5-8 个方向，每个方向只绑定 1 个主变化点，便于后续进入裂变脚本 A/B 测试。
+
+建议输出结构：
+- 数据范围与样本说明。
+- Top 素材观察表：素材 ID/标题、指标、首帧、前 3 秒钩子、卖点、CTA、可复用点。
+- 爆款共性特征。
+- 创意母题聚类。
+- 下一批创意方向指导：方向名、适用素材、核心假设、脚本 brief、建议裂变元素、验收指标。
+- 风险与待补数据。
+
+产品化建议：
+- 做成“爆款素材分析任务”：选择产品 -> 配置 DataEye 来源和近 30 天筛选 -> 拉取素材 -> 生成爆款分析报告 -> 一键转入裂变脚本任务。
+- DataEye 拉取应作为后端白名单任务执行，普通 ReAct 对话只调用分析结果和本地素材库，不直接执行任意系统命令。
 `),
 	}
 	if value, ok := skills[key]; ok {

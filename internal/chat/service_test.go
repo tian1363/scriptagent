@@ -77,3 +77,19 @@ func TestCosineSimilarity(t *testing.T) {
 		t.Fatalf("expected orthogonal vectors to be 0, got %f", orthogonal)
 	}
 }
+
+func TestBuiltInSkillIncludesDataEyeHotMaterialAnalysis(t *testing.T) {
+	skill, err := builtInSkill("dataeye_hot_material_analysis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(skill, "DataEye") {
+		t.Fatal("expected DataEye guidance")
+	}
+	if !strings.Contains(skill, "近 30 天") {
+		t.Fatal("expected recent 30 day analysis guidance")
+	}
+	if !strings.Contains(skill, "不得编造") {
+		t.Fatal("expected metric anti-fabrication rule")
+	}
+}

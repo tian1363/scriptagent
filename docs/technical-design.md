@@ -482,8 +482,50 @@ POST /api/chats/{id}/messages
 - 通用对话响应包含 `agent_steps`，用于前端展示本轮 ReAct 步骤。步骤字段包括序号、类型、可见决策摘要、工具名、工具输入、工具观察和错误信息。
 - 第一版 ReAct 工具为只读能力：`list_products`、`retrieve_product_sections`、`read_product_markdown`、`call_skill`。
 - `call_skill` 调用的是内置工作流/提示词模板，不执行外部命令或系统工具。
+- 内置 skill 包括：`fission_strategy`、`product_markdown_writer`、`script_review`、`creatibi_storyboard_mapping`、`dataeye_hot_material_analysis`。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
+
+### 10.8 DataEye 爆款素材分析产品化
+
+当前阶段先配置两层能力：
+
+- Codex 本机 skill：`dataeye-video-download`，用于在开发/运营环境中基于 DataEye 登录态抓取素材元数据和视频文件。
+- ScriptAgent 内置 ReAct skill：`dataeye_hot_material_analysis`，用于把已有 DataEye 数据和素材转成爆款特征、创意母题和下一批脚本 brief。
+
+当前 ReAct 对话仍保持只读工具边界，不直接执行 DataEye 下载脚本。后续产品化建议增加独立任务：
+
+```text
+选择产品
+  ↓
+配置素材来源（DataEye URL / 产品 ID / 产品名）
+  ↓
+设置筛选（近 30 天 / 媒体 / 国家 / 排序指标 / 样本数）
+  ↓
+后端白名单拉取任务
+  ↓
+保存素材批次与视频文件
+  ↓
+爆款分析 Agent
+  ↓
+爆款特征报告 + 创意方向
+  ↓
+一键进入裂变脚本任务
+```
+
+建议新增数据模型：
+
+- `material_sources`：产品 ID、来源类型、DataEye URL/产品 ID/产品名、媒体、国家、排序指标、创建时间。
+- `material_batches`：产品 ID、时间范围、样本数、拉取状态、输出目录、原始 JSON 路径、创建时间。
+- `material_items`：批次 ID、素材 ID、标题、指标 JSON、首见时间、媒体、国家、视频路径、封面路径。
+- `creative_insight_reports`：产品 ID、批次 ID、样本说明、爆款特征 Markdown、创意方向 JSON、创建时间。
+
+安全约束：
+
+- DataEye 抓取必须通过后端 allowlist job 执行，禁止前端传任意命令。
+- 不在数据库保存浏览器 Cookie 或明文登录态；优先复用用户本机浏览器授权或部署环境显式配置。
+- 报告中必须展示数据口径和缺失字段，禁止模型补造指标。
+- 没有指标数据时，只能标记为“素材内容分析”，不能标记为“爆款表现分析”。
 
 ## 11. 数据库设计
 

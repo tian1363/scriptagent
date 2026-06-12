@@ -143,6 +143,10 @@ const chatQuickTasks = [
     title: "优化脚本",
     description: "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。",
   },
+  {
+    title: "分析爆款素材",
+    description: "调用 dataeye_hot_material_analysis skill，帮我设计近 30 天爆款素材分析流程和创意方向输出结构。",
+  },
 ];
 
 export function App() {
