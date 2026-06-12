@@ -267,7 +267,7 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 		{
 			Name:        "call_skill",
 			Description: "调用 ScriptAgent 内置 skill 模板，获得某类任务的工作流、提示词约束或输出结构。",
-			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping | dataeye_hot_material_analysis"}`,
+			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping | dataeye_hot_material_analysis | seedance_video_prompt_writer"}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var input struct {
 					Skill string `json:"skill"`
@@ -545,6 +545,37 @@ func builtInSkill(name string) (string, error) {
 产品化建议：
 - 做成“爆款素材分析任务”：选择产品 -> 配置 DataEye 来源和近 30 天筛选 -> 拉取素材 -> 生成爆款分析报告 -> 一键转入裂变脚本任务。
 - DataEye 拉取应作为后端白名单任务执行，普通 ReAct 对话只调用分析结果和本地素材库，不直接执行任意系统命令。
+`),
+		"seedance_video_prompt_writer": strings.TrimSpace(`
+# Skill: seedance_video_prompt_writer
+用途：把 ScriptAgent 复刻/裂变分镜脚本转成 Seedance 视频生成提示词。
+
+输入要求：
+- 优先使用已生成的复刻脚本 JSON 或裂变脚本 JSON。
+- 每个分镜至少读取时间段、画面描述、动作描述、景别、镜头动机、道具场景、旁白/字幕、音效/BGM。
+- 如果脚本字段缺失，只基于已有字段生成，不补造产品功效、品牌、角色或镜头细节。
+
+转换规则：
+1. 按脚本逐条输出，不把多条脚本混在一个提示词里。
+2. 按分镜逐段输出，保留原时间段和镜头顺序。
+3. 每个分镜输出三块：正向提示词、声音与字幕、负向提示词。
+4. 正向提示词必须包含画幅、主体、动作、场景道具、景别、镜头运动/动机、视觉风格和连续性要求。
+5. 声音与字幕必须包含旁白、字幕、音效、BGM；脚本没有的信息写“无明确声音信息”。
+6. 负向提示词必须限制：文字乱码、Logo 变形、产品外观不一致、人物肢体畸形、镜头闪烁、低清晰度、无关品牌、水印、版权角色、夸大功效。
+7. 全片必须增加连续性提示：同一产品、角色、UI、道具和场景命名保持一致。
+
+建议输出格式：
+# Seedance 视频生成提示词
+## 脚本名称
+全片连续性：...
+### 分镜 01（00:00-00:02）
+正向提示词：...
+声音与字幕：...
+负向提示词：...
+
+产品化建议：
+- 结果页增加“视频提示词”Tab，由后端读取当前任务脚本 JSON 即时转换。
+- 后续可增加“一键复制单分镜提示词”“按复刻/裂变筛选”“导出 Markdown”。
 `),
 	}
 	if value, ok := skills[key]; ok {

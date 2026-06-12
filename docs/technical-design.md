@@ -482,11 +482,37 @@ POST /api/chats/{id}/messages
 - 通用对话响应包含 `agent_steps`，用于前端展示本轮 ReAct 步骤。步骤字段包括序号、类型、可见决策摘要、工具名、工具输入、工具观察和错误信息。
 - 第一版 ReAct 工具为只读能力：`list_products`、`retrieve_product_sections`、`read_product_markdown`、`call_skill`。
 - `call_skill` 调用的是内置工作流/提示词模板，不执行外部命令或系统工具。
-- 内置 skill 包括：`fission_strategy`、`product_markdown_writer`、`script_review`、`creatibi_storyboard_mapping`、`dataeye_hot_material_analysis`。
+- 内置 skill 包括：`fission_strategy`、`product_markdown_writer`、`script_review`、`creatibi_storyboard_mapping`、`dataeye_hot_material_analysis`、`seedance_video_prompt_writer`。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 
-### 10.8 DataEye 爆款素材分析产品化
+### 10.8 脚本转 Seedance 视频提示词
+
+```http
+POST /api/jobs/{id}/video-prompts
+```
+
+请求 JSON：
+
+- `source`: 可选，`all`、`replica` 或 `fission`，默认 `all`。
+
+响应 JSON：
+
+- `job_id`: 任务 ID。
+- `source`: 转换来源。
+- `content`: Seedance 视频生成提示词 Markdown。
+
+实现约束：
+
+- 第一版使用后端确定性转换器，不额外调用模型。
+- 转换器读取 `replica_script_json` 和 `fission_scripts_json`，兼容 `replica_script.storyboards`、根级 `storyboards`、`fission_scripts[]` 等结构。
+- 输出按脚本和分镜分组，每个分镜包含正向提示词、声音与字幕、负向提示词。
+- 正向提示词从时间段、画面、动作、景别、镜头、道具场景、镜头目的等字段拼接。
+- 声音与字幕从旁白、字幕、音效、BGM 等字段拼接；字段缺失时明确说明无明确声音信息。
+- 负向提示词使用统一安全约束，避免乱码、水印、产品不一致、版权角色和夸大功效。
+- 前端任务结果页新增“视频提示词”Tab，打开时调用该接口并以 Markdown 样式展示。
+
+### 10.9 DataEye 爆款素材分析产品化
 
 当前阶段先配置两层能力：
 

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/videoprompt"
 )
 
 type Handler struct {
@@ -258,6 +259,34 @@ func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"job_id": job.ID,
 		"status": jobs.StatusPending,
+	})
+}
+
+func (h *Handler) generateVideoPrompts(w http.ResponseWriter, r *http.Request) {
+	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	var input struct {
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if input.Source == "" {
+		input.Source = r.URL.Query().Get("source")
+	}
+	content, err := videoprompt.GenerateFromJob(*job, input.Source)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"job_id":  job.ID,
+		"source":  valueOr(input.Source, "all"),
+		"content": content,
 	})
 }
 

@@ -34,6 +34,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Get("/jobs/{id}/result", h.getJob)
 		api.Post("/jobs/{id}/retry", h.retryJob)
 		api.Post("/jobs/{id}/publish", h.publishJob)
+		api.Post("/jobs/{id}/video-prompts", h.generateVideoPrompts)
 		api.Get("/chats", h.listChats)
 		api.Post("/chats", h.createChat)
 		api.Post("/chats/messages", h.sendNewChatMessage)

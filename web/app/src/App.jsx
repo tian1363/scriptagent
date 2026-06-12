@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createJob,
   createProduct,
+  generateVideoPrompts,
   getModelSettings,
   getChat,
   getJob,
@@ -43,6 +44,7 @@ const resultTabs = [
   ["analysis_markdown", "视频分析"],
   ["replica_script_json", "复刻脚本"],
   ["fission_scripts_json", "裂变脚本"],
+  ["video_prompts", "视频提示词"],
   ["creatibi_result_json", "CreatiBI"],
 ];
 
@@ -147,6 +149,10 @@ const chatQuickTasks = [
     title: "分析爆款素材",
     description: "调用 dataeye_hot_material_analysis skill，帮我设计近 30 天爆款素材分析流程和创意方向输出结构。",
   },
+  {
+    title: "生成视频提示词",
+    description: "调用 seedance_video_prompt_writer skill，把这条分镜脚本转成 Seedance 可用的视频生成提示词。",
+  },
 ];
 
 export function App() {
@@ -154,6 +160,8 @@ export function App() {
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [activeTab, setActiveTab] = useState("run_log");
+  const [videoPromptContent, setVideoPromptContent] = useState("");
+  const [isGeneratingVideoPrompts, setIsGeneratingVideoPrompts] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -258,6 +266,30 @@ export function App() {
   }, [selectedJob?.id, selectedJob?.status]);
 
   useEffect(() => {
+    if (activeTab !== "video_prompts") return undefined;
+    if (!selectedJob?.id) return undefined;
+    let cancelled = false;
+    setError("");
+    setIsGeneratingVideoPrompts(true);
+    generateVideoPrompts(selectedJob.id)
+      .then((result) => {
+        if (!cancelled) setVideoPromptContent(result.content || "");
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setVideoPromptContent("");
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsGeneratingVideoPrompts(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedJob?.id]);
+
+  useEffect(() => {
     if (view !== "products" || !selectedProductId) {
       setProductPreview(null);
       return undefined;
@@ -314,6 +346,7 @@ export function App() {
       const created = await createJob(form);
       formEl.reset();
       setActiveTab("run_log");
+      setVideoPromptContent("");
       await refreshJobs(created.job_id);
       await refreshProducts();
     } catch (err) {
@@ -326,6 +359,7 @@ export function App() {
   async function handleSelectJob(id) {
     setError("");
     setActiveTab("run_log");
+    setVideoPromptContent("");
     setSelectedJob(await getJob(id));
   }
 
@@ -336,6 +370,7 @@ export function App() {
     try {
       await publishJob(selectedJob.id);
       setActiveTab("creatibi_result_json");
+      setVideoPromptContent("");
       await refreshJobs(selectedJob.id);
     } catch (err) {
       setError(err.message);
@@ -352,6 +387,7 @@ export function App() {
     try {
       const retried = await retryJob(selectedJob.id);
       setActiveTab("run_log");
+      setVideoPromptContent("");
       await refreshJobs(retried.job_id);
     } catch (err) {
       setError(err.message);
@@ -471,7 +507,7 @@ export function App() {
     }
   }
 
-  const visibleContent = selectedJob?.[activeTab] || "";
+  const visibleContent = activeTab === "video_prompts" ? videoPromptContent : selectedJob?.[activeTab] || "";
   const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
   const selectedCall = modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
@@ -535,6 +571,7 @@ export function App() {
               selectedJob={selectedJob}
               activeTab={activeTab}
               visibleContent={visibleContent}
+              isGeneratingVideoPrompts={isGeneratingVideoPrompts}
               isCreating={isCreating}
               isPublishing={isPublishing}
               isRetrying={isRetrying}
@@ -831,7 +868,12 @@ function JobsWorkspace(props) {
             </button>
           ))}
         </div>
-        <ResultContent job={props.selectedJob} content={props.visibleContent} activeTab={props.activeTab} />
+        <ResultContent
+          job={props.selectedJob}
+          content={props.visibleContent}
+          activeTab={props.activeTab}
+          isGeneratingVideoPrompts={props.isGeneratingVideoPrompts}
+        />
       </section>
     </>
   );
@@ -1397,12 +1439,14 @@ function ResultHeader({ job, isPublishing, isRetrying, canPublish, canRetry, onP
   );
 }
 
-function ResultContent({ job, content, activeTab }) {
+function ResultContent({ job, content, activeTab, isGeneratingVideoPrompts }) {
   if (!job) return <EmptyState text="暂无任务结果" />;
   if (job.error_message && job.status === "failed") return <pre className="result-output error-output">{job.error_message}</pre>;
+  if (activeTab === "video_prompts" && isGeneratingVideoPrompts) return <EmptyState text="正在生成 Seedance 视频提示词" />;
   if (!content) return <EmptyState text={runningStatuses.has(job.status) ? "任务执行中" : "当前页暂无内容"} />;
   if (activeTab === "run_log") return <TimelineContent content={content} />;
   if (activeTab === "analysis_markdown") return <MarkdownContent content={content} />;
+  if (activeTab === "video_prompts") return <MarkdownContent content={content} />;
   return <ScriptJSONContent content={content} activeTab={activeTab} />;
 }
 

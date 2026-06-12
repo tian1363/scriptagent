@@ -58,6 +58,14 @@ export async function retryJob(id) {
   });
 }
 
+export async function generateVideoPrompts(id, source = "all") {
+  return request(`/api/jobs/${id}/video-prompts`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ source }),
+  });
+}
+
 export async function listChats() {
   return request("/api/chats");
 }
