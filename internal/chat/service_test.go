@@ -93,3 +93,22 @@ func TestBuiltInSkillIncludesDataEyeHotMaterialAnalysis(t *testing.T) {
 		t.Fatal("expected metric anti-fabrication rule")
 	}
 }
+
+func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
+	skills := BuiltInSkills()
+	if len(skills) < 6 {
+		t.Fatalf("expected at least 6 skills, got %d", len(skills))
+	}
+	found := map[string]bool{}
+	for _, skill := range skills {
+		if skill.Name == "" || skill.Title == "" || skill.Description == "" || skill.InvocationPrompt == "" {
+			t.Fatalf("skill metadata should be user-facing: %+v", skill)
+		}
+		found[skill.Name] = true
+	}
+	for _, name := range []string{"fission_strategy", "dataeye_hot_material_analysis", "seedance_video_prompt_writer"} {
+		if !found[name] {
+			t.Fatalf("expected skill %s in catalog", name)
+		}
+	}
+}

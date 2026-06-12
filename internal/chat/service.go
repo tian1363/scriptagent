@@ -30,6 +30,15 @@ type Service struct {
 	reactRunner *reactagent.Runner
 }
 
+type BuiltInSkillInfo struct {
+	Name             string `json:"name"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	Category         string `json:"category"`
+	InvocationPrompt string `json:"invocation_prompt"`
+	Content          string `json:"-"`
+}
+
 func NewService(store *jobs.Store, client *model.DashScopeClient) *Service {
 	return &Service{store: store, client: client, reactRunner: reactagent.New(client, 6)}
 }
@@ -463,10 +472,37 @@ func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProduc
 	return strings.Join(lines, "\n")
 }
 
+func BuiltInSkills() []BuiltInSkillInfo {
+	items := append([]BuiltInSkillInfo(nil), builtInSkillCatalog...)
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	return items
+}
+
 func builtInSkill(name string) (string, error) {
 	key := strings.ToLower(strings.TrimSpace(name))
-	skills := map[string]string{
-		"fission_strategy": strings.TrimSpace(`
+	for _, skill := range builtInSkillCatalog {
+		if skill.Name == key {
+			return skill.Content, nil
+		}
+	}
+	available := []string{}
+	for _, skill := range builtInSkillCatalog {
+		available = append(available, skill.Name)
+	}
+	sort.Strings(available)
+	return "", fmt.Errorf("unknown skill %q, available: %s", name, strings.Join(available, ", "))
+}
+
+var builtInSkillCatalog = []BuiltInSkillInfo{
+	{
+		Name:             "fission_strategy",
+		Title:            "裂变策略",
+		Description:      "为短视频素材设计单变量裂变方向，适合生成 A/B 测试思路。",
+		Category:         "脚本策略",
+		InvocationPrompt: "调用 fission_strategy skill，基于当前产品和素材，给我 3-5 个可执行的裂变方向。",
+		Content: strings.TrimSpace(`
 # Skill: fission_strategy
 用途：为短视频广告素材设计裂变脚本方向。
 规则：
@@ -477,7 +513,14 @@ func builtInSkill(name string) (string, error) {
 - 元素层：换局部角色/群演、换局部场景贴片、换局部道具/UI、字幕语言本地化。
 输出建议：先列适配方向，再说明为什么适合该产品/素材，最后给每条脚本的具体改动点。
 `),
-		"product_markdown_writer": strings.TrimSpace(`
+	},
+	{
+		Name:             "product_markdown_writer",
+		Title:            "产品 Markdown 编写",
+		Description:      "把产品资料整理成可用于脚本生成的结构化 Markdown。",
+		Category:         "产品资产",
+		InvocationPrompt: "调用 product_markdown_writer skill，帮我把产品资料整理成 ScriptAgent 可用的 Markdown。",
+		Content: strings.TrimSpace(`
 # Skill: product_markdown_writer
 用途：把产品资料整理成 ScriptAgent 可用的产品 Markdown。
 建议结构：
@@ -488,7 +531,14 @@ func builtInSkill(name string) (string, error) {
 5. 禁用表达：夸大、违规、版权、敏感点。
 6. 脚本生成备注：目标平台、语气、CTA、素材约束。
 `),
-		"script_review": strings.TrimSpace(`
+	},
+	{
+		Name:             "script_review",
+		Title:            "脚本优化检查",
+		Description:      "检查脚本钩子、卖点、CTA、可执行性和投放风险。",
+		Category:         "脚本策略",
+		InvocationPrompt: "调用 script_review skill，帮我检查这条脚本的问题，并给出可替换文案和分镜建议。",
+		Content: strings.TrimSpace(`
 # Skill: script_review
 用途：检查复刻/裂变脚本是否适合投放和制作。
 检查维度：
@@ -500,7 +550,14 @@ func builtInSkill(name string) (string, error) {
 - 是否存在版权、夸大、无法实现的画面。
 输出建议：先给结论，再列问题，再给可替换文案/分镜。
 `),
-		"creatibi_storyboard_mapping": strings.TrimSpace(`
+	},
+	{
+		Name:             "creatibi_storyboard_mapping",
+		Title:            "CreatiBI 分镜映射",
+		Description:      "说明脚本字段如何映射到 CreatiBI 分镜脚本格式。",
+		Category:         "发布生产",
+		InvocationPrompt: "调用 creatibi_storyboard_mapping skill，帮我检查脚本字段如何填充到 CreatiBI 分镜格式。",
+		Content: strings.TrimSpace(`
 # Skill: creatibi_storyboard_mapping
 用途：把脚本字段映射到 CreatiBI 分镜脚本格式。
 字段映射：
@@ -510,7 +567,14 @@ func builtInSkill(name string) (string, error) {
 - action/props_scene/shot_size/audio -> property.Movement/Prop/ShotSize/text.SoundEffec
 约束：保存脚本内容时必须保留脚本名称和目标专案 ID；裂变脚本应作为复刻脚本的子任务。
 `),
-		"dataeye_hot_material_analysis": strings.TrimSpace(`
+	},
+	{
+		Name:             "dataeye_hot_material_analysis",
+		Title:            "DataEye 爆款分析",
+		Description:      "基于 DataEye 素材口径提炼爆款特征和下一批创意方向。",
+		Category:         "创意策略",
+		InvocationPrompt: "调用 dataeye_hot_material_analysis skill，帮我设计近 30 天爆款素材分析流程和创意方向输出结构。",
+		Content: strings.TrimSpace(`
 # Skill: dataeye_hot_material_analysis
 用途：基于 DataEye 近 30 天表现好的素材，提炼爆款特征，并输出下一批短视频创意方向指导。
 
@@ -546,7 +610,14 @@ func builtInSkill(name string) (string, error) {
 - 做成“爆款素材分析任务”：选择产品 -> 配置 DataEye 来源和近 30 天筛选 -> 拉取素材 -> 生成爆款分析报告 -> 一键转入裂变脚本任务。
 - DataEye 拉取应作为后端白名单任务执行，普通 ReAct 对话只调用分析结果和本地素材库，不直接执行任意系统命令。
 `),
-		"seedance_video_prompt_writer": strings.TrimSpace(`
+	},
+	{
+		Name:             "seedance_video_prompt_writer",
+		Title:            "Seedance 视频提示词",
+		Description:      "把复刻/裂变分镜脚本转换成 Seedance 视频生成提示词。",
+		Category:         "视频生成",
+		InvocationPrompt: "调用 seedance_video_prompt_writer skill，把这条分镜脚本转成 Seedance 可用的视频生成提示词。",
+		Content: strings.TrimSpace(`
 # Skill: seedance_video_prompt_writer
 用途：把 ScriptAgent 复刻/裂变分镜脚本转成 Seedance 视频生成提示词。
 
@@ -577,16 +648,7 @@ func builtInSkill(name string) (string, error) {
 - 结果页增加“视频提示词”Tab，由后端读取当前任务脚本 JSON 即时转换。
 - 后续可增加“一键复制单分镜提示词”“按复刻/裂变筛选”“导出 Markdown”。
 `),
-	}
-	if value, ok := skills[key]; ok {
-		return value, nil
-	}
-	available := []string{}
-	for skill := range skills {
-		available = append(available, skill)
-	}
-	sort.Strings(available)
-	return "", fmt.Errorf("unknown skill %q, available: %s", name, strings.Join(available, ", "))
+	},
 }
 
 func toJobAgentSteps(steps []reactagent.Step) []jobs.AgentStep {

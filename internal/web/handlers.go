@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	chatpkg "github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/storage"
@@ -62,6 +63,10 @@ func (h *Handler) listJobs(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listSkills(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, chatpkg.BuiltInSkills())
 }
 
 func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {

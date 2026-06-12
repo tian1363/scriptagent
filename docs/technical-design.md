@@ -452,11 +452,20 @@ POST /api/jobs/{id}/retry
 ### 10.7 通用对话
 
 ```http
+GET /api/skills
 GET /api/chats
 GET /api/chats/{id}
 POST /api/chats/messages
 POST /api/chats/{id}/messages
 ```
+
+`GET /api/skills` 返回 ScriptAgent 内置 skill 目录：
+
+- `name`: skill 调用名。
+- `title`: 面向用户的名称。
+- `description`: 用途说明。
+- `category`: 分类。
+- `invocation_prompt`: 前端点击 skill 后写入输入框的调用指令。
 
 `POST /api/chats/messages` 和 `POST /api/chats/{id}/messages` 使用 JSON：
 
@@ -483,6 +492,7 @@ POST /api/chats/{id}/messages
 - 第一版 ReAct 工具为只读能力：`list_products`、`retrieve_product_sections`、`read_product_markdown`、`call_skill`。
 - `call_skill` 调用的是内置工作流/提示词模板，不执行外部命令或系统工具。
 - 内置 skill 包括：`fission_strategy`、`product_markdown_writer`、`script_review`、`creatibi_storyboard_mapping`、`dataeye_hot_material_analysis`、`seedance_video_prompt_writer`。
+- 通用对话前端必须展示内置 skill 卡片；用户点击卡片后只填充输入框，不自动发送。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 

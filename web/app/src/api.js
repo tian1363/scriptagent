@@ -21,6 +21,10 @@ export async function listProducts() {
   return request("/api/products");
 }
 
+export async function listSkills() {
+  return request("/api/skills");
+}
+
 export async function createProduct(formData) {
   return request("/api/products", {
     method: "POST",

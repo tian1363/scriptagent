@@ -30,6 +30,7 @@ import {
   getProductMarkdown,
   listCreativeReports,
   listProducts,
+  listSkills,
   listChats,
   listJobs,
   listModelCalls,
@@ -168,6 +169,7 @@ export function App() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [products, setProducts] = useState([]);
+  const [skills, setSkills] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productPreview, setProductPreview] = useState(null);
   const [creativeReports, setCreativeReports] = useState([]);
@@ -231,6 +233,10 @@ export function App() {
     }
   }
 
+  async function refreshSkills() {
+    setSkills(await listSkills());
+  }
+
   async function refreshModelSettings() {
     setModelSettings(await getModelSettings());
   }
@@ -249,6 +255,7 @@ export function App() {
     refreshChats().catch(() => {});
     if (showDebugPanel) refreshModelCalls().catch(() => {});
     refreshProducts().catch(() => {});
+    refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
   }, []);
 
@@ -686,6 +693,7 @@ export function App() {
               isThinking={isChatThinking}
               draft={chatDraft}
               products={products}
+              skills={skills}
               selectedProductId={chatProductId}
               isSending={isSending}
               error={error}
@@ -966,7 +974,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
@@ -974,6 +982,10 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, isThinking, typingMessage?.visible]);
+
+  function handleSkill(skill) {
+    onDraft(skill.invocation_prompt || `调用 ${skill.name} skill。`);
+  }
 
   return (
     <section className="chat-pane">
@@ -1007,6 +1019,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>
+            {skills?.length ? <SkillLauncher skills={skills} onSelect={handleSkill} compact /> : null}
             {agentSteps?.length ? <AgentStepsPanel steps={agentSteps} /> : null}
             {citations?.length ? <CitationPanel citations={citations} /> : null}
             {messages.map((message) => (
@@ -1029,7 +1042,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
             <div ref={messagesEndRef} />
           </>
         ) : (
-          <ChatTaskStarter onSelect={onDraft} />
+          <ChatTaskStarter skills={skills} onSelect={onDraft} onSkill={handleSkill} />
         )}
       </div>
       <form className="chat-form" onSubmit={onSend}>
@@ -1044,7 +1057,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
   );
 }
 
-function ChatTaskStarter({ onSelect }) {
+function ChatTaskStarter({ skills, onSelect, onSkill }) {
   return (
     <section className="chat-starter">
       <div>
@@ -1056,6 +1069,27 @@ function ChatTaskStarter({ onSelect }) {
           <button key={task.title} type="button" onClick={() => onSelect(task.description)}>
             <strong>{task.title}</strong>
             <span>{task.description}</span>
+          </button>
+        ))}
+      </div>
+      {skills?.length ? <SkillLauncher skills={skills} onSelect={onSkill} /> : null}
+    </section>
+  );
+}
+
+function SkillLauncher({ skills, onSelect, compact = false }) {
+  return (
+    <section className={`skill-launcher ${compact ? "compact" : ""}`}>
+      <div className="section-heading">
+        <span>可主动调用的 Skill</span>
+        <small>{skills.length} 个</small>
+      </div>
+      <div className="skill-list">
+        {skills.map((skill) => (
+          <button key={skill.name} type="button" onClick={() => onSelect(skill)}>
+            <span>{skill.category}</span>
+            <strong>{skill.title}</strong>
+            <small>{skill.description}</small>
           </button>
         ))}
       </div>
