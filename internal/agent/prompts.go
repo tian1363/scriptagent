@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
 )
@@ -119,8 +120,8 @@ func videoAnalysisPrompt(job jobs.Job, productMD string) string {
 请重点服务于后续生成复刻脚本。`, job.Industry, job.FissionCount, job.Requirement, productMD)
 }
 
-func scriptGenerationPrompt(job jobs.Job, productMD, analysisMarkdown string) string {
-	return fmt.Sprintf(`你是 CreatiBI 分镜脚本生成 Agent。请基于产品 Markdown 和视频理解结果，生成 1 条复刻脚本和 %d 条裂变脚本。
+func replicaScriptPrompt(job jobs.Job, productMD, analysisMarkdown string) string {
+	return fmt.Sprintf(`你是 CreatiBI 复刻分镜脚本生成 Agent。请基于产品 Markdown 和视频理解结果，生成 1 条复刻脚本。
 
 产品 Markdown：
 %s
@@ -131,13 +132,13 @@ func scriptGenerationPrompt(job jobs.Job, productMD, analysisMarkdown string) st
 视频理解结果：
 %s
 
-生成原则：
+复刻生成原则：
 
 - 复刻脚本复刻参考视频的结构、节奏、镜头功能，不复制原视频独有台词、品牌、人物肖像或版权音乐。
-- 裂变脚本保留复刻结构的核心链路，但分别改变钩子、卖点、场景、人群、节奏、CTA 或表现形式。
+- 每个分镜必须继承视频理解中的时间段、镜头动机、叙事节奏和核心功能。
+- 如果需要改写台词，应保留原镜头承担的功能：hook、twist、selling_point、proof、cta 等。
 - 所有脚本必须适合写入 CreatiBI 分镜结构。
-- 所有 storyboards 都必须包含 time_range、visual、action、voiceover、subtitle、shot_size、camera_intent、props_scene、audio、purpose。
-- fission_scripts 数量必须严格等于 %d。
+- 所有 storyboards 都必须包含 scene_index、time_range、visual、action、voiceover、subtitle、shot_size、camera_intent、props_scene、audio、purpose。
 - 输出必须是严格 JSON，不要 Markdown，不要代码块，不要解释。
 
 JSON Schema：
@@ -153,10 +154,10 @@ JSON Schema：
       {
         "scene_index": 1,
         "time_range": "00:00-00:03",
-        "visual": "画面描述",
-        "action": "动作描述",
-        "voiceover": "旁白",
-        "subtitle": "字幕",
+        "visual": "画面描述，写清主体、方位、构图、光线、UI/贴片/环境细节",
+        "action": "动作描述，写清人物/产品/镜头运动/互动关系",
+        "voiceover": "旁白/对话文案",
+        "subtitle": "屏幕字幕或贴片文字",
         "shot_size": "近景",
         "camera_intent": "镜头动机",
         "props_scene": "道具场景",
@@ -170,22 +171,110 @@ JSON Schema：
       "kept_elements": ["保留元素"],
       "changed_elements": ["替换元素"]
     }
-  },
+  }
+}`, productMD, job.Requirement, analysisMarkdown)
+}
+
+func fissionScriptPrompt(job jobs.Job, productMD, analysisMarkdown, replicaScriptJSON string) string {
+	return fmt.Sprintf(`你是 CreatiBI 裂变分镜脚本生成 Agent。请基于“复刻脚本”生成 %d 条裂变脚本。
+
+产品 Markdown：
+%s
+
+用户补充要求：
+%s
+
+视频理解结果：
+%s
+
+复刻脚本 JSON：
+%s
+
+用户选择的裂变方向：
+%s
+
+裂变生成原则：
+
+- 裂变脚本必须以复刻脚本为母版，先继承每个分镜的 scene_index、time_range、镜头功能、叙事节奏和转场顺序。
+- 用户选择的裂变方向按行与 fission_scripts 顺序一一对应：第 1 行用于第 1 条裂变脚本，第 2 行用于第 2 条裂变脚本，依此类推。
+- 如果用户选择了裂变方向，每条裂变脚本必须严格使用对应行的唯一裂变方向，不允许自行替换为其他方向。
+- 每条裂变只选择一个清晰裂变维度。
+- 每条裂变脚本只能基于 1 个裂变元素，不允许把多个裂变元素组合到同一条脚本中。
+- 同一条裂变脚本内，所有分镜都必须围绕同一个裂变元素变化；其他层级和元素只做必要适配，不能成为第二个裂变点。
+- metadata.fission_dimension 必须使用“层级-维度”格式，例如“视听层-换BGM”。
+- metadata.fission_dimension 只能填写一个值；如果用户选择了裂变方向，必须精准等于对应行选择的裂变维度；禁止输出“视听层-换BGM+结构层-换CTA”这类组合值。
+- 如果需要生成多条裂变，应优先覆盖不同层级；不要连续多条都只改同一种元素。
+- 每条裂变的 storyboards 数量和复刻脚本保持一致；每个分镜的 time_range 尽量保持一致。
+- 每个裂变分镜必须保留原分镜的 purpose，但改写 visual、action、voiceover、subtitle、props_scene、audio 中与裂变维度相关的内容。
+- 裂变应适合直接写入 CreatiBI 分镜结构，不要输出抽象策略，要输出可拍/可剪/可生成的视频分镜。
+- 所有 storyboards 都必须包含 scene_index、time_range、visual、action、voiceover、subtitle、shot_size、camera_intent、props_scene、audio、purpose。
+- fission_scripts 数量必须严格等于 %d。
+- 输出必须是严格 JSON，不要 Markdown，不要代码块，不要解释。
+
+允许裂变维度：
+
+1. 视听层
+   - 换BGM：保留画面结构，替换音乐风格、情绪走向或卡点方式，写入 audio。
+   - 换音效：保留镜头和台词，替换关键动作、UI、转场、点击、爆点音效，写入 audio。
+   - 换色调/滤镜：保留主体与动作，改变 visual 中的色彩、光影、滤镜、氛围描述。
+   - 换字幕&花字：保留旁白核心，改写 subtitle 的花字风格、强调词、屏幕文字层级。
+   - 换画幅：保留内容结构，改写 visual 中的构图、主体位置、留白、贴片适配方式。
+   - 换配音(语速/声线)：保留语义，改写 voiceover 的语速、声线、情绪、口吻。
+
+2. 结构层
+   - 换开头钩子：重点改写前 1-2 个分镜的 visual/action/voiceover/subtitle，但保留后续链路。
+   - 换CTA：重点改写最后 1-2 个分镜的 voiceover/subtitle/action，强化不同转化动作。
+   - 时长压缩/拉伸：调整 time_range 和 duration_seconds，压缩或拉伸节奏，同时保留分镜顺序。
+   - 变速·节奏调整：保留时长大体不变，改变 action 和 camera_intent 中的速度、卡点、停顿。
+   - 换首帧/封面：重点改写第 1 个分镜的 visual、action、subtitle，让首帧更强。
+   - 同素材高光重剪：不换主体素材，重排高光重点和镜头强调，改写 camera_intent/action。
+
+3. 元素层
+   - 换局部角色/群演：保留场景与叙事，替换 visual/action 中的局部角色、群演或人物关系。
+   - 换局部场景贴片：保留主体动作，替换 visual/props_scene 中的局部背景、贴片、环境元素。
+   - 换局部道具/UI：保留镜头结构，替换 props_scene/visual 中的局部道具、UI 元素、按钮、弹窗。
+   - 字幕语言本地化：保留语义，按目标地区改写 subtitle 和必要的 voiceover 表达。
+
+JSON Schema：
+
+{
   "fission_scripts": [
     {
       "title": "裂变脚本标题",
       "script_type": "fission",
       "industry": "game 或 ecommerce",
       "duration_seconds": 25,
-      "source_summary": "裂变说明",
-      "storyboards": [],
+      "source_summary": "说明该裂变相对复刻脚本改了什么、保留了什么",
+      "storyboards": [
+        {
+          "scene_index": 1,
+          "time_range": "00:00-00:03",
+          "visual": "画面描述，写清主体、方位、构图、光线、UI/贴片/环境细节",
+          "action": "动作描述，写清人物/产品/镜头运动/互动关系",
+          "voiceover": "旁白/对话文案",
+          "subtitle": "屏幕字幕或贴片文字",
+          "shot_size": "近景",
+          "camera_intent": "镜头动机",
+          "props_scene": "道具场景",
+          "audio": "音效/BGM",
+          "purpose": "hook"
+        }
+      ],
       "metadata": {
         "parent_script_id": "replica",
-        "fission_dimension": "钩子裂变",
+        "fission_dimension": "视听层-换BGM",
         "kept_elements": ["保留元素"],
         "changed_elements": ["替换元素"]
       }
     }
   ]
-}`, job.FissionCount, productMD, job.Requirement, analysisMarkdown, job.FissionCount)
+}`, job.FissionCount, productMD, job.Requirement, analysisMarkdown, replicaScriptJSON, selectedFissionDirections(job.FissionDirections), job.FissionCount)
+}
+
+func selectedFissionDirections(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "未选择，允许从下方全部裂变维度中自动选择。"
+	}
+	return raw
 }

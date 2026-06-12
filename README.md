@@ -11,7 +11,8 @@ This repository currently contains the first application scaffold:
 - Local upload storage.
 - React + Vite frontend.
 - CreatiBI Design System tokens and assets.
-- Qwen mode when `DASHSCOPE_API_KEY` is configured, with mock mode fallback for local workflow verification.
+- Qwen mode with model settings configurable from the UI or environment variables.
+- Product library for reusable product Markdown files.
 
 ## Run Locally
 
@@ -38,25 +39,44 @@ The frontend dev server runs at `http://127.0.0.1:5173`. The API server runs at 
 
 ## Configure Qwen
 
-Set your DashScope API key before starting the Go server:
+You can configure Qwen from the app UI at `配置 -> 模型配置`. For server-level defaults, set your DashScope API key before starting the Go server:
 
 ```bash
 export DASHSCOPE_API_KEY="sk-your-key"
 export SCRIPT_AGENT_MODEL="qwen3.6-plus"
 export SCRIPT_AGENT_VIDEO_FPS="2"
+export SCRIPT_AGENT_EMBEDDING_MODEL="text-embedding-v4"
+export SCRIPT_AGENT_EMBEDDING_DIMENSIONS="1024"
 go run ./cmd/server
 ```
 
-When `DASHSCOPE_API_KEY` is present, the server uses Qwen mode automatically. To force mock mode:
+User-saved model settings take precedence over environment variables. To force mock mode:
 
 ```bash
 export SCRIPT_AGENT_MODE="mock"
 ```
 
-The first Qwen implementation sends local videos as Base64 data URLs. Keep videos modest in size, or set a different limit:
+The Qwen implementation sends local videos as Base64 data URLs. If a video would exceed the DashScope data-uri limit, ScriptAgent automatically creates a temporary compressed MP4 with `ffmpeg` and sends that instead. You can tune the data-uri ceiling:
 
 ```bash
-export SCRIPT_AGENT_MAX_VIDEO_MB="80"
+export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
+```
+
+Product Markdown retrieval uses embeddings for long documents. ScriptAgent stores product chunks in SQLite and uses DashScope embeddings for semantic Top-K retrieval; if embedding fails, it falls back to local keyword section matching.
+
+## Configure CreatiBI Publishing
+
+The publish action uses the local `cbi` CLI. Make sure you are logged in:
+
+```bash
+cbi auth whoami
+```
+
+Optionally pin the target project. If omitted, ScriptAgent uses the first project returned by `cbi project list`.
+
+```bash
+export CREATIBI_PROJECT_ID="9944"
+export CREATIBI_CLI_BIN="cbi"
 ```
 
 ## Persistence

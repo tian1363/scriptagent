@@ -1,13 +1,16 @@
 package jobs
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tian1363/scriptagent/internal/model"
 	_ "modernc.org/sqlite"
 )
 
@@ -84,7 +87,337 @@ CREATE TABLE IF NOT EXISTS jobs (
 	if err != nil {
 		return err
 	}
-	return s.ensureColumn("jobs", "run_log", "TEXT")
+	if err := s.ensureColumn("jobs", "run_log", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("jobs", "fission_directions", "TEXT"); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  summary TEXT,
+  summary_message_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS model_calls (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  step TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_json TEXT,
+  output_text TEXT,
+  response_json TEXT,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_model_calls_ref ON model_calls(ref_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_model_calls_created ON model_calls(created_at);
+
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  md_path TEXT NOT NULL,
+  md_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS creative_reports (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  product_title TEXT NOT NULL,
+  source_config_json TEXT NOT NULL,
+  report_markdown TEXT NOT NULL,
+  report_summary TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_chunks (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  heading TEXT,
+  content TEXT NOT NULL,
+  embedding_json TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  embedding_dim INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS model_settings (
+  id TEXT PRIMARY KEY,
+  api_key TEXT,
+  endpoint TEXT NOT NULL,
+  model TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
+CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_id, chunk_index);
+`)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "summary", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "summary_message_id", "TEXT"); err != nil {
+		return err
+	}
+	return err
+}
+
+func (s *Store) CreateProduct(input CreateProductInput) (*Product, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	product := &Product{
+		ID:        newID(),
+		Title:     normalizeTitle(valueOr(input.Title, defaultProductTitle(input.MDName))),
+		MDPath:    input.MDPath,
+		MDName:    input.MDName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := s.db.Exec(`
+INSERT INTO products (id, title, md_path, md_name, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		product.ID, product.Title, product.MDPath, product.MDName,
+		now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
+func defaultProductTitle(fileName string) string {
+	title := strings.TrimSuffix(fileName, ".markdown")
+	title = strings.TrimSuffix(title, ".md")
+	return title
+}
+
+func (s *Store) ListProducts() ([]Product, error) {
+	rows, err := s.db.Query(`
+SELECT id, title, md_path, md_name, created_at, updated_at
+FROM products
+ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []Product{}
+	for rows.Next() {
+		product, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *product)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetProduct(id string) (*Product, error) {
+	return scanProduct(s.db.QueryRow(`
+SELECT id, title, md_path, md_name, created_at, updated_at
+FROM products WHERE id = ?`, id))
+}
+
+func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	report := &CreativeReport{
+		ID:               newID(),
+		ProductID:        strings.TrimSpace(input.ProductID),
+		ProductTitle:     normalizeTitle(input.ProductTitle),
+		SourceConfigJSON: strings.TrimSpace(input.SourceConfigJSON),
+		ReportMarkdown:   strings.TrimSpace(input.ReportMarkdown),
+		ReportSummary:    strings.TrimSpace(input.ReportSummary),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	_, err := s.db.Exec(`
+INSERT INTO creative_reports (
+  id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		report.ID, report.ProductID, report.ProductTitle, report.SourceConfigJSON, report.ReportMarkdown,
+		report.ReportSummary, now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func (s *Store) ListCreativeReports(productID string) ([]CreativeReport, error) {
+	rows, err := s.db.Query(`
+SELECT id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+FROM creative_reports
+WHERE product_id = ?
+ORDER BY created_at DESC`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []CreativeReport{}
+	for rows.Next() {
+		report, err := scanCreativeReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *report)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetCreativeReport(id string) (*CreativeReport, error) {
+	return scanCreativeReport(s.db.QueryRow(`
+SELECT id, product_id, product_title, source_config_json, report_markdown, report_summary, created_at, updated_at
+FROM creative_reports WHERE id = ?`, id))
+}
+
+func (s *Store) ReplaceProductChunks(productID string, chunks []ProductChunkInput) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM product_chunks WHERE product_id = ?`, productID); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, chunk := range chunks {
+		embeddingJSON, err := json.Marshal(chunk.Embedding)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+INSERT INTO product_chunks (
+  id, product_id, chunk_index, heading, content, embedding_json, embedding_model, embedding_dim, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			newID(), productID, chunk.ChunkIndex, chunk.Heading, chunk.Content, string(embeddingJSON),
+			chunk.EmbeddingModel, chunk.EmbeddingDim, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListProductChunks(productID string) ([]ProductChunk, error) {
+	rows, err := s.db.Query(`
+SELECT id, product_id, chunk_index, heading, content, embedding_json, embedding_model, embedding_dim, created_at
+FROM product_chunks
+WHERE product_id = ?
+ORDER BY chunk_index ASC`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []ProductChunk{}
+	for rows.Next() {
+		chunk, err := scanProductChunk(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *chunk)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	existing, _ := s.GetModelSettings()
+	apiKey := strings.TrimSpace(settings.APIKey)
+	if apiKey == "" && existing != nil {
+		apiKey = existing.APIKey
+	}
+	endpoint := strings.TrimSpace(settings.Endpoint)
+	if endpoint == "" {
+		endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+	}
+	modelName := strings.TrimSpace(settings.Model)
+	if modelName == "" {
+		modelName = "qwen3.6-plus"
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+INSERT INTO model_settings (id, api_key, endpoint, model, updated_at)
+VALUES ('default', ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  api_key = excluded.api_key,
+  endpoint = excluded.endpoint,
+  model = excluded.model,
+  updated_at = excluded.updated_at`,
+		apiKey, endpoint, modelName, now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ModelSettings{APIKey: apiKey, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
+}
+
+func (s *Store) GetModelSettings() (*ModelSettings, error) {
+	settings := &ModelSettings{}
+	var updatedAt string
+	var apiKey sql.NullString
+	err := s.db.QueryRow(`
+SELECT api_key, endpoint, model, updated_at
+FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &settings.Model, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	settings.APIKey = apiKey.String
+	settings.UpdatedAt = parseTime(updatedAt)
+	return settings, nil
+}
+
+func (s *Store) GetModelRuntimeConfig() (model.RuntimeConfig, error) {
+	settings, err := s.GetModelSettings()
+	if err != nil {
+		return model.RuntimeConfig{}, err
+	}
+	return model.RuntimeConfig{
+		APIKey:   settings.APIKey,
+		Endpoint: settings.Endpoint,
+		Model:    settings.Model,
+		Source:   "user",
+	}, nil
 }
 
 func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
@@ -103,17 +436,18 @@ func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
 		Requirement:       input.Requirement,
 		Industry:          input.Industry,
 		FissionCount:      input.FissionCount,
+		FissionDirections: input.FissionDirections,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	_, err := s.db.Exec(`
 INSERT INTO jobs (
   id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-  requirement, industry, fission_count, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  requirement, industry, fission_count, fission_directions, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Title, job.Status, job.VideoPath, job.VideoOriginalName,
 		job.ProductMDPath, job.ProductMDName, job.Requirement, job.Industry,
-		job.FissionCount, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
+		job.FissionCount, job.FissionDirections, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -124,7 +458,7 @@ INSERT INTO jobs (
 func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
@@ -146,7 +480,7 @@ FROM jobs ORDER BY created_at DESC`)
 func (s *Store) ListUnfinishedJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs
 WHERE status IN (?, ?, ?, ?, ?, ?, ?)
@@ -172,7 +506,7 @@ ORDER BY created_at ASC`,
 func (s *Store) GetJob(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-       requirement, industry, fission_count, analysis_markdown, replica_script_json,
+       requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
        fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
 FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
@@ -251,6 +585,180 @@ WHERE id = ?`,
 	return requireOne(res)
 }
 
+func (s *Store) CreateChatConversation(title string) (*ChatConversation, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	conversation := &ChatConversation{
+		ID:        newID(),
+		Title:     normalizeTitle(title),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := s.db.Exec(`
+INSERT INTO chat_conversations (id, title, created_at, updated_at)
+VALUES (?, ?, ?, ?)`,
+		conversation.ID, conversation.Title, now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return conversation, nil
+}
+
+func (s *Store) ListChatConversations() ([]ChatConversation, error) {
+	rows, err := s.db.Query(`
+SELECT id, title, summary, summary_message_id, created_at, updated_at
+FROM chat_conversations
+ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []ChatConversation{}
+	for rows.Next() {
+		conversation, err := scanChatConversation(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *conversation)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetChatThread(id string) (*ChatThread, error) {
+	conversation, err := scanChatConversation(s.db.QueryRow(`
+SELECT id, title, summary, summary_message_id, created_at, updated_at
+FROM chat_conversations WHERE id = ?`, id))
+	if err != nil {
+		return nil, err
+	}
+	messages, err := s.ListChatMessages(id)
+	if err != nil {
+		return nil, err
+	}
+	return &ChatThread{Conversation: *conversation, Messages: messages}, nil
+}
+
+func (s *Store) ListChatMessages(conversationID string) ([]ChatMessage, error) {
+	rows, err := s.db.Query(`
+SELECT id, conversation_id, role, content, created_at
+FROM chat_messages
+WHERE conversation_id = ?
+ORDER BY created_at ASC`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []ChatMessage{}
+	for rows.Next() {
+		message, err := scanChatMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *message)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) SaveChatSummary(conversationID, summary, summaryMessageID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	res, err := s.db.Exec(`
+UPDATE chat_conversations
+SET summary = ?, summary_message_id = ?
+WHERE id = ?`,
+		summary, summaryMessageID, conversationID)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
+}
+
+func (s *Store) AddChatMessage(conversationID, role, content string) (*ChatMessage, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	message := &ChatMessage{
+		ID:             newID(),
+		ConversationID: conversationID,
+		Role:           role,
+		Content:        content,
+		CreatedAt:      now,
+	}
+	res, err := s.db.Exec(`
+INSERT INTO chat_messages (id, conversation_id, role, content, created_at)
+VALUES (?, ?, ?, ?, ?)`,
+		message.ID, message.ConversationID, message.Role, message.Content, now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireOne(res); err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(`UPDATE chat_conversations SET updated_at = ? WHERE id = ?`, now.Format(time.RFC3339), conversationID); err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func (s *Store) RecordModelCall(_ context.Context, record model.CallRecord) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+INSERT INTO model_calls (
+  id, scope, ref_id, step, model, input_json, output_text, response_json,
+  prompt_tokens, output_tokens, total_tokens, latency_ms, error_message, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		newID(), valueOr(record.Scope, "unknown"), record.RefID, record.Step, record.Model,
+		record.InputJSON, record.OutputText, record.ResponseJSON,
+		record.PromptTokens, record.OutputTokens, record.TotalTokens, record.LatencyMS,
+		record.ErrorMessage, now.Format(time.RFC3339),
+	)
+	return err
+}
+
+func (s *Store) ListModelCalls(refID string, limit int) ([]ModelCall, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	query := `
+SELECT id, scope, ref_id, step, model, input_json, output_text, response_json,
+       prompt_tokens, output_tokens, total_tokens, latency_ms, error_message, created_at
+FROM model_calls`
+	args := []any{}
+	if strings.TrimSpace(refID) != "" {
+		query += ` WHERE ref_id = ?`
+		args = append(args, refID)
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []ModelCall{}
+	for rows.Next() {
+		call, err := scanModelCall(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *call)
+	}
+	return result, rows.Err()
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -259,11 +767,11 @@ func scanJob(row scanner) (*Job, error) {
 	var job Job
 	var createdAt, updatedAt string
 	var analysisMarkdown, replicaScriptJSON, fissionScriptsJSON sql.NullString
-	var creatibiResultJSON, errorMessage, runLog sql.NullString
+	var fissionDirections, creatibiResultJSON, errorMessage, runLog sql.NullString
 	err := row.Scan(
 		&job.ID, &job.Title, &job.Status, &job.VideoPath, &job.VideoOriginalName,
 		&job.ProductMDPath, &job.ProductMDName, &job.Requirement, &job.Industry,
-		&job.FissionCount, &analysisMarkdown, &replicaScriptJSON,
+		&job.FissionCount, &fissionDirections, &analysisMarkdown, &replicaScriptJSON,
 		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog,
 		&createdAt, &updatedAt,
 	)
@@ -271,6 +779,7 @@ func scanJob(row scanner) (*Job, error) {
 		return nil, err
 	}
 	job.AnalysisMarkdown = analysisMarkdown.String
+	job.FissionDirections = fissionDirections.String
 	job.ReplicaScriptJSON = replicaScriptJSON.String
 	job.FissionScriptsJSON = fissionScriptsJSON.String
 	job.CreatiBIResultJSON = creatibiResultJSON.String
@@ -279,6 +788,97 @@ func scanJob(row scanner) (*Job, error) {
 	job.CreatedAt = parseTime(createdAt)
 	job.UpdatedAt = parseTime(updatedAt)
 	return &job, nil
+}
+
+func scanChatConversation(row scanner) (*ChatConversation, error) {
+	var conversation ChatConversation
+	var createdAt, updatedAt string
+	var summary, summaryMessageID sql.NullString
+	if err := row.Scan(&conversation.ID, &conversation.Title, &summary, &summaryMessageID, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	conversation.Summary = summary.String
+	conversation.SummaryMessageID = summaryMessageID.String
+	conversation.CreatedAt = parseTime(createdAt)
+	conversation.UpdatedAt = parseTime(updatedAt)
+	return &conversation, nil
+}
+
+func scanProduct(row scanner) (*Product, error) {
+	var product Product
+	var createdAt, updatedAt string
+	if err := row.Scan(&product.ID, &product.Title, &product.MDPath, &product.MDName, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	product.CreatedAt = parseTime(createdAt)
+	product.UpdatedAt = parseTime(updatedAt)
+	return &product, nil
+}
+
+func scanCreativeReport(row scanner) (*CreativeReport, error) {
+	var report CreativeReport
+	var createdAt, updatedAt string
+	if err := row.Scan(
+		&report.ID,
+		&report.ProductID,
+		&report.ProductTitle,
+		&report.SourceConfigJSON,
+		&report.ReportMarkdown,
+		&report.ReportSummary,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return nil, err
+	}
+	report.CreatedAt = parseTime(createdAt)
+	report.UpdatedAt = parseTime(updatedAt)
+	return &report, nil
+}
+
+func scanProductChunk(row scanner) (*ProductChunk, error) {
+	var chunk ProductChunk
+	var embeddingJSON, createdAt string
+	if err := row.Scan(
+		&chunk.ID, &chunk.ProductID, &chunk.ChunkIndex, &chunk.Heading, &chunk.Content,
+		&embeddingJSON, &chunk.EmbeddingModel, &chunk.EmbeddingDim, &createdAt,
+	); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(embeddingJSON), &chunk.Embedding); err != nil {
+		return nil, err
+	}
+	chunk.CreatedAt = parseTime(createdAt)
+	return &chunk, nil
+}
+
+func scanChatMessage(row scanner) (*ChatMessage, error) {
+	var message ChatMessage
+	var createdAt string
+	if err := row.Scan(&message.ID, &message.ConversationID, &message.Role, &message.Content, &createdAt); err != nil {
+		return nil, err
+	}
+	message.CreatedAt = parseTime(createdAt)
+	return &message, nil
+}
+
+func scanModelCall(row scanner) (*ModelCall, error) {
+	var call ModelCall
+	var createdAt string
+	var inputJSON, outputText, responseJSON, errorMessage sql.NullString
+	if err := row.Scan(
+		&call.ID, &call.Scope, &call.RefID, &call.Step, &call.Model,
+		&inputJSON, &outputText, &responseJSON,
+		&call.PromptTokens, &call.OutputTokens, &call.TotalTokens, &call.LatencyMS,
+		&errorMessage, &createdAt,
+	); err != nil {
+		return nil, err
+	}
+	call.InputJSON = inputJSON.String
+	call.OutputText = outputText.String
+	call.ResponseJSON = responseJSON.String
+	call.ErrorMessage = errorMessage.String
+	call.CreatedAt = parseTime(createdAt)
+	return &call, nil
 }
 
 func (s *Store) ensureColumn(table, column, columnType string) error {
@@ -324,4 +924,22 @@ func requireOne(res sql.Result) error {
 		return errors.New("job not found")
 	}
 	return nil
+}
+
+func normalizeTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "新对话"
+	}
+	if len([]rune(title)) > 32 {
+		return string([]rune(title)[:32])
+	}
+	return title
+}
+
+func valueOr(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }

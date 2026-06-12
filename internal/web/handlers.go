@@ -1,16 +1,22 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
-	"path/filepath"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	chatpkg "github.com/tian1363/scriptagent/internal/chat"
+	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/videoprompt"
 )
 
 type Handler struct {
@@ -19,19 +25,30 @@ type Handler struct {
 	files     *storage.LocalStore
 	runner    *jobs.Runner
 	publisher Publisher
+	chat      ChatResponder
+	creative  *creative.Service
 }
 
 type Publisher interface {
 	Publish(job jobs.Job) (string, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner) *Handler {
+type ChatResponder interface {
+	Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error)
+}
+
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service) *Handler {
+	if publisher == nil {
+		publisher = disabledPublisher{}
+	}
 	return &Handler{
 		cfg:       cfg,
 		store:     store,
 		files:     files,
 		runner:    runner,
-		publisher: noopPublisher{},
+		publisher: publisher,
+		chat:      chat,
+		creative:  creativeReports,
 	}
 }
 
@@ -48,6 +65,10 @@ func (h *Handler) listJobs(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handler) listSkills(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, chatpkg.BuiltInSkills())
+}
+
 func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {
 	job, err := h.store.GetJob(chi.URLParam(r, "id"))
 	if err != nil {
@@ -55,6 +76,99 @@ func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (h *Handler) listProducts(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.store.ListProducts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(storage.MaxMarkdownBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	product, err := h.store.CreateProduct(jobs.CreateProductInput{
+		Title:  r.FormValue("title"),
+		MDPath: mdPath,
+		MDName: mdName,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, product)
+}
+
+func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
+	product, err := h.store.GetProduct(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	file, err := os.Open(product.MDPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, int64(storage.MaxMarkdownBytes)+1))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(content) > storage.MaxMarkdownBytes {
+		writeError(w, http.StatusBadRequest, errors.New("product Markdown is too large to preview"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":      product.ID,
+		"title":   product.Title,
+		"md_name": product.MDName,
+		"content": string(content),
+	})
+}
+
+func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
+	productID := chi.URLParam(r, "id")
+	if _, err := h.store.GetProduct(productID); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	reports, err := h.store.ListCreativeReports(productID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, reports)
+}
+
+func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
+	if h.creative == nil {
+		writeError(w, http.StatusBadRequest, errors.New("creative report service is not configured"))
+		return
+	}
+	var input creative.DataEyeConfig
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	report, err := h.creative.GenerateReport(r.Context(), chi.URLParam(r, "id"), input)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, report)
 }
 
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +182,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	product, err := h.resolveJobProduct(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -79,6 +193,11 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	fissionDirections := parseFissionDirections(r)
+	if err := validateFissionDirectionCount(fissionDirections, fissionCount); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	industry := r.FormValue("industry")
 	if industry == "" {
 		industry = "auto"
@@ -86,18 +205,19 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 
 	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
-		title = strings.TrimSuffix(mdName, filepath.Ext(mdName))
+		title = product.Title
 	}
 
 	job, err := h.store.CreateJob(jobs.CreateJobInput{
 		Title:             title,
 		VideoPath:         videoPath,
 		VideoOriginalName: videoName,
-		ProductMDPath:     mdPath,
-		ProductMDName:     mdName,
+		ProductMDPath:     product.MDPath,
+		ProductMDName:     product.MDName,
 		Requirement:       r.FormValue("requirement"),
 		Industry:          industry,
 		FissionCount:      fissionCount,
+		FissionDirections: fissionDirections,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -108,6 +228,22 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"job_id": job.ID,
 		"status": job.Status,
+	})
+}
+
+func (h *Handler) resolveJobProduct(r *http.Request) (*jobs.Product, error) {
+	productID := strings.TrimSpace(r.FormValue("product_id"))
+	if productID != "" {
+		return h.store.GetProduct(productID)
+	}
+	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
+	if err != nil {
+		return nil, errors.New("select a product or upload product Markdown")
+	}
+	return h.store.CreateProduct(jobs.CreateProductInput{
+		Title:  r.FormValue("product_title"),
+		MDPath: mdPath,
+		MDName: mdName,
 	})
 }
 
@@ -125,12 +261,15 @@ func (h *Handler) publishJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	_ = h.store.AppendLog(job.ID, "开始发布至 CreatiBI。")
 	result, err := h.publisher.Publish(*job)
 	if err != nil {
+		_ = h.store.AppendLog(job.ID, "发布至 CreatiBI 失败："+err.Error())
 		_ = h.store.SavePublishResult(job.ID, jobs.StatusCompleted, "", err.Error())
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
+	_ = h.store.AppendLog(job.ID, "发布至 CreatiBI 成功。")
 	if err := h.store.SavePublishResult(job.ID, jobs.StatusPublished, result, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -163,6 +302,182 @@ func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) generateVideoPrompts(w http.ResponseWriter, r *http.Request) {
+	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	var input struct {
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if input.Source == "" {
+		input.Source = r.URL.Query().Get("source")
+	}
+	content, err := videoprompt.GenerateFromJob(*job, input.Source)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"job_id":  job.ID,
+		"source":  valueOr(input.Source, "all"),
+		"content": content,
+	})
+}
+
+func (h *Handler) listChats(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.store.ListChatConversations()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) createChat(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	conversation, err := h.store.CreateChatConversation(input.Title)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, conversation)
+}
+
+func (h *Handler) getChat(w http.ResponseWriter, r *http.Request) {
+	thread, err := h.store.GetChatThread(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
+	if h.chat == nil {
+		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
+		return
+	}
+	var input struct {
+		Content   string `json:"content"`
+		ProductID string `json:"product_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	thread, err := h.chat.Send(r.Context(), chi.URLParam(r, "id"), input.Content, input.ProductID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
+	if h.chat == nil {
+		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
+		return
+	}
+	var input struct {
+		Content   string `json:"content"`
+		ProductID string `json:"product_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	thread, err := h.chat.Send(r.Context(), "", input.Content, input.ProductID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, thread)
+}
+
+func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	result, err := h.store.ListModelCalls(r.URL.Query().Get("ref_id"), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) getModelSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.publicModelSettings())
+}
+
+func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		APIKey   string `json:"api_key"`
+		Endpoint string `json:"endpoint"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if _, err := h.store.SaveModelSettings(jobs.ModelSettings{
+		APIKey:   input.APIKey,
+		Endpoint: input.Endpoint,
+		Model:    input.Model,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.publicModelSettings())
+}
+
+func (h *Handler) publicModelSettings() jobs.PublicModelSettings {
+	if settings, err := h.store.GetModelSettings(); err == nil && strings.TrimSpace(settings.APIKey) != "" {
+		return jobs.PublicModelSettings{
+			Configured: true,
+			Source:     "user",
+			APIKeyMask: maskAPIKey(settings.APIKey),
+			Endpoint:   settings.Endpoint,
+			Model:      settings.Model,
+			UpdatedAt:  settings.UpdatedAt,
+		}
+	}
+	apiKey := os.Getenv("DASHSCOPE_API_KEY")
+	return jobs.PublicModelSettings{
+		Configured: strings.TrimSpace(apiKey) != "",
+		Source:     "env",
+		APIKeyMask: maskAPIKey(apiKey),
+		Endpoint:   valueOr(os.Getenv("DASHSCOPE_ENDPOINT"), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"),
+		Model:      valueOr(os.Getenv("SCRIPT_AGENT_MODEL"), "qwen3.6-plus"),
+	}
+}
+
+func maskAPIKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "..." + value[len(value)-4:]
+}
+
 func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string, string, error) {
 	file, header, err := r.FormFile(field)
 	if err != nil {
@@ -174,6 +489,13 @@ func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string,
 		return "", "", err
 	}
 	return path, header.Filename, nil
+}
+
+func valueOr(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func isRunningStatus(status string) bool {
@@ -206,6 +528,30 @@ func parseFissionCount(raw string) (int, error) {
 	return value, nil
 }
 
+func parseFissionDirections(r *http.Request) string {
+	values := r.MultipartForm.Value["fission_directions"]
+	result := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	return strings.Join(result, "\n")
+}
+
+func validateFissionDirectionCount(raw string, expected int) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	actual := len(strings.Split(strings.TrimSpace(raw), "\n"))
+	if actual != expected {
+		return fmt.Errorf("fission_directions must contain exactly %d items, got %d", expected, actual)
+	}
+	return nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -216,18 +562,8 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-type noopPublisher struct{}
+type disabledPublisher struct{}
 
-func (noopPublisher) Publish(job jobs.Job) (string, error) {
-	payload, err := json.MarshalIndent(map[string]any{
-		"mode":        "noop",
-		"job_id":      job.ID,
-		"message":     "CreatiBI publisher is not configured yet.",
-		"script_ids":  []string{},
-		"script_link": "",
-	}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(payload), nil
+func (disabledPublisher) Publish(job jobs.Job) (string, error) {
+	return "", errors.New("CreatiBI publisher is not configured")
 }
