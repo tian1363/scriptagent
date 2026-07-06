@@ -472,6 +472,12 @@ POST /api/chats/{id}/messages
 - `content`: 用户消息，必填。
 - `product_id`: 可选，产品库产品 ID。传入后，ReAct Agent 可在需要产品资料时优先使用该产品调用检索工具。
 
+当用户上传素材附件时，同一接口使用 `multipart/form-data`：
+
+- `content`: 用户消息，可为空；为空时默认按“请分析我上传的素材”处理。
+- `product_id`: 可选，产品库产品 ID。
+- `attachment`: 可选，单个图片或视频文件；支持 png、jpg、jpeg、webp、gif、mp4、mov、webm。
+
 约束：
 
 - `product_id` 只影响本次消息的 ReAct 工具默认产品，不强制绑定整个会话。
@@ -479,6 +485,9 @@ POST /api/chats/{id}/messages
 - 模型调用日志中记录的是脱敏后的可见请求体，不记录 API Key。
 - ReAct Runner 要求模型每轮只输出一个严格 JSON 动作：`type=tool` 调用工具，或 `type=final` 输出最终答案。
 - ReAct 动作中的 `reason` 字段只保存可见决策摘要，不保存隐式逐字思维链。
+- 当本轮消息包含附件时，后端将附件保存到 `uploads/chat/`，并以 image/video data-uri 附加到 ReAct 模型输入。
+- 模型调用日志必须脱敏附件 data-uri，图片记录为 `[image omitted from log]`，视频记录为 `[video omitted from log]`。
+- 第一版通用对话每轮最多 1 个素材附件，data-uri 上限 20MB；超过限制时提示压缩或改用脚本任务视频上传流程。
 - Prompt 上下文按“系统角色 -> ReAct 协议 -> 长期会话摘要 -> 最近 12 条消息 -> 可用工具 -> 已执行步骤观察 -> 最后一条用户目标”的顺序组织。
 - 当会话消息超过阈值时，后端调用模型生成长期会话摘要，并保存到 `chat_conversations.summary`。
 - 摘要只压缩上次摘要之后、且不属于最近尾部窗口的旧消息；摘要失败不阻断本轮正常回复。

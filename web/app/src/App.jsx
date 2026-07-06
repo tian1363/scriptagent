@@ -186,6 +186,7 @@ export function App() {
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatDraft, setChatDraft] = useState("");
+  const [chatAttachment, setChatAttachment] = useState(null);
   const [chatProductId, setChatProductId] = useState("");
   const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
   const [typingMessage, setTypingMessage] = useState(null);
@@ -434,6 +435,7 @@ export function App() {
     setChatCitations([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
+    setChatAttachment(null);
     setSelectedChat(await getChat(id));
   }
 
@@ -445,31 +447,35 @@ export function App() {
     setChatCitations([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
+    setChatAttachment(null);
   }
 
   async function handleSendChat(event) {
     event.preventDefault();
     const content = chatDraft.trim();
-    if (!content) return;
+    if (!content && !chatAttachment) return;
     setError("");
     setIsSending(true);
     setIsChatThinking(true);
     setTypingMessage(null);
     setChatCitations([]);
     setChatAgentSteps([]);
+    const displayContent = [content || "请分析我上传的素材。", chatAttachment ? `附件：${chatAttachment.name}` : ""].filter(Boolean).join("\n\n");
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
       role: "user",
-      content,
+      content: displayContent,
       created_at: new Date().toISOString(),
     };
     const baseMessages = selectedChat?.messages || [];
     setOptimisticChatMessages([...baseMessages, tempUserMessage]);
+    const attachment = chatAttachment;
     setChatDraft("");
+    setChatAttachment(null);
     try {
       const thread = selectedChat?.conversation?.id
-        ? await sendChatMessage(selectedChat.conversation.id, content, chatProductId)
-        : await sendNewChatMessage(content, chatProductId);
+        ? await sendChatMessage(selectedChat.conversation.id, content, chatProductId, attachment)
+        : await sendNewChatMessage(content, chatProductId, attachment);
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
       setChatCitations(thread.citations || []);
@@ -698,6 +704,8 @@ export function App() {
               isSending={isSending}
               error={error}
               onDraft={setChatDraft}
+              attachment={chatAttachment}
+              onAttachment={setChatAttachment}
               onProduct={setChatProductId}
               onSend={handleSendChat}
             />
@@ -974,7 +982,25 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+function ChatWorkspace({
+  thread,
+  optimisticMessages,
+  typingMessage,
+  citations,
+  agentSteps,
+  isThinking,
+  draft,
+  products,
+  skills,
+  selectedProductId,
+  isSending,
+  error,
+  attachment,
+  onDraft,
+  onAttachment,
+  onProduct,
+  onSend,
+}) {
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
@@ -1047,8 +1073,25 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
-        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：帮我设计 3 个视听层裂变方向。" />
-        <button className="primary-button" type="submit" disabled={isSending || !draft.trim()}>
+        {attachment ? (
+          <div className="attachment-chip">
+            <span>{attachment.name}</span>
+            <button type="button" onClick={() => onAttachment(null)}>
+              移除
+            </button>
+          </div>
+        ) : null}
+        <label className="chat-attachment-button">
+          <Upload size={15} />
+          <span>素材</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+            onChange={(event) => onAttachment(event.target.files?.[0] || null)}
+          />
+        </label>
+        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：分析这个素材的前三秒钩子。" />
+        <button className="primary-button" type="submit" disabled={isSending || (!draft.trim() && !attachment)}>
           {isSending ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
           <span>{isSending ? "发送中" : "发送"}</span>
         </button>

@@ -45,6 +45,7 @@ type RunInput struct {
 	Goal          string
 	ContextPrompt string
 	Tools         []Tool
+	Attachments   []model.ContentItem
 }
 
 type actionEnvelope struct {
@@ -82,7 +83,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			Scope: valueOr(input.Scope, "react"),
 			RefID: input.RefID,
 			Step:  fmt.Sprintf("react_step_%02d", index+1),
-		}, []model.ContentItem{{Text: prompt}})
+		}, append([]model.ContentItem{{Text: prompt}}, input.Attachments...))
 		if err != nil {
 			return Result{Steps: steps}, err
 		}

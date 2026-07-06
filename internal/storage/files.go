@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	MaxVideoBytes    = 500 * 1024 * 1024
-	MaxMarkdownBytes = 2 * 1024 * 1024
+	MaxVideoBytes          = 500 * 1024 * 1024
+	MaxMarkdownBytes       = 2 * 1024 * 1024
+	MaxChatAttachmentBytes = 20 * 1024 * 1024
 )
 
 type LocalStore struct {
@@ -29,6 +30,9 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 	if kind == "video" && ext != ".mp4" && ext != ".mov" && ext != ".webm" {
 		return "", errors.New("unsupported video type")
 	}
+	if kind == "chat" && !isChatAttachmentExt(ext) {
+		return "", errors.New("unsupported chat attachment type")
+	}
 	if kind == "markdown" && ext != ".md" && ext != ".markdown" {
 		return "", errors.New("unsupported markdown type")
 	}
@@ -36,6 +40,9 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 	limit := int64(MaxVideoBytes)
 	if kind == "markdown" {
 		limit = MaxMarkdownBytes
+	}
+	if kind == "chat" {
+		limit = MaxChatAttachmentBytes
 	}
 	if header.Size > limit {
 		return "", errors.New("file is too large")
@@ -57,6 +64,15 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 		return "", err
 	}
 	return path, nil
+}
+
+func isChatAttachmentExt(ext string) bool {
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm":
+		return true
+	default:
+		return false
+	}
 }
 
 func randomName() string {

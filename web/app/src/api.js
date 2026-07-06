@@ -90,7 +90,17 @@ export async function getChat(id) {
   return request(`/api/chats/${id}`);
 }
 
-export async function sendNewChatMessage(content, productId = "") {
+export async function sendNewChatMessage(content, productId = "", attachment = null) {
+  if (attachment) {
+    const form = new FormData();
+    form.append("content", content);
+    form.append("product_id", productId);
+    form.append("attachment", attachment);
+    return request("/api/chats/messages", {
+      method: "POST",
+      body: form,
+    });
+  }
   return request("/api/chats/messages", {
     method: "POST",
     headers: jsonHeaders,
@@ -98,7 +108,17 @@ export async function sendNewChatMessage(content, productId = "") {
   });
 }
 
-export async function sendChatMessage(id, content, productId = "") {
+export async function sendChatMessage(id, content, productId = "", attachment = null) {
+  if (attachment) {
+    const form = new FormData();
+    form.append("content", content);
+    form.append("product_id", productId);
+    form.append("attachment", attachment);
+    return request(`/api/chats/${id}/messages`, {
+      method: "POST",
+      body: form,
+    });
+  }
   return request(`/api/chats/${id}/messages`, {
     method: "POST",
     headers: jsonHeaders,

@@ -269,6 +269,7 @@ func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext
 
 type ContentItem struct {
 	Text  string `json:"text,omitempty"`
+	Image string `json:"image,omitempty"`
 	Video string `json:"video,omitempty"`
 	FPS   int    `json:"fps,omitempty"`
 }
@@ -412,6 +413,9 @@ func sanitizedRequestBody(body requestBody) requestBody {
 		next := msg
 		next.Content = make([]ContentItem, 0, len(msg.Content))
 		for _, item := range msg.Content {
+			if item.Image != "" {
+				item.Image = "[image omitted from log]"
+			}
 			if item.Video != "" {
 				item.Video = "[video omitted from log]"
 			}

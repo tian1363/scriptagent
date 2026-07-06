@@ -2,11 +2,14 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"mime"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -22,6 +25,7 @@ const (
 	summaryTailMessageCount      = 8
 	maxProductContextChars       = 6000
 	maxProductSectionPreviewChar = 1800
+	maxChatAttachmentDataURI     = 20 * 1024 * 1024
 )
 
 type Service struct {
@@ -39,13 +43,24 @@ type BuiltInSkillInfo struct {
 	Content          string `json:"-"`
 }
 
+type AttachmentInput struct {
+	Path string
+	Name string
+	Kind string
+	Size int64
+}
+
 func NewService(store *jobs.Store, client *model.DashScopeClient) *Service {
 	return &Service{store: store, client: client, reactRunner: reactagent.New(client, 6)}
 }
 
 func (s *Service) Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error) {
+	return s.SendWithAttachments(ctx, conversationID, content, productID, nil)
+}
+
+func (s *Service) SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []AttachmentInput) (*jobs.ChatThread, error) {
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && len(attachments) == 0 {
 		return nil, errors.New("message content is required")
 	}
 	if s.client == nil {
@@ -56,7 +71,11 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	var messages []jobs.ChatMessage
 	var err error
 	if conversationID == "" {
-		conversation, err = s.store.CreateChatConversation(content)
+		title := content
+		if title == "" && len(attachments) > 0 {
+			title = "素材分析"
+		}
+		conversation, err = s.store.CreateChatConversation(title)
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +89,19 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 		messages = thread.Messages
 	}
 
-	userMessage, err := s.store.AddChatMessage(conversationID, "user", content)
+	displayContent := content
+	if displayContent == "" {
+		displayContent = "请分析我上传的素材。"
+	}
+	if len(attachments) > 0 {
+		displayContent += "\n\n附件：" + attachmentSummary(attachments)
+	}
+	modelAttachments, err := contentItemsForAttachments(attachments)
+	if err != nil {
+		return nil, err
+	}
+
+	userMessage, err := s.store.AddChatMessage(conversationID, "user", displayContent)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +112,10 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	reactResult, err := s.reactRunner.Run(ctx, reactagent.RunInput{
 		Scope:         "chat",
 		RefID:         conversationID,
-		Goal:          content,
+		Goal:          displayContent,
 		ContextPrompt: reactChatContextPrompt(messages, summary, productID),
 		Tools:         s.reactTools(conversationID, productID, content, &citations),
+		Attachments:   modelAttachments,
 	})
 	if err != nil {
 		return nil, err
@@ -181,6 +213,72 @@ func (s *Service) productContext(ctx context.Context, conversationID, productID,
 	}
 	selected, fallbackCitations := selectProductMarkdownContext(markdown, query, *product)
 	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), fallbackCitations, nil
+}
+
+func contentItemsForAttachments(attachments []AttachmentInput) ([]model.ContentItem, error) {
+	items := make([]model.ContentItem, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			continue
+		}
+		dataURL, mimeType, err := attachmentDataURL(attachment.Path)
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(mimeType, "image/") {
+			items = append(items, model.ContentItem{Image: dataURL})
+			continue
+		}
+		if strings.HasPrefix(mimeType, "video/") {
+			items = append(items, model.ContentItem{Video: dataURL, FPS: 2})
+			continue
+		}
+		return nil, fmt.Errorf("unsupported attachment MIME type %s", mimeType)
+	}
+	return items, nil
+}
+
+func attachmentDataURL(path string) (string, string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", "", err
+	}
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if mimeType == "" {
+		return "", "", errors.New("cannot determine attachment MIME type")
+	}
+	if dataURLByteLen(info.Size(), mimeType) > maxChatAttachmentDataURI {
+		return "", "", fmt.Errorf("attachment data-uri would be %.1fMB, exceeds %.1fMB limit; please compress the file or use the script task video upload", mb(dataURLByteLen(info.Size(), mimeType)), mb(maxChatAttachmentDataURI))
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), mimeType, nil
+}
+
+func dataURLByteLen(rawBytes int64, mimeType string) int64 {
+	return int64(len("data:"+mimeType+";base64,")) + int64(base64.StdEncoding.EncodedLen(int(rawBytes)))
+}
+
+func mb(bytes int64) float64 {
+	return float64(bytes) / 1024 / 1024
+}
+
+func attachmentSummary(attachments []AttachmentInput) string {
+	rows := []string{}
+	for _, attachment := range attachments {
+		name := strings.TrimSpace(attachment.Name)
+		if name == "" {
+			name = filepath.Base(attachment.Path)
+		}
+		kind := strings.TrimSpace(attachment.Kind)
+		if kind == "" {
+			kind = "素材"
+		}
+		rows = append(rows, fmt.Sprintf("%s（%s，%.1fMB）", name, kind, mb(attachment.Size)))
+	}
+	return strings.Join(rows, "、")
 }
 
 func (s *Service) reactTools(conversationID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
