@@ -6,6 +6,33 @@ export async function listJobs() {
   return request("/api/jobs");
 }
 
+export async function getCurrentUser() {
+  return request("/api/auth/me");
+}
+
+export async function login(input) {
+  return request("/api/auth/login", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function register(input) {
+  return request("/api/auth/register", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function logout() {
+  return request("/api/auth/logout", {
+    method: "POST",
+    headers: jsonHeaders,
+  });
+}
+
 export async function getJob(id) {
   return request(`/api/jobs/${id}`);
 }
@@ -138,7 +165,9 @@ async function request(path, init) {
   const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `Request failed: ${res.status}`);
+    const error = new Error(data.error || `Request failed: ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
   return data;
 }

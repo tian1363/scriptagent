@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"log"
+
+	"github.com/tian1363/scriptagent/internal/userctx"
 )
 
 type Agent interface {
@@ -36,12 +38,12 @@ func (r *Runner) ResumeUnfinished() {
 }
 
 func (r *Runner) run(jobID string) {
-	ctx := context.Background()
 	job, err := r.store.GetJob(jobID)
 	if err != nil {
 		log.Printf("load job %s: %v", jobID, err)
 		return
 	}
+	ctx := userctx.WithUser(context.Background(), userctx.User{ID: job.UserID})
 	progress := func(status, message string) {
 		if status != "" {
 			if err := r.store.UpdateStatus(job.ID, status, ""); err != nil {

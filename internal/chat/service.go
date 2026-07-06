@@ -17,6 +17,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/reactagent"
+	"github.com/tian1363/scriptagent/internal/userctx"
 )
 
 const (
@@ -70,18 +71,19 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 	var conversation *jobs.ChatConversation
 	var messages []jobs.ChatMessage
 	var err error
+	userID := userctx.UserID(ctx)
 	if conversationID == "" {
 		title := content
 		if title == "" && len(attachments) > 0 {
 			title = "素材分析"
 		}
-		conversation, err = s.store.CreateChatConversation(title)
+		conversation, err = s.store.CreateChatConversation(userID, title)
 		if err != nil {
 			return nil, err
 		}
 		conversationID = conversation.ID
 	} else {
-		thread, err := s.store.GetChatThread(conversationID)
+		thread, err := s.store.GetChatThread(userID, conversationID)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +116,7 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 		RefID:         conversationID,
 		Goal:          displayContent,
 		ContextPrompt: reactChatContextPrompt(messages, summary, productID),
-		Tools:         s.reactTools(conversationID, productID, content, &citations),
+		Tools:         s.reactTools(userID, conversationID, productID, content, &citations),
 		Attachments:   modelAttachments,
 	})
 	if err != nil {
@@ -123,7 +125,7 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 	if _, err := s.store.AddChatMessage(conversationID, "assistant", reactResult.Answer); err != nil {
 		return nil, err
 	}
-	thread, err := s.store.GetChatThread(conversationID)
+	thread, err := s.store.GetChatThread(userID, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +185,12 @@ func (s *Service) refreshSummary(ctx context.Context, conversationID string, con
 	return summary
 }
 
-func (s *Service) productContext(ctx context.Context, conversationID, productID, query string) (string, []jobs.ProductCitation, error) {
+func (s *Service) productContext(ctx context.Context, userID, conversationID, productID, query string) (string, []jobs.ProductCitation, error) {
 	productID = strings.TrimSpace(productID)
 	if productID == "" {
 		return "", nil, nil
 	}
-	product, err := s.store.GetProduct(productID)
+	product, err := s.store.GetProduct(userID, productID)
 	if err != nil {
 		return "", nil, fmt.Errorf("get product: %w", err)
 	}
@@ -281,14 +283,14 @@ func attachmentSummary(attachments []AttachmentInput) string {
 	return strings.Join(rows, "、")
 }
 
-func (s *Service) reactTools(conversationID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
+func (s *Service) reactTools(userID, conversationID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
 	return []reactagent.Tool{
 		{
 			Name:        "list_products",
 			Description: "列出产品库中的产品，适合在用户没有明确产品时先确认可用产品。",
 			InputSchema: `{}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
-				products, err := s.store.ListProducts()
+				products, err := s.store.ListProducts(userID)
 				if err != nil {
 					return "", err
 				}
@@ -329,7 +331,7 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 				if query == "" {
 					query = userQuery
 				}
-				contextText, foundCitations, err := s.productContext(ctx, conversationID, productID, query)
+				contextText, foundCitations, err := s.productContext(ctx, userID, conversationID, productID, query)
 				if err != nil {
 					return "", err
 				}
@@ -356,7 +358,7 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 				if productID == "" {
 					return "", errors.New("product_id is required when no product is selected")
 				}
-				product, err := s.store.GetProduct(productID)
+				product, err := s.store.GetProduct(userID, productID)
 				if err != nil {
 					return "", err
 				}

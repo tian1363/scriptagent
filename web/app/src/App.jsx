@@ -15,7 +15,11 @@ import {
   Send,
   Settings,
   KeyRound,
+  LogOut,
+  Mail,
+  ShieldCheck,
   Upload,
+  UserRound,
   Video,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,6 +28,7 @@ import {
   createCreativeReport,
   createProduct,
   generateVideoPrompts,
+  getCurrentUser,
   getModelSettings,
   getChat,
   getJob,
@@ -34,7 +39,10 @@ import {
   listChats,
   listJobs,
   listModelCalls,
+  login,
+  logout,
   publishJob,
+  register,
   retryJob,
   saveModelSettings,
   sendChatMessage,
@@ -159,6 +167,9 @@ const chatQuickTasks = [
 ];
 
 export function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [authError, setAuthError] = useState("");
   const [view, setView] = useState("products");
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
@@ -252,13 +263,21 @@ export function App() {
   }
 
   useEffect(() => {
+    getCurrentUser()
+      .then((user) => setCurrentUser(user))
+      .catch(() => setCurrentUser(null))
+      .finally(() => setIsCheckingAuth(false));
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
     refreshJobs().catch((err) => setError(err.message));
     refreshChats().catch(() => {});
     if (showDebugPanel) refreshModelCalls().catch(() => {});
     refreshProducts().catch(() => {});
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
-  }, []);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     window.localStorage.setItem("scriptagent:debug-panel", showDebugPanel ? "true" : "false");
@@ -386,6 +405,29 @@ export function App() {
     } finally {
       setIsCreating(false);
     }
+  }
+
+  async function handleAuthSubmit(mode, values) {
+    setAuthError("");
+    const action = mode === "register" ? register : login;
+    try {
+      const user = await action(values);
+      setCurrentUser(user);
+      setView("products");
+    } catch (err) {
+      setAuthError(err.message);
+    }
+  }
+
+  async function handleLogout() {
+    await logout().catch(() => {});
+    setCurrentUser(null);
+    setSelectedJob(null);
+    setSelectedChat(null);
+    setJobs([]);
+    setProducts([]);
+    setChats([]);
+    setModelCalls([]);
   }
 
   async function handleSelectJob(id) {
@@ -599,6 +641,21 @@ export function App() {
     handleStartProductJob(report.product_id, requirement);
   }
 
+  if (isCheckingAuth) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card compact-auth-card">
+          <img src={logo} alt="ScriptAgent" />
+          <p>正在恢复登录状态...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthGate error={authError} onSubmit={handleAuthSubmit} />;
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -631,6 +688,11 @@ export function App() {
         </div>
         <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新">
           <RefreshCw size={16} />
+        </button>
+        <button className="user-button" type="button" onClick={handleLogout} title="退出登录">
+          <UserRound size={15} />
+          <span>{currentUser.name || currentUser.email}</span>
+          <LogOut size={14} />
         </button>
       </header>
 
@@ -724,6 +786,76 @@ export function App() {
         </section>
       </main>
     </div>
+  );
+}
+
+function AuthGate({ error, onSubmit }) {
+  const [mode, setMode] = useState("login");
+  const isRegister = mode === "register";
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    onSubmit(mode, {
+      email: String(form.get("email") || ""),
+      password: String(form.get("password") || ""),
+      name: String(form.get("name") || ""),
+    });
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand">
+          <img src={logo} alt="ScriptAgent" />
+          <span className="status-pill neutral">
+            <ShieldCheck size={13} />
+            多人隔离版
+          </span>
+        </div>
+        <div>
+          <h1>{isRegister ? "创建你的 ScriptAgent 工作区" : "登录 ScriptAgent"}</h1>
+          <p>产品、脚本任务、通用对话和模型配置都会绑定到当前账号。API Key 加密保存，不与其他用户共享。</p>
+        </div>
+        <div className="auth-tabs">
+          <button type="button" className={!isRegister ? "active" : ""} onClick={() => setMode("login")}>
+            登录
+          </button>
+          <button type="button" className={isRegister ? "active" : ""} onClick={() => setMode("register")}>
+            注册
+          </button>
+        </div>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {isRegister ? (
+            <label>
+              <span>名称</span>
+              <input name="name" type="text" placeholder="团队或个人名称" autoComplete="name" />
+            </label>
+          ) : null}
+          <label>
+            <span>邮箱</span>
+            <div className="input-with-icon">
+              <Mail size={15} />
+              <input name="email" type="email" placeholder="you@example.com" autoComplete="email" required />
+            </div>
+          </label>
+          <label>
+            <span>密码</span>
+            <div className="input-with-icon">
+              <KeyRound size={15} />
+              <input name="password" type="password" placeholder="至少 8 位" autoComplete={isRegister ? "new-password" : "current-password"} required />
+            </div>
+          </label>
+          {error ? <div className="error-banner">{error}</div> : null}
+          <button className="primary-button wide-button" type="submit">
+            <span>{isRegister ? "创建账号" : "登录"}</span>
+          </button>
+        </form>
+        <div className="auth-provider-note">
+          <span>手机号验证码、微信登录已按 provider 方式预留，接入时需要短信服务商配置和微信 AppID/Secret。</span>
+        </div>
+      </section>
+    </main>
   );
 }
 

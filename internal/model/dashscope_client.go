@@ -47,7 +47,7 @@ type RuntimeConfig struct {
 }
 
 type ConfigProvider interface {
-	GetModelRuntimeConfig() (RuntimeConfig, error)
+	GetModelRuntimeConfig(ctx context.Context) (RuntimeConfig, error)
 }
 
 func NewDashScopeClient(cfg DashScopeConfig) *DashScopeClient {
@@ -93,7 +93,7 @@ func (c *DashScopeClient) Generate(ctx context.Context, content []ContentItem) (
 }
 
 func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (Generation, error) {
-	runtime := c.runtimeConfig()
+	runtime := c.runtimeConfig(ctx)
 	if runtime.APIKey == "" {
 		return Generation{}, errors.New("DASHSCOPE_API_KEY is not configured")
 	}
@@ -174,7 +174,7 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	return Generation{}, err
 }
 
-func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
+func (c *DashScopeClient) runtimeConfig(ctx context.Context) RuntimeConfig {
 	runtime := RuntimeConfig{
 		APIKey:   c.apiKey,
 		Endpoint: c.endpoint,
@@ -182,7 +182,7 @@ func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 		Source:   "env",
 	}
 	if c.provider != nil {
-		if provided, err := c.provider.GetModelRuntimeConfig(); err == nil && provided.APIKey != "" {
+		if provided, err := c.provider.GetModelRuntimeConfig(ctx); err == nil && provided.APIKey != "" {
 			runtime.APIKey = provided.APIKey
 			runtime.Endpoint = valueOr(provided.Endpoint, runtime.Endpoint)
 			runtime.Model = valueOr(provided.Model, runtime.Model)
@@ -193,7 +193,7 @@ func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 }
 
 func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext, texts []string, textType string) (EmbeddingGeneration, error) {
-	runtime := c.runtimeConfig()
+	runtime := c.runtimeConfig(ctx)
 	if runtime.APIKey == "" {
 		return EmbeddingGeneration{}, errors.New("DASHSCOPE_API_KEY is not configured")
 	}

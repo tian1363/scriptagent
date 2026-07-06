@@ -13,6 +13,7 @@ func TestStoreProducts(t *testing.T) {
 	defer store.Close()
 
 	created, err := store.CreateProduct(CreateProductInput{
+		UserID: "user-a",
 		Title:  "测试产品",
 		MDPath: "/tmp/product.md",
 		MDName: "product.md",
@@ -21,7 +22,7 @@ func TestStoreProducts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := store.GetProduct(created.ID)
+	got, err := store.GetProduct("user-a", created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,12 +30,19 @@ func TestStoreProducts(t *testing.T) {
 		t.Fatalf("unexpected product: %+v", got)
 	}
 
-	products, err := store.ListProducts()
+	products, err := store.ListProducts("user-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(products) != 1 {
 		t.Fatalf("expected 1 product, got %d", len(products))
+	}
+	otherProducts, err := store.ListProducts("user-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(otherProducts) != 0 {
+		t.Fatalf("expected product isolation, got %d products", len(otherProducts))
 	}
 }
 
@@ -46,6 +54,7 @@ func TestStoreProductChunks(t *testing.T) {
 	defer store.Close()
 
 	product, err := store.CreateProduct(CreateProductInput{
+		UserID: "user-a",
 		Title:  "测试产品",
 		MDPath: "/tmp/product.md",
 		MDName: "product.md",
@@ -86,6 +95,7 @@ func TestStoreCreativeReports(t *testing.T) {
 	defer store.Close()
 
 	product, err := store.CreateProduct(CreateProductInput{
+		UserID: "user-a",
 		Title:  "测试产品",
 		MDPath: "/tmp/product.md",
 		MDName: "product.md",
@@ -94,6 +104,7 @@ func TestStoreCreativeReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := store.CreateCreativeReport(CreateCreativeReportInput{
+		UserID:           "user-a",
 		ProductID:        product.ID,
 		ProductTitle:     product.Title,
 		SourceConfigJSON: `{"range":"30d"}`,
@@ -103,19 +114,26 @@ func TestStoreCreativeReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.GetCreativeReport(created.ID)
+	got, err := store.GetCreativeReport("user-a", created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.ProductID != product.ID || got.ReportSummary != "创意方向摘要" {
 		t.Fatalf("unexpected report: %+v", got)
 	}
-	reports, err := store.ListCreativeReports(product.ID)
+	reports, err := store.ListCreativeReports("user-a", product.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(reports) != 1 {
 		t.Fatalf("expected 1 report, got %d", len(reports))
+	}
+	otherReports, err := store.ListCreativeReports("user-b", product.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(otherReports) != 0 {
+		t.Fatalf("expected report isolation, got %d reports", len(otherReports))
 	}
 }
 
@@ -126,7 +144,7 @@ func TestStoreModelRuntimeConfig(t *testing.T) {
 	}
 	defer store.Close()
 
-	if _, err := store.SaveModelSettings(ModelSettings{
+	if _, err := store.SaveModelSettings("user-a", ModelSettings{
 		APIKey:   "sk-test",
 		Endpoint: "https://example.com/api",
 		Model:    "qwen-test",
@@ -134,11 +152,14 @@ func TestStoreModelRuntimeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runtime, err := store.GetModelRuntimeConfig()
+	settings, err := store.GetModelSettings("user-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.APIKey != "sk-test" || runtime.Endpoint != "https://example.com/api" || runtime.Model != "qwen-test" || runtime.Source != "user" {
-		t.Fatalf("unexpected runtime config: %+v", runtime)
+	if settings.APIKey != "sk-test" || settings.Endpoint != "https://example.com/api" || settings.Model != "qwen-test" {
+		t.Fatalf("unexpected model settings: %+v", settings)
+	}
+	if _, err := store.GetModelSettings("user-b"); err == nil {
+		t.Fatal("expected user-b settings to be missing")
 	}
 }

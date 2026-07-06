@@ -37,14 +37,14 @@ func NewService(store *jobs.Store, client *model.DashScopeClient) *Service {
 	return &Service{store: store, client: client}
 }
 
-func (s *Service) GenerateReport(ctx context.Context, productID string, config DataEyeConfig) (*jobs.CreativeReport, error) {
+func (s *Service) GenerateReport(ctx context.Context, userID, productID string, config DataEyeConfig) (*jobs.CreativeReport, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("creative report service is not configured")
 	}
 	if s.client == nil {
 		return nil, errors.New("model client is not configured")
 	}
-	product, err := s.store.GetProduct(strings.TrimSpace(productID))
+	product, err := s.store.GetProduct(strings.TrimSpace(userID), strings.TrimSpace(productID))
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +70,7 @@ func (s *Service) GenerateReport(ctx context.Context, productID string, config D
 		return nil, errors.New("creative report is empty")
 	}
 	return s.store.CreateCreativeReport(jobs.CreateCreativeReportInput{
+		UserID:           userID,
 		ProductID:        product.ID,
 		ProductTitle:     product.Title,
 		SourceConfigJSON: string(configJSON),

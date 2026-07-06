@@ -11,12 +11,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	authsvc "github.com/tian1363/scriptagent/internal/auth"
 	chatpkg "github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/secret"
 	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/userctx"
 	"github.com/tian1363/scriptagent/internal/videoprompt"
 )
 
@@ -28,6 +32,8 @@ type Handler struct {
 	publisher Publisher
 	chat      ChatResponder
 	creative  *creative.Service
+	auth      *authsvc.Service
+	secrets   *secret.Box
 }
 
 type Publisher interface {
@@ -39,7 +45,7 @@ type ChatResponder interface {
 	SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []chatpkg.AttachmentInput) (*jobs.ChatThread, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service) *Handler {
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service, authService *authsvc.Service, secrets *secret.Box) *Handler {
 	if publisher == nil {
 		publisher = disabledPublisher{}
 	}
@@ -51,6 +57,8 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		publisher: publisher,
 		chat:      chat,
 		creative:  creativeReports,
+		auth:      authService,
+		secrets:   secrets,
 	}
 }
 
@@ -58,8 +66,115 @@ func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *Handler) listJobs(w http.ResponseWriter, _ *http.Request) {
-	result, err := h.store.ListJobs()
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	user, session, err := h.auth.Register(input.Email, input.Password, input.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	h.setSessionCookie(w, session)
+	writeJSON(w, http.StatusCreated, publicUser(user))
+}
+
+func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	user, session, err := h.auth.Login(input.Email, input.Password)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	h.setSessionCookie(w, session)
+	writeJSON(w, http.StatusOK, publicUser(user))
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(authsvc.CookieName()); err == nil {
+		_ = h.auth.Logout(cookie.Value)
+	}
+	http.SetCookie(w, expiredSessionCookie())
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
+	user, ok := userctx.FromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, errors.New("not authenticated"))
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *Handler) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.auth == nil {
+			writeError(w, http.StatusUnauthorized, errors.New("auth is not configured"))
+			return
+		}
+		cookie, err := r.Cookie(authsvc.CookieName())
+		if err != nil || strings.TrimSpace(cookie.Value) == "" {
+			writeError(w, http.StatusUnauthorized, errors.New("login required"))
+			return
+		}
+		user, err := h.auth.Authenticate(cookie.Value)
+		if err != nil {
+			http.SetCookie(w, expiredSessionCookie())
+			writeError(w, http.StatusUnauthorized, errors.New("login required"))
+			return
+		}
+		ctx := userctx.WithUser(r.Context(), userctx.User{ID: user.ID, Email: user.Email, Name: user.Name})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (h *Handler) setSessionCookie(w http.ResponseWriter, session *jobs.Session) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authsvc.CookieName(),
+		Value:    session.Token,
+		Path:     "/",
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func expiredSessionCookie() *http.Cookie {
+	return &http.Cookie{
+		Name:     authsvc.CookieName(),
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+func publicUser(user *jobs.User) userctx.User {
+	return userctx.User{ID: user.ID, Email: user.Email, Name: user.Name}
+}
+
+func userIDFromRequest(r *http.Request) string {
+	return userctx.UserID(r.Context())
+}
+
+func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
+	result, err := h.store.ListJobs(userIDFromRequest(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -72,7 +187,7 @@ func (h *Handler) listSkills(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {
-	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	job, err := h.store.GetUserJob(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -80,8 +195,8 @@ func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
-func (h *Handler) listProducts(w http.ResponseWriter, _ *http.Request) {
-	result, err := h.store.ListProducts()
+func (h *Handler) listProducts(w http.ResponseWriter, r *http.Request) {
+	result, err := h.store.ListProducts(userIDFromRequest(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -100,6 +215,7 @@ func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	product, err := h.store.CreateProduct(jobs.CreateProductInput{
+		UserID: userIDFromRequest(r),
 		Title:  r.FormValue("title"),
 		MDPath: mdPath,
 		MDName: mdName,
@@ -112,7 +228,7 @@ func (h *Handler) createProduct(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
-	product, err := h.store.GetProduct(chi.URLParam(r, "id"))
+	product, err := h.store.GetProduct(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -143,11 +259,11 @@ func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
 	productID := chi.URLParam(r, "id")
-	if _, err := h.store.GetProduct(productID); err != nil {
+	if _, err := h.store.GetProduct(userIDFromRequest(r), productID); err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	reports, err := h.store.ListCreativeReports(productID)
+	reports, err := h.store.ListCreativeReports(userIDFromRequest(r), productID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -165,7 +281,7 @@ func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	report, err := h.creative.GenerateReport(r.Context(), chi.URLParam(r, "id"), input)
+	report, err := h.creative.GenerateReport(r.Context(), userIDFromRequest(r), chi.URLParam(r, "id"), input)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -211,6 +327,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := h.store.CreateJob(jobs.CreateJobInput{
+		UserID:            userIDFromRequest(r),
 		Title:             title,
 		VideoPath:         videoPath,
 		VideoOriginalName: videoName,
@@ -234,15 +351,17 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) resolveJobProduct(r *http.Request) (*jobs.Product, error) {
+	userID := userIDFromRequest(r)
 	productID := strings.TrimSpace(r.FormValue("product_id"))
 	if productID != "" {
-		return h.store.GetProduct(productID)
+		return h.store.GetProduct(userID, productID)
 	}
 	mdPath, mdName, err := h.saveRequiredFile(r, "product_md", "markdown")
 	if err != nil {
 		return nil, errors.New("select a product or upload product Markdown")
 	}
 	return h.store.CreateProduct(jobs.CreateProductInput{
+		UserID: userID,
 		Title:  r.FormValue("product_title"),
 		MDPath: mdPath,
 		MDName: mdName,
@@ -250,7 +369,7 @@ func (h *Handler) resolveJobProduct(r *http.Request) (*jobs.Product, error) {
 }
 
 func (h *Handler) publishJob(w http.ResponseWriter, r *http.Request) {
-	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	job, err := h.store.GetUserJob(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -280,7 +399,7 @@ func (h *Handler) publishJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
-	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	job, err := h.store.GetUserJob(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -305,7 +424,7 @@ func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) generateVideoPrompts(w http.ResponseWriter, r *http.Request) {
-	job, err := h.store.GetJob(chi.URLParam(r, "id"))
+	job, err := h.store.GetUserJob(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -332,8 +451,8 @@ func (h *Handler) generateVideoPrompts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) listChats(w http.ResponseWriter, _ *http.Request) {
-	result, err := h.store.ListChatConversations()
+func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
+	result, err := h.store.ListChatConversations(userIDFromRequest(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -349,7 +468,7 @@ func (h *Handler) createChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	conversation, err := h.store.CreateChatConversation(input.Title)
+	conversation, err := h.store.CreateChatConversation(userIDFromRequest(r), input.Title)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -358,7 +477,7 @@ func (h *Handler) createChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getChat(w http.ResponseWriter, r *http.Request) {
-	thread, err := h.store.GetChatThread(chi.URLParam(r, "id"))
+	thread, err := h.store.GetChatThread(userIDFromRequest(r), chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -429,7 +548,7 @@ func (h *Handler) parseChatMessageInput(r *http.Request) (chatMessageInput, []ch
 			return chatMessageInput{}, nil, err
 		}
 		defer file.Close()
-		path, err := h.files.SaveUpload(file, header, "chat")
+		path, err := h.files.SaveUserUpload(userIDFromRequest(r), file, header, "chat")
 		if err != nil {
 			return chatMessageInput{}, nil, err
 		}
@@ -465,7 +584,7 @@ func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	result, err := h.store.ListModelCalls(r.URL.Query().Get("ref_id"), limit)
+	result, err := h.store.ListModelCalls(userIDFromRequest(r), r.URL.Query().Get("ref_id"), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -473,8 +592,8 @@ func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (h *Handler) getModelSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.publicModelSettings())
+func (h *Handler) getModelSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.publicModelSettings(r))
 }
 
 func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
@@ -487,23 +606,43 @@ func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if _, err := h.store.SaveModelSettings(jobs.ModelSettings{
-		APIKey:   input.APIKey,
+	encryptedKey := ""
+	if strings.TrimSpace(input.APIKey) != "" {
+		var err error
+		encryptedKey, err = h.secrets.Encrypt(input.APIKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	} else if existing, err := h.store.GetModelSettings(userIDFromRequest(r)); err == nil && strings.TrimSpace(existing.APIKey) != "" && !strings.HasPrefix(existing.APIKey, "v1:") {
+		var encryptErr error
+		encryptedKey, encryptErr = h.secrets.Encrypt(existing.APIKey)
+		if encryptErr != nil {
+			writeError(w, http.StatusInternalServerError, encryptErr)
+			return
+		}
+	}
+	if _, err := h.store.SaveModelSettings(userIDFromRequest(r), jobs.ModelSettings{
+		APIKey:   encryptedKey,
 		Endpoint: input.Endpoint,
 		Model:    input.Model,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.publicModelSettings())
+	writeJSON(w, http.StatusOK, h.publicModelSettings(r))
 }
 
-func (h *Handler) publicModelSettings() jobs.PublicModelSettings {
-	if settings, err := h.store.GetModelSettings(); err == nil && strings.TrimSpace(settings.APIKey) != "" {
+func (h *Handler) publicModelSettings(r *http.Request) jobs.PublicModelSettings {
+	if settings, err := h.store.GetModelSettings(userIDFromRequest(r)); err == nil && strings.TrimSpace(settings.APIKey) != "" {
+		apiKey, decryptErr := h.secrets.Decrypt(settings.APIKey)
+		if decryptErr != nil {
+			apiKey = ""
+		}
 		return jobs.PublicModelSettings{
 			Configured: true,
 			Source:     "user",
-			APIKeyMask: maskAPIKey(settings.APIKey),
+			APIKeyMask: maskAPIKey(apiKey),
 			Endpoint:   settings.Endpoint,
 			Model:      settings.Model,
 			UpdatedAt:  settings.UpdatedAt,
@@ -536,7 +675,7 @@ func (h *Handler) saveRequiredFile(r *http.Request, field, kind string) (string,
 		return "", "", err
 	}
 	defer file.Close()
-	path, err := h.files.SaveUpload(file, header, kind)
+	path, err := h.files.SaveUserUpload(userIDFromRequest(r), file, header, kind)
 	if err != nil {
 		return "", "", err
 	}

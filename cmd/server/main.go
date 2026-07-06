@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,12 +10,15 @@ import (
 	"time"
 
 	"github.com/tian1363/scriptagent/internal/agent"
+	authsvc "github.com/tian1363/scriptagent/internal/auth"
 	"github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creatibi"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
+	"github.com/tian1363/scriptagent/internal/secret"
 	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/userctx"
 	webserver "github.com/tian1363/scriptagent/internal/web"
 )
 
@@ -40,9 +44,10 @@ func main() {
 	defer store.Close()
 
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
-	modelClient := buildModelClient(store)
+	secretBox := secret.NewBox(env("APP_ENCRYPTION_KEY", "scriptagent-dev-only-change-me"))
+	modelClient := buildModelClient(store, secretBox)
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient))
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient), authsvc.NewService(store), secretBox)
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
@@ -73,7 +78,7 @@ func buildAgent(client *model.DashScopeClient) jobs.Agent {
 	})
 }
 
-func buildModelClient(store *jobs.Store) *model.DashScopeClient {
+func buildModelClient(store *jobs.Store, box *secret.Box) *model.DashScopeClient {
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
 	return model.NewDashScopeClient(model.DashScopeConfig{
 		APIKey:              apiKey,
@@ -83,8 +88,58 @@ func buildModelClient(store *jobs.Store) *model.DashScopeClient {
 		EmbeddingModel:      env("SCRIPT_AGENT_EMBEDDING_MODEL", "text-embedding-v4"),
 		EmbeddingDimensions: envInt("SCRIPT_AGENT_EMBEDDING_DIMENSIONS", 1024),
 		Recorder:            store,
-		Provider:            store,
+		Provider: modelConfigProvider{
+			store:       store,
+			box:         box,
+			envAPIKey:   apiKey,
+			envEndpoint: env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
+			envModel:    env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
+		},
 	})
+}
+
+type modelConfigProvider struct {
+	store       *jobs.Store
+	box         *secret.Box
+	envAPIKey   string
+	envEndpoint string
+	envModel    string
+}
+
+func (p modelConfigProvider) GetModelRuntimeConfig(ctx context.Context) (model.RuntimeConfig, error) {
+	runtime := model.RuntimeConfig{
+		APIKey:   p.envAPIKey,
+		Endpoint: p.envEndpoint,
+		Model:    p.envModel,
+		Source:   "env",
+	}
+	userID := userctx.UserID(ctx)
+	if userID == "" {
+		return runtime, nil
+	}
+	settings, err := p.store.GetModelSettings(userID)
+	if err != nil {
+		return runtime, nil
+	}
+	apiKey, err := p.box.Decrypt(settings.APIKey)
+	if err != nil {
+		return runtime, err
+	}
+	if apiKey == "" {
+		return runtime, nil
+	}
+	runtime.APIKey = apiKey
+	runtime.Endpoint = envValue(settings.Endpoint, runtime.Endpoint)
+	runtime.Model = envValue(settings.Model, runtime.Model)
+	runtime.Source = "user"
+	return runtime, nil
+}
+
+func envValue(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func env(key, fallback string) string {

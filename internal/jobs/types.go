@@ -18,6 +18,7 @@ const (
 
 type Job struct {
 	ID                 string    `json:"id"`
+	UserID             string    `json:"-"`
 	Title              string    `json:"title"`
 	Status             string    `json:"status"`
 	VideoPath          string    `json:"video_path"`
@@ -40,6 +41,7 @@ type Job struct {
 
 type Product struct {
 	ID        string    `json:"id"`
+	UserID    string    `json:"-"`
 	Title     string    `json:"title"`
 	MDPath    string    `json:"md_path"`
 	MDName    string    `json:"md_name"`
@@ -47,8 +49,37 @@ type Product struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name,omitempty"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type CreateUserInput struct {
+	Email        string
+	Name         string
+	PasswordHash string
+}
+
+type Session struct {
+	Token     string    `json:"-"`
+	UserID    string    `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateSessionInput struct {
+	Token     string
+	UserID    string
+	ExpiresAt time.Time
+}
+
 type CreativeReport struct {
 	ID               string    `json:"id"`
+	UserID           string    `json:"-"`
 	ProductID        string    `json:"product_id"`
 	ProductTitle     string    `json:"product_title"`
 	SourceConfigJSON string    `json:"source_config_json"`
@@ -59,6 +90,7 @@ type CreativeReport struct {
 }
 
 type CreateCreativeReportInput struct {
+	UserID           string
 	ProductID        string
 	ProductTitle     string
 	SourceConfigJSON string
@@ -99,6 +131,7 @@ type ProductChunkInput struct {
 }
 
 type CreateJobInput struct {
+	UserID            string
 	Title             string
 	VideoPath         string
 	VideoOriginalName string
@@ -111,6 +144,7 @@ type CreateJobInput struct {
 }
 
 type CreateProductInput struct {
+	UserID string
 	Title  string
 	MDPath string
 	MDName string
@@ -140,6 +174,7 @@ type ScriptResult struct {
 
 type ChatConversation struct {
 	ID               string    `json:"id"`
+	UserID           string    `json:"-"`
 	Title            string    `json:"title"`
 	Summary          string    `json:"summary,omitempty"`
 	SummaryMessageID string    `json:"summary_message_id,omitempty"`
@@ -174,6 +209,7 @@ type AgentStep struct {
 
 type ModelCall struct {
 	ID           string    `json:"id"`
+	UserID       string    `json:"-"`
 	Scope        string    `json:"scope"`
 	RefID        string    `json:"ref_id"`
 	Step         string    `json:"step"`

@@ -347,6 +347,35 @@ Go 规则校验第一版至少检查：
 
 ## 10. API 设计
 
+### 10.0 用户认证
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+GET /api/auth/me
+```
+
+`POST /api/auth/register` JSON 字段：
+
+- `email`: 邮箱，必填。
+- `password`: 密码，至少 8 位。
+- `name`: 名称，可选。
+
+`POST /api/auth/login` JSON 字段：
+
+- `email`: 邮箱，必填。
+- `password`: 密码，必填。
+
+认证约束：
+
+- 登录成功后后端写入 HttpOnly Cookie：`scriptagent_session`。
+- 除 `/api/health` 与 `/api/auth/*` 外，业务接口必须通过 session 鉴权。
+- 当前 P0 使用邮箱密码作为最简登录。
+- 手机号验证码作为后续 `sms` provider 接入，需要短信服务商 AccessKey、签名、模板 ID、发送频控和验证码过期策略。
+- 微信登录作为后续 `wechat` provider 接入，需要 AppID、Secret、回调域名、state 校验和用户绑定策略。
+- 登录 provider 不得影响业务表结构；所有业务数据只依赖内部 `user_id`。
+
 ### 10.1 创建任务
 
 ```http
@@ -412,6 +441,14 @@ PUT /api/settings/model
 - `model`: 模型名，例如 `qwen3.6-plus`。
 
 接口响应只返回脱敏 Key，不返回完整 API Key。
+
+约束：
+
+- 模型配置按当前登录用户保存。
+- `api_key` 入库前使用 AES-GCM 加密。
+- `api_key` 留空时保留该用户原有 Key。
+- 模型运行时从 request/job context 中读取 `user_id`，优先使用该用户配置。
+- 用户未配置 Key 时，可回退服务器环境变量 `DASHSCOPE_API_KEY`；正式 SaaS 可不设置该环境变量，强制用户自配。
 
 ### 10.2 获取历史记录
 
@@ -486,6 +523,7 @@ POST /api/chats/{id}/messages
 - ReAct Runner 要求模型每轮只输出一个严格 JSON 动作：`type=tool` 调用工具，或 `type=final` 输出最终答案。
 - ReAct 动作中的 `reason` 字段只保存可见决策摘要，不保存隐式逐字思维链。
 - 当本轮消息包含附件时，后端将附件保存到 `uploads/chat/`，并以 image/video data-uri 附加到 ReAct 模型输入。
+- 多人模式下，新附件保存到 `uploads/users/{user_id}/chat/`。
 - 模型调用日志必须脱敏附件 data-uri，图片记录为 `[image omitted from log]`，视频记录为 `[video omitted from log]`。
 - 第一版通用对话每轮最多 1 个素材附件，data-uri 上限 20MB；超过限制时提示压缩或改用脚本任务视频上传流程。
 - Prompt 上下文按“系统角色 -> ReAct 协议 -> 长期会话摘要 -> 最近 12 条消息 -> 可用工具 -> 已执行步骤观察 -> 最后一条用户目标”的顺序组织。
@@ -608,8 +646,26 @@ POST /api/products/{id}/creative-reports
 第一版使用 SQLite，多表保存任务、产品、模型配置、对话和模型调用记录。
 
 ```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE jobs (
   id TEXT PRIMARY KEY,
+  user_id TEXT,
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   video_path TEXT NOT NULL,
@@ -632,6 +688,7 @@ CREATE TABLE jobs (
 ```sql
 CREATE TABLE products (
   id TEXT PRIMARY KEY,
+  user_id TEXT,
   title TEXT NOT NULL,
   md_path TEXT NOT NULL,
   md_name TEXT NOT NULL,
@@ -641,6 +698,7 @@ CREATE TABLE products (
 
 CREATE TABLE creative_reports (
   id TEXT PRIMARY KEY,
+  user_id TEXT,
   product_id TEXT NOT NULL,
   product_title TEXT NOT NULL,
   source_config_json TEXT NOT NULL,
@@ -664,6 +722,7 @@ CREATE TABLE product_chunks (
 
 CREATE TABLE chat_conversations (
   id TEXT PRIMARY KEY,
+  user_id TEXT,
   title TEXT NOT NULL,
   summary TEXT,
   summary_message_id TEXT,
@@ -681,12 +740,21 @@ CREATE TABLE chat_messages (
 
 CREATE TABLE model_settings (
   id TEXT PRIMARY KEY,
+  user_id TEXT,
   api_key TEXT,
   endpoint TEXT NOT NULL,
   model TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 ```
+
+多人隔离约束：
+
+- `products`、`jobs`、`creative_reports`、`chat_conversations`、`model_settings`、`model_calls` 必须带 `user_id`。
+- 查询用户可见数据时必须附带当前 `user_id`。
+- `product_chunks` 通过 `product_id` 间接归属产品用户，不直接暴露跨用户查询入口。
+- 旧版单人数据升级后 `user_id` 为空；首个注册用户会接管这些遗留数据。
+- `model_settings.api_key` 保存 AES-GCM 密文，明文只在运行时解密使用。
 
 任务状态：
 
@@ -711,6 +779,7 @@ APP_ENV=development
 APP_PORT=8080
 DATA_DIR=./data
 UPLOAD_DIR=./uploads
+APP_ENCRYPTION_KEY=
 
 DASHSCOPE_API_KEY=
 DASHSCOPE_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
