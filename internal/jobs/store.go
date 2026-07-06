@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT,
+  role TEXT NOT NULL DEFAULT 'member',
+  status TEXT NOT NULL DEFAULT 'active',
   password_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -216,10 +218,19 @@ CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_
 	if err := s.ensureColumn("chat_conversations", "summary_message_id", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("users", "role", "TEXT NOT NULL DEFAULT 'member'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("users", "status", "TEXT NOT NULL DEFAULT 'active'"); err != nil {
+		return err
+	}
 	for _, table := range []string{"chat_conversations", "model_calls", "products", "creative_reports", "model_settings"} {
 		if err := s.ensureColumn(table, "user_id", "TEXT"); err != nil {
 			return err
 		}
+	}
+	if err := s.ensureAdminUser(); err != nil {
+		return err
 	}
 	_, err = s.db.Exec(`
 CREATE INDEX IF NOT EXISTS idx_products_user_updated ON products(user_id, updated_at);
@@ -227,6 +238,23 @@ CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_updated ON chat_conversations(user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_model_calls_user_created ON model_calls(user_id, created_at);
 `)
+	return err
+}
+
+func (s *Store) ensureAdminUser() error {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin'`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := s.db.Exec(`
+UPDATE users
+SET role = 'admin'
+WHERE id = (
+  SELECT id FROM users ORDER BY created_at ASC LIMIT 1
+)`)
 	return err
 }
 
@@ -247,14 +275,16 @@ func (s *Store) CreateUser(input CreateUserInput) (*User, error) {
 		ID:           newID(),
 		Email:        strings.ToLower(strings.TrimSpace(input.Email)),
 		Name:         strings.TrimSpace(input.Name),
+		Role:         valueOr(input.Role, "member"),
+		Status:       valueOr(input.Status, "active"),
 		PasswordHash: input.PasswordHash,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 	_, err := s.db.Exec(`
-INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		user.ID, user.Email, user.Name, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339))
+INSERT INTO users (id, email, name, role, status, password_hash, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		user.ID, user.Email, user.Name, user.Role, user.Status, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -263,14 +293,72 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 
 func (s *Store) GetUser(id string) (*User, error) {
 	return scanUser(s.db.QueryRow(`
-SELECT id, email, name, password_hash, created_at, updated_at
+SELECT id, email, name, role, status, password_hash, created_at, updated_at
 FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) GetUserByEmail(email string) (*User, error) {
 	return scanUser(s.db.QueryRow(`
-SELECT id, email, name, password_hash, created_at, updated_at
+SELECT id, email, name, role, status, password_hash, created_at, updated_at
 FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))))
+}
+
+func (s *Store) ListAdminUsers() ([]AdminUser, error) {
+	rows, err := s.db.Query(`
+SELECT
+  u.id,
+  u.email,
+  u.name,
+  u.role,
+  u.status,
+  CASE WHEN COALESCE(ms.api_key, '') != '' THEN 1 ELSE 0 END AS model_configured,
+  (SELECT COUNT(*) FROM products p WHERE p.user_id = u.id) AS product_count,
+  (SELECT COUNT(*) FROM jobs j WHERE j.user_id = u.id) AS job_count,
+  (SELECT COUNT(*) FROM chat_conversations c WHERE c.user_id = u.id) AS chat_count,
+  u.created_at,
+  u.updated_at
+FROM users u
+LEFT JOIN model_settings ms ON ms.user_id = u.id
+ORDER BY u.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []AdminUser{}
+	for rows.Next() {
+		var user AdminUser
+		var createdAt, updatedAt string
+		var name sql.NullString
+		var modelConfigured int
+		if err := rows.Scan(
+			&user.ID, &user.Email, &name, &user.Role, &user.Status, &modelConfigured,
+			&user.ProductCount, &user.JobCount, &user.ChatCount, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		user.Name = name.String
+		user.ModelConfigured = modelConfigured == 1
+		user.CreatedAt = parseTime(createdAt)
+		user.UpdatedAt = parseTime(updatedAt)
+		result = append(result, user)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) UpdateUserStatus(id, status string) error {
+	status = strings.TrimSpace(status)
+	if status != "active" && status != "disabled" {
+		return errors.New("invalid user status")
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE users SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
 }
 
 func (s *Store) CreateSession(input CreateSessionInput) (*Session, error) {
@@ -988,7 +1076,7 @@ func scanUser(row scanner) (*User, error) {
 	var user User
 	var createdAt, updatedAt string
 	var name sql.NullString
-	if err := row.Scan(&user.ID, &user.Email, &name, &user.PasswordHash, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&user.ID, &user.Email, &name, &user.Role, &user.Status, &user.PasswordHash, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	user.Name = name.String

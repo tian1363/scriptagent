@@ -192,6 +192,64 @@ textarea {
   font-size: var(--cbi-fs-sm);
 }
 
+.admin-users-panel {
+  gap: var(--cbi-space-1-5);
+}
+
+.admin-callout {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.admin-user-table {
+  display: grid;
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  overflow-x: auto;
+  background: var(--cbi-bg-1);
+}
+
+.admin-user-row {
+  min-width: 760px;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) 88px 88px 92px minmax(210px, 1fr) 88px;
+  align-items: center;
+  gap: var(--cbi-space-1);
+  padding: 0 var(--cbi-space-1-5);
+  border-top: 1px solid var(--cbi-border-default);
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.admin-user-row:first-child {
+  border-top: 0;
+}
+
+.admin-user-row.header {
+  min-height: 38px;
+  background: var(--cbi-bg-2);
+  color: var(--cbi-fg-3);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.admin-user-row strong,
+.admin-user-row small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-row strong {
+  color: var(--cbi-fg-1);
+}
+
+.admin-user-row small {
+  color: var(--cbi-fg-3);
+}
+
 .view-switcher button,
 .mini-button {
   height: 28px;

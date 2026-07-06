@@ -137,8 +137,19 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, errors.New("login required"))
 			return
 		}
-		ctx := userctx.WithUser(r.Context(), userctx.User{ID: user.ID, Email: user.Email, Name: user.Name})
+		ctx := userctx.WithUser(r.Context(), publicUser(user))
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (h *Handler) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := userctx.FromContext(r.Context())
+		if !ok || user.Role != "admin" {
+			writeError(w, http.StatusForbidden, errors.New("admin access required"))
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -166,11 +177,45 @@ func expiredSessionCookie() *http.Cookie {
 }
 
 func publicUser(user *jobs.User) userctx.User {
-	return userctx.User{ID: user.ID, Email: user.Email, Name: user.Name}
+	return userctx.User{ID: user.ID, Email: user.Email, Name: user.Name, Role: user.Role}
 }
 
 func userIDFromRequest(r *http.Request) string {
 	return userctx.UserID(r.Context())
+}
+
+func (h *Handler) listAdminUsers(w http.ResponseWriter, _ *http.Request) {
+	users, err := h.store.ListAdminUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
+func (h *Handler) updateAdminUserStatus(w http.ResponseWriter, r *http.Request) {
+	targetID := chi.URLParam(r, "id")
+	if targetID == userIDFromRequest(r) {
+		writeError(w, http.StatusBadRequest, errors.New("cannot change your own status"))
+		return
+	}
+	var input struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := h.store.UpdateUserStatus(targetID, input.Status); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	users, err := h.store.ListAdminUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
 }
 
 func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {

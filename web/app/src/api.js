@@ -33,6 +33,18 @@ export async function logout() {
   });
 }
 
+export async function listAdminUsers() {
+  return request("/api/admin/users");
+}
+
+export async function updateAdminUserStatus(id, status) {
+  return request(`/api/admin/users/${id}/status`, {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function getJob(id) {
   return request(`/api/jobs/${id}`);
 }

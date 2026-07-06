@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Upload,
   UserRound,
+  UsersRound,
   Video,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +35,7 @@ import {
   getJob,
   getProductMarkdown,
   listCreativeReports,
+  listAdminUsers,
   listProducts,
   listSkills,
   listChats,
@@ -47,6 +49,7 @@ import {
   saveModelSettings,
   sendChatMessage,
   sendNewChatMessage,
+  updateAdminUserStatus,
 } from "./api.js";
 import logo from "./assets/logo-scriptagent.svg";
 
@@ -191,6 +194,8 @@ export function App() {
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [jobInitialRequirement, setJobInitialRequirement] = useState("");
   const [modelSettings, setModelSettings] = useState(null);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(() => window.localStorage.getItem("scriptagent:debug-panel") === "true");
 
@@ -253,13 +258,26 @@ export function App() {
     setModelSettings(await getModelSettings());
   }
 
+  async function refreshAdminUsers() {
+    if (currentUser?.role !== "admin") return;
+    setIsLoadingAdminUsers(true);
+    try {
+      setAdminUsers(await listAdminUsers());
+    } finally {
+      setIsLoadingAdminUsers(false);
+    }
+  }
+
   async function refreshCurrent() {
     setError("");
     if (view === "jobs") await refreshJobs();
     if (view === "chat") await refreshChats();
     if (view === "calls" && showDebugPanel) await refreshModelCalls();
     if (view === "products") await refreshProducts();
-    if (view === "settings") await refreshModelSettings();
+    if (view === "settings") {
+      await refreshModelSettings();
+      await refreshAdminUsers();
+    }
   }
 
   useEffect(() => {
@@ -277,6 +295,7 @@ export function App() {
     refreshProducts().catch(() => {});
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
+    refreshAdminUsers().catch(() => {});
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -586,6 +605,15 @@ export function App() {
     }
   }
 
+  async function handleUserStatus(userID, status) {
+    setError("");
+    try {
+      setAdminUsers(await updateAdminUserStatus(userID, status));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   const visibleContent = activeTab === "video_prompts" ? videoPromptContent : selectedJob?.[activeTab] || "";
   const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
@@ -776,11 +804,16 @@ export function App() {
           {view === "settings" ? (
             <SettingsWorkspace
               modelSettings={modelSettings}
+              currentUser={currentUser}
+              adminUsers={adminUsers}
+              isLoadingAdminUsers={isLoadingAdminUsers}
               showDebugPanel={showDebugPanel}
               isSaving={isSavingSettings}
               error={error}
               onDebugPanel={setShowDebugPanel}
               onSave={handleSaveModelSettings}
+              onUserStatus={handleUserStatus}
+              onReloadUsers={refreshAdminUsers}
             />
           ) : null}
         </section>
@@ -1695,7 +1728,20 @@ function ProductsWorkspace({
   );
 }
 
-function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onDebugPanel, onSave }) {
+function SettingsWorkspace({
+  modelSettings,
+  currentUser,
+  adminUsers,
+  isLoadingAdminUsers,
+  showDebugPanel,
+  isSaving,
+  error,
+  onDebugPanel,
+  onSave,
+  onUserStatus,
+  onReloadUsers,
+}) {
+  const isAdmin = currentUser?.role === "admin";
   return (
     <section className="result-pane full-height">
       <div className="result-header">
@@ -1750,6 +1796,68 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
             <input type="checkbox" checked={showDebugPanel} onChange={(event) => onDebugPanel(event.target.checked)} />
           </label>
         </div>
+        {isAdmin ? (
+          <div className="form-section admin-users-panel">
+            <div className="section-heading">
+              <span>用户管理</span>
+              <small>{isLoadingAdminUsers ? "读取中" : `${adminUsers.length} 个账号`}</small>
+            </div>
+            <div className="security-callout admin-callout">
+              <UsersRound size={18} />
+              <div>
+                <strong>管理员后台</strong>
+                <p>用于查看注册用户、模型配置状态和使用概况；停用账号后，该用户不能登录或继续使用已有 session。</p>
+              </div>
+              <button className="secondary-button" type="button" onClick={() => onReloadUsers().catch(() => {})}>
+                <RefreshCw size={15} />
+                <span>刷新</span>
+              </button>
+            </div>
+            <div className="admin-user-table">
+              <div className="admin-user-row header">
+                <span>用户</span>
+                <span>角色</span>
+                <span>状态</span>
+                <span>模型</span>
+                <span>资产</span>
+                <span>操作</span>
+              </div>
+              {adminUsers.length ? (
+                adminUsers.map((user) => (
+                  <div key={user.id} className="admin-user-row">
+                    <span>
+                      <strong>{user.name || user.email}</strong>
+                      <small>{user.email}</small>
+                    </span>
+                    <span>{user.role === "admin" ? "管理员" : "成员"}</span>
+                    <span className={`status-pill ${user.status === "active" ? "success" : "danger"}`}>
+                      {user.status === "active" ? "启用" : "停用"}
+                    </span>
+                    <span>{user.model_configured ? "已配置" : "未配置"}</span>
+                    <span>
+                      {user.product_count || 0} 产品 / {user.job_count || 0} 任务 / {user.chat_count || 0} 对话
+                    </span>
+                    <span>
+                      {user.id === currentUser?.id ? (
+                        <small>当前账号</small>
+                      ) : (
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => onUserStatus(user.id, user.status === "active" ? "disabled" : "active")}
+                        >
+                          <span>{user.status === "active" ? "停用" : "启用"}</span>
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <EmptyState text={isLoadingAdminUsers ? "正在读取用户" : "暂无用户"} compact />
+              )}
+            </div>
+          </div>
+        ) : null}
         <div className="submit-row">
           <div>
             <span>运行时配置</span>

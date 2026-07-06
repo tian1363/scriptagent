@@ -52,6 +52,8 @@ func (s *Service) Register(email, password, name string) (*jobs.User, *jobs.Sess
 	user, err := s.store.CreateUser(jobs.CreateUserInput{
 		Email:        email,
 		Name:         strings.TrimSpace(name),
+		Role:         firstUserRole(existingCount),
+		Status:       "active",
 		PasswordHash: hash,
 	})
 	if err != nil {
@@ -75,6 +77,9 @@ func (s *Service) Login(email, password string) (*jobs.User, *jobs.Session, erro
 	if !CheckPassword(user.PasswordHash, password) {
 		return nil, nil, errors.New("email or password is incorrect")
 	}
+	if user.Status != "active" {
+		return nil, nil, errors.New("account is disabled")
+	}
 	session, err := s.createSession(user.ID)
 	if err != nil {
 		return nil, nil, err
@@ -95,7 +100,14 @@ func (s *Service) Authenticate(token string) (*jobs.User, error) {
 		_ = s.store.DeleteSession(token)
 		return nil, errors.New("session expired")
 	}
-	return s.store.GetUser(session.UserID)
+	user, err := s.store.GetUser(session.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != "active" {
+		return nil, errors.New("account is disabled")
+	}
+	return user, nil
 }
 
 func (s *Service) Logout(token string) error {
@@ -171,4 +183,11 @@ func randomBytes(size int) ([]byte, error) {
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func firstUserRole(existingCount int) string {
+	if existingCount == 0 {
+		return "admin"
+	}
+	return "member"
 }

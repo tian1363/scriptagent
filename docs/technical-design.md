@@ -371,10 +371,42 @@ GET /api/auth/me
 
 - 登录成功后后端写入 HttpOnly Cookie：`scriptagent_session`。
 - 除 `/api/health` 与 `/api/auth/*` 外，业务接口必须通过 session 鉴权。
+- 首个注册用户角色为 `admin`，后续用户默认为 `member`。
+- 被停用用户不能登录；已有 session 访问业务接口时也会被拒绝。
 - 当前 P0 使用邮箱密码作为最简登录。
 - 手机号验证码作为后续 `sms` provider 接入，需要短信服务商 AccessKey、签名、模板 ID、发送频控和验证码过期策略。
 - 微信登录作为后续 `wechat` provider 接入，需要 AppID、Secret、回调域名、state 校验和用户绑定策略。
 - 登录 provider 不得影响业务表结构；所有业务数据只依赖内部 `user_id`。
+
+### 10.0A 用户管理后台
+
+```http
+GET /api/admin/users
+PATCH /api/admin/users/{id}/status
+```
+
+`GET /api/admin/users` 返回：
+
+- `id`: 用户 ID。
+- `email`: 邮箱。
+- `name`: 名称。
+- `role`: `admin` / `member`。
+- `status`: `active` / `disabled`。
+- `model_configured`: 是否已配置模型 Key。
+- `product_count`: 产品数量。
+- `job_count`: 脚本任务数量。
+- `chat_count`: 对话数量。
+- `created_at` / `updated_at`。
+
+`PATCH /api/admin/users/{id}/status` JSON 字段：
+
+- `status`: `active` 或 `disabled`。
+
+约束：
+
+- 仅 `role=admin` 用户可访问。
+- 管理员不能修改自己的状态，避免误停用唯一管理账号。
+- 第一版只提供用户查看与启停，不提供删除用户、重置密码、团队空间、角色权限矩阵或计费。
 
 ### 10.1 创建任务
 
@@ -650,6 +682,8 @@ CREATE TABLE users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT,
+  role TEXT NOT NULL DEFAULT 'member',
+  status TEXT NOT NULL DEFAULT 'active',
   password_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -754,6 +788,7 @@ CREATE TABLE model_settings (
 - 查询用户可见数据时必须附带当前 `user_id`。
 - `product_chunks` 通过 `product_id` 间接归属产品用户，不直接暴露跨用户查询入口。
 - 旧版单人数据升级后 `user_id` 为空；首个注册用户会接管这些遗留数据。
+- 若历史数据库没有管理员，迁移时最早创建的用户会被设为 `admin`。
 - `model_settings.api_key` 保存 AES-GCM 密文，明文只在运行时解密使用。
 
 任务状态：

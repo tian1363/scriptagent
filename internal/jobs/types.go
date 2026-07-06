@@ -53,6 +53,8 @@ type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
 	Name         string    `json:"name,omitempty"`
+	Role         string    `json:"role"`
+	Status       string    `json:"status"`
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -61,7 +63,23 @@ type User struct {
 type CreateUserInput struct {
 	Email        string
 	Name         string
+	Role         string
+	Status       string
 	PasswordHash string
+}
+
+type AdminUser struct {
+	ID              string    `json:"id"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name,omitempty"`
+	Role            string    `json:"role"`
+	Status          string    `json:"status"`
+	ModelConfigured bool      `json:"model_configured"`
+	ProductCount    int       `json:"product_count"`
+	JobCount        int       `json:"job_count"`
+	ChatCount       int       `json:"chat_count"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Session struct {

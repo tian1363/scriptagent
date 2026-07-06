@@ -33,6 +33,11 @@ func (h *Handler) Routes() http.Handler {
 		})
 		api.Group(func(private chi.Router) {
 			private.Use(h.requireAuth)
+			private.Group(func(admin chi.Router) {
+				admin.Use(h.requireAdmin)
+				admin.Get("/admin/users", h.listAdminUsers)
+				admin.Patch("/admin/users/{id}/status", h.updateAdminUserStatus)
+			})
 			private.Get("/skills", h.listSkills)
 			private.Get("/products", h.listProducts)
 			private.Post("/products", h.createProduct)
