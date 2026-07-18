@@ -700,45 +700,40 @@ export function App() {
 
   return (
     <div className={`app-shell ${view === "calls" ? "app-shell-calls" : ""}`}>
-      <header className="topbar">
-        <div className="brand">
+      <aside className="agent-sidebar">
+        <div className="agent-sidebar-brand">
           <img src={logo} alt="ScriptAgent" />
+          <span>ScriptAgent</span>
         </div>
-        <div className="view-switcher">
+        <button className="new-agent-task" type="button" onClick={() => { setView("chat"); handleNewChat(); }}>
+          <Plus size={18} />
+          <span>新建对话</span>
+        </button>
+        <nav className="agent-navigation" aria-label="主导航">
+          <button className={view === "chat" ? "active" : ""} type="button" onClick={() => setView("chat")}>
+            <MessageSquare size={17} />
+            <span>通用对话</span>
+          </button>
           <button className={view === "jobs" ? "active" : ""} type="button" onClick={() => setView("jobs")}>
-            <FileText size={15} />
+            <FileText size={17} />
             <span>脚本任务</span>
           </button>
           <button className={view === "products" ? "active" : ""} type="button" onClick={() => setView("products")}>
-            <Package size={15} />
+            <Package size={17} />
             <span>产品库</span>
-          </button>
-          <button className={view === "chat" ? "active" : ""} type="button" onClick={() => setView("chat")}>
-            <MessageSquare size={15} />
-            <span>通用对话</span>
           </button>
           {showDebugPanel ? (
             <button className={view === "calls" ? "active" : ""} type="button" onClick={() => setView("calls")}>
-              <Activity size={15} />
+              <Activity size={17} />
               <span>调试台</span>
             </button>
           ) : null}
           <button className={view === "settings" ? "active" : ""} type="button" onClick={() => setView("settings")}>
-            <Settings size={15} />
+            <Settings size={17} />
             <span>配置</span>
           </button>
-        </div>
-        <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新">
-          <RefreshCw size={16} />
-        </button>
-        <button className="user-button" type="button" onClick={handleLogout} title="退出登录">
-          <UserRound size={15} />
-          <span>{currentUser.name || currentUser.email}</span>
-          <LogOut size={14} />
-        </button>
-      </header>
-
-      <main className={`workspace ${view === "products" ? "workspace-home" : ""} ${view === "calls" ? "workspace-calls" : ""}`}>
+        </nav>
+        <div className="agent-sidebar-context">
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
@@ -749,6 +744,28 @@ export function App() {
           <CallsSidebar calls={modelCalls} selectedCallId={selectedCall?.id} onSelect={setSelectedCallId} />
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
+        </div>
+        <div className="agent-account">
+          <span className="account-avatar">{(currentUser.name || currentUser.email || "U").slice(0, 1).toUpperCase()}</span>
+          <span className="account-copy">
+            <strong>{currentUser.name || currentUser.email}</strong>
+            <small>{currentUser.role === "admin" ? "管理员" : "工作区成员"}</small>
+          </span>
+          <button type="button" onClick={handleLogout} title="退出登录"><LogOut size={16} /></button>
+        </div>
+      </aside>
+
+      <div className="agent-stage">
+        <header className="agent-toolbar">
+          <div>
+            <strong>{{ chat: "通用对话", jobs: "脚本任务", products: "产品资产", calls: "调试台", settings: "配置" }[view]}</strong>
+            <span>{{ chat: "与 Agent 协作完成创作任务", jobs: "生成、复刻与裂变视频脚本", products: "沉淀可复用的产品资料", calls: "检查模型调用与 Token", settings: "管理模型、记忆与成员" }[view]}</span>
+          </div>
+          <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新">
+            <RefreshCw size={16} />
+          </button>
+        </header>
+        <main className={`workspace ${view === "products" ? "workspace-home" : ""} ${view === "calls" ? "workspace-calls" : ""}`}>
 
         <section className={`main-pane ${view === "products" ? "main-pane-home" : ""} ${view === "calls" ? "main-pane-calls" : ""}`}>
           {view === "jobs" ? (
@@ -833,7 +850,8 @@ export function App() {
             />
           ) : null}
         </section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
@@ -1186,6 +1204,7 @@ function ChatWorkspace({
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
+  const isEmpty = !messages.length && !isThinking && !typingMessage;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -1196,7 +1215,7 @@ function ChatWorkspace({
   }
 
   return (
-    <section className="chat-pane">
+    <section className={`chat-pane ${isEmpty ? "empty" : ""}`}>
       <div className="result-header">
         <div>
           <h2>{thread?.conversation?.title || "通用对话"}</h2>
@@ -1224,6 +1243,13 @@ function ChatWorkspace({
           <span>{selectedProduct ? `本轮会引用 ${selectedProduct.md_name}` : "普通对话"}</span>
         </div>
       </div>
+      {isEmpty ? (
+        <div className="chat-agent-intro">
+          <span>SA</span>
+          <h1>今天想创作什么？</h1>
+          <p>上传素材、选择产品，或直接交给 Agent 完成一项任务。</p>
+        </div>
+      ) : null}
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>

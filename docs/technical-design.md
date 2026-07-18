@@ -615,6 +615,16 @@ X-API-Key: {MEM0_API_KEY}  # 自托管启用 API Key 时
 - 前端通过 `GET /api/settings/memory` 获取脱敏运行状态，并通过对话响应的 `memories` 字段展示本轮命中。
 - Platform 模式会把本轮对话发送给 Mem0 托管服务；需要在部署隐私政策中向用户说明。OSS 模式由部署者负责数据安全、鉴权和 HTTPS。
 
+### 10.7B Agent 工作台信息架构
+
+前端采用单一 Agent Shell：`agent-sidebar` 承载全局导航、模块历史和账户，`agent-stage` 承载标题工具栏与当前工作画布。各业务 Workspace 保留原有数据与事件接口，只调整展示层归属，避免 UI 改造影响后端契约。
+
+- 桌面端为 `264px + minmax(0, 1fr)` 双列结构，页面外层保留 8px 间隔。
+- 产品、任务、对话、调试与配置共享同一左侧导航；历史列表按当前模块动态切换。
+- 空对话使用 `chat-agent-intro -> chat-form -> quick tasks / skills` 的任务顺序。
+- 小于 `860px` 时侧栏收敛为单行图标导航，隐藏历史和账户详情。
+- 调试台使用文档级原生滚动，不在模型输入、输出和原始响应中创建嵌套滚动链。
+
 ### 10.8 脚本转 Seedance 视频提示词
 
 ```http
