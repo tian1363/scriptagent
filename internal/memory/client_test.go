@@ -29,6 +29,15 @@ func TestPlatformSearchAndAdd(t *testing.T) {
 			})
 			return
 		}
+		if r.URL.Path == "/v3/memories/add/" {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["user_id"] != "user-a" || body["agent_id"] != "scriptagent" || body["run_id"] != "chat-1" {
+				t.Fatalf("unexpected memory scope: %+v", body)
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"PENDING"}`))
 	}))

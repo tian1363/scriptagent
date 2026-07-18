@@ -68,6 +68,8 @@ Product Markdown retrieval uses embeddings for long documents. ScriptAgent store
 
 Mem0 is optional. When configured, general chat retrieves relevant cross-conversation memories before each ReAct run and asynchronously stores the successful user/assistant turn afterward. Memories are isolated with ScriptAgent's internal user ID.
 
+For SaaS deployments, the operator configures one server-side Mem0 key for the whole deployment. End users do not provide Mem0 credentials; every search and write is scoped by the authenticated ScriptAgent `user_id`.
+
 Mem0 Platform:
 
 ```bash

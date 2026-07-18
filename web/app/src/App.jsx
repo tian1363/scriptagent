@@ -1836,7 +1836,7 @@ function SettingsWorkspace({
               <p>
                 {memorySettings?.configured
                   ? `${memorySettings.provider === "oss" ? "自托管 OSS" : "Mem0 Platform"} · 每轮最多检索 ${memorySettings.top_k || 5} 条长期记忆 · 按当前用户隔离`
-                  : "通过服务端环境变量配置 Mem0。未配置时，通用对话继续使用现有会话摘要，不受影响。"}
+                  : "由部署者通过服务端环境变量统一配置 Mem0。普通用户无需配置；未启用时仍使用会话摘要。"}
               </p>
             </div>
             <span className={`status-pill ${memorySettings?.configured ? "success" : "neutral"}`}>

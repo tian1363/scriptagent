@@ -607,6 +607,7 @@ X-API-Key: {MEM0_API_KEY}  # 自托管启用 API Key 时
 
 - Platform 搜索必须通过 `filters.user_id` 传入用户 ID；不得使用全局或共享用户标识。
 - OSS 搜索和写入必须使用顶层 `user_id`。
+- SaaS 部署只维护一份服务级 Mem0 配置；每次请求从登录会话取得 ScriptAgent 内部 `user_id`，作为 Mem0 用户命名空间。禁止接受客户端传入的 Mem0 Key 或任意覆盖 `user_id`。
 - `agent_id` 默认是 `scriptagent`，`run_id` 使用对话 ID。
 - Mem0 API Key 只从服务端环境变量读取，不写入前端、不进入模型调用日志。
 - Mem0 未配置、超时或返回错误时，降级为现有本地会话上下文，不阻断通用对话。
