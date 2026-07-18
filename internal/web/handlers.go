@@ -18,6 +18,7 @@ import (
 	chatpkg "github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/memory"
 	"github.com/tian1363/scriptagent/internal/secret"
 	"github.com/tian1363/scriptagent/internal/storage"
 	"github.com/tian1363/scriptagent/internal/userctx"
@@ -34,6 +35,7 @@ type Handler struct {
 	creative  *creative.Service
 	auth      *authsvc.Service
 	secrets   *secret.Box
+	memory    *memory.Client
 }
 
 type Publisher interface {
@@ -45,7 +47,7 @@ type ChatResponder interface {
 	SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []chatpkg.AttachmentInput) (*jobs.ChatThread, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service, authService *authsvc.Service, secrets *secret.Box) *Handler {
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service, authService *authsvc.Service, secrets *secret.Box, memoryClient *memory.Client) *Handler {
 	if publisher == nil {
 		publisher = disabledPublisher{}
 	}
@@ -59,11 +61,20 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		creative:  creativeReports,
 		auth:      authService,
 		secrets:   secrets,
+		memory:    memoryClient,
 	}
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) getMemorySettings(w http.ResponseWriter, _ *http.Request) {
+	if h.memory == nil {
+		writeJSON(w, http.StatusOK, memory.Status{})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.memory.Status())
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {

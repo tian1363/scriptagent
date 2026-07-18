@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  BrainCircuit,
   CheckCircle2,
   Clock3,
   FileText,
@@ -30,6 +31,7 @@ import {
   createProduct,
   generateVideoPrompts,
   getCurrentUser,
+  getMemorySettings,
   getModelSettings,
   getChat,
   getJob,
@@ -194,6 +196,7 @@ export function App() {
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [jobInitialRequirement, setJobInitialRequirement] = useState("");
   const [modelSettings, setModelSettings] = useState(null);
+  const [memorySettings, setMemorySettings] = useState(null);
   const [adminUsers, setAdminUsers] = useState([]);
   const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -207,6 +210,7 @@ export function App() {
   const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
   const [typingMessage, setTypingMessage] = useState(null);
   const [chatCitations, setChatCitations] = useState([]);
+  const [chatMemories, setChatMemories] = useState([]);
   const [chatAgentSteps, setChatAgentSteps] = useState([]);
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -258,6 +262,10 @@ export function App() {
     setModelSettings(await getModelSettings());
   }
 
+  async function refreshMemorySettings() {
+    setMemorySettings(await getMemorySettings());
+  }
+
   async function refreshAdminUsers() {
     if (currentUser?.role !== "admin") return;
     setIsLoadingAdminUsers(true);
@@ -276,6 +284,7 @@ export function App() {
     if (view === "products") await refreshProducts();
     if (view === "settings") {
       await refreshModelSettings();
+      await refreshMemorySettings();
       await refreshAdminUsers();
     }
   }
@@ -295,6 +304,7 @@ export function App() {
     refreshProducts().catch(() => {});
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
+    refreshMemorySettings().catch(() => {});
     refreshAdminUsers().catch(() => {});
   }, [currentUser?.id]);
 
@@ -494,6 +504,7 @@ export function App() {
     setOptimisticChatMessages(null);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatMemories([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
     setChatAttachment(null);
@@ -506,6 +517,7 @@ export function App() {
     setOptimisticChatMessages(null);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatMemories([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
     setChatAttachment(null);
@@ -520,6 +532,7 @@ export function App() {
     setIsChatThinking(true);
     setTypingMessage(null);
     setChatCitations([]);
+    setChatMemories([]);
     setChatAgentSteps([]);
     const displayContent = [content || "请分析我上传的素材。", chatAttachment ? `附件：${chatAttachment.name}` : ""].filter(Boolean).join("\n\n");
     const tempUserMessage = {
@@ -540,6 +553,7 @@ export function App() {
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
       setChatCitations(thread.citations || []);
+      setChatMemories(thread.memories || []);
       setChatAgentSteps(thread.agent_steps || []);
       if (assistantMessage) {
         setOptimisticChatMessages(thread.messages.filter((message) => message.id !== assistantMessage.id));
@@ -785,6 +799,7 @@ export function App() {
               optimisticMessages={optimisticChatMessages}
               typingMessage={typingMessage}
               citations={chatCitations}
+              memories={chatMemories}
               agentSteps={chatAgentSteps}
               isThinking={isChatThinking}
               draft={chatDraft}
@@ -804,6 +819,7 @@ export function App() {
           {view === "settings" ? (
             <SettingsWorkspace
               modelSettings={modelSettings}
+              memorySettings={memorySettings}
               currentUser={currentUser}
               adminUsers={adminUsers}
               isLoadingAdminUsers={isLoadingAdminUsers}
@@ -1152,6 +1168,7 @@ function ChatWorkspace({
   optimisticMessages,
   typingMessage,
   citations,
+  memories,
   agentSteps,
   isThinking,
   draft,
@@ -1213,6 +1230,7 @@ function ChatWorkspace({
             {skills?.length ? <SkillLauncher skills={skills} onSelect={handleSkill} compact /> : null}
             {agentSteps?.length ? <AgentStepsPanel steps={agentSteps} /> : null}
             {citations?.length ? <CitationPanel citations={citations} /> : null}
+            {memories?.length ? <MemoryPanel memories={memories} /> : null}
             {messages.map((message) => (
               <ChatMessageBubble key={message.id} message={message} />
             ))}
@@ -1354,6 +1372,28 @@ function CitationPanel({ citations }) {
               <span>{citation.product_name} · {citation.source === "embedding" ? `相似度 ${Number(citation.score || 0).toFixed(3)}` : citation.source}</span>
             </div>
             <p>{citation.snippet}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MemoryPanel({ memories }) {
+  return (
+    <section className="citation-panel memory-panel">
+      <div className="section-heading">
+        <span>本轮长期记忆</span>
+        <small>Mem0 · {memories.length} 条</small>
+      </div>
+      <div className="citation-list">
+        {memories.map((memory, index) => (
+          <article key={memory.id || `memory-${index}`} className="citation-card memory-card">
+            <div>
+              <strong>用户偏好 / 历史事实</strong>
+              <span>{memory.score ? `相关度 ${Number(memory.score).toFixed(3)}` : "Mem0"}</span>
+            </div>
+            <p>{memory.memory}</p>
           </article>
         ))}
       </div>
@@ -1730,6 +1770,7 @@ function ProductsWorkspace({
 
 function SettingsWorkspace({
   modelSettings,
+  memorySettings,
   currentUser,
   adminUsers,
   isLoadingAdminUsers,
@@ -1782,6 +1823,42 @@ function SettingsWorkspace({
               <input name="endpoint" type="text" defaultValue={modelSettings?.endpoint || "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"} />
             </label>
           </div>
+        </div>
+        <div className="form-section memory-settings-panel">
+          <div className="section-heading">
+            <span>长期记忆</span>
+            <small>{memorySettings?.configured ? "已启用" : "未配置"}</small>
+          </div>
+          <div className="security-callout">
+            <BrainCircuit size={18} />
+            <div>
+              <strong>Mem0 {memorySettings?.configured ? "正在工作" : "尚未启用"}</strong>
+              <p>
+                {memorySettings?.configured
+                  ? `${memorySettings.provider === "oss" ? "自托管 OSS" : "Mem0 Platform"} · 每轮最多检索 ${memorySettings.top_k || 5} 条长期记忆 · 按当前用户隔离`
+                  : "通过服务端环境变量配置 Mem0。未配置时，通用对话继续使用现有会话摘要，不受影响。"}
+              </p>
+            </div>
+            <span className={`status-pill ${memorySettings?.configured ? "success" : "neutral"}`}>
+              {memorySettings?.configured ? "已连接" : "关闭"}
+            </span>
+          </div>
+          {memorySettings?.configured ? (
+            <div className="memory-config-grid">
+              <span>
+                <small>Provider</small>
+                <strong>{memorySettings.provider}</strong>
+              </span>
+              <span>
+                <small>Agent ID</small>
+                <strong>{memorySettings.agent_id}</strong>
+              </span>
+              <span>
+                <small>Endpoint</small>
+                <strong>{memorySettings.base_url}</strong>
+              </span>
+            </div>
+          ) : null}
         </div>
         <div className="form-section developer-options">
           <div className="section-heading">

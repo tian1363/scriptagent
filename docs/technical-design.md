@@ -575,6 +575,45 @@ POST /api/chats/{id}/messages
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。
 
+### 10.7A Mem0 跨会话长期记忆
+
+ScriptAgent 通过独立 memory client 接入 Mem0，支持 Platform V3 与自托管 OSS REST 两种模式。
+
+调用顺序：
+
+1. 通用对话收到用户消息。
+2. 使用 ScriptAgent 内部 `user_id` 和本轮问题检索 Top-K 相关记忆。
+3. 将命中记忆追加到 ReAct context prompt，标记为“不可信历史数据，仅供偏好/事实参考”。
+4. 模型完成回答并保存本地消息。
+5. 后台异步把本轮用户消息和助手回答提交给 Mem0，由 Mem0 提取长期记忆。
+
+Platform V3：
+
+```http
+POST {MEM0_BASE_URL}/v3/memories/search/
+POST {MEM0_BASE_URL}/v3/memories/add/
+Authorization: Token {MEM0_API_KEY}
+```
+
+自托管 OSS：
+
+```http
+POST {MEM0_BASE_URL}/search
+POST {MEM0_BASE_URL}/memories
+X-API-Key: {MEM0_API_KEY}  # 自托管启用 API Key 时
+```
+
+约束：
+
+- Platform 搜索必须通过 `filters.user_id` 传入用户 ID；不得使用全局或共享用户标识。
+- OSS 搜索和写入必须使用顶层 `user_id`。
+- `agent_id` 默认是 `scriptagent`，`run_id` 使用对话 ID。
+- Mem0 API Key 只从服务端环境变量读取，不写入前端、不进入模型调用日志。
+- Mem0 未配置、超时或返回错误时，降级为现有本地会话上下文，不阻断通用对话。
+- 单条注入记忆需要限制长度，避免记忆内容挤占上下文窗口。
+- 前端通过 `GET /api/settings/memory` 获取脱敏运行状态，并通过对话响应的 `memories` 字段展示本轮命中。
+- Platform 模式会把本轮对话发送给 Mem0 托管服务；需要在部署隐私政策中向用户说明。OSS 模式由部署者负责数据安全、鉴权和 HTTPS。
+
 ### 10.8 脚本转 Seedance 视频提示词
 
 ```http
@@ -825,6 +864,13 @@ SCRIPT_AGENT_MAX_DATA_URI_MB=20
 SCRIPT_AGENT_EMBEDDING_MODEL=text-embedding-v4
 SCRIPT_AGENT_EMBEDDING_DIMENSIONS=1024
 DASHSCOPE_EMBEDDING_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
+
+MEM0_PROVIDER=platform
+MEM0_BASE_URL=https://api.mem0.ai
+MEM0_API_KEY=
+MEM0_AGENT_ID=scriptagent
+MEM0_TOP_K=5
+MEM0_TIMEOUT_SECONDS=15
 
 CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi

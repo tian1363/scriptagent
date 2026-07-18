@@ -250,6 +250,47 @@ textarea {
   color: var(--cbi-fg-3);
 }
 
+.memory-panel {
+  border-color: rgba(60, 138, 103, 0.24);
+  background: rgba(239, 249, 244, 0.72);
+}
+
+.memory-card {
+  border-color: rgba(60, 138, 103, 0.2);
+}
+
+.memory-settings-panel {
+  gap: var(--cbi-space-1-5);
+}
+
+.memory-config-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.6fr) minmax(140px, 0.8fr) minmax(240px, 2fr);
+  gap: var(--cbi-space-1);
+}
+
+.memory-config-grid > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: var(--cbi-space-1);
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-2);
+}
+
+.memory-config-grid small {
+  color: var(--cbi-fg-3);
+}
+
+.memory-config-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cbi-fg-1);
+}
+
 .view-switcher button,
 .mini-button {
   height: 28px;
@@ -2243,7 +2284,8 @@ textarea:focus {
   .chat-context-bar,
   .chat-form,
   .starter-list,
-  .call-detail {
+  .call-detail,
+  .memory-config-grid {
     grid-template-columns: 1fr;
   }
 

@@ -212,7 +212,15 @@ type ChatThread struct {
 	Conversation ChatConversation  `json:"conversation"`
 	Messages     []ChatMessage     `json:"messages"`
 	Citations    []ProductCitation `json:"citations,omitempty"`
+	Memories     []MemoryReference `json:"memories,omitempty"`
 	AgentSteps   []AgentStep       `json:"agent_steps,omitempty"`
+}
+
+type MemoryReference struct {
+	ID     string  `json:"id"`
+	Memory string  `json:"memory"`
+	Score  float64 `json:"score,omitempty"`
+	Source string  `json:"source"`
 }
 
 type AgentStep struct {

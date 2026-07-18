@@ -64,6 +64,29 @@ export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
 
 Product Markdown retrieval uses embeddings for long documents. ScriptAgent stores product chunks in SQLite and uses DashScope embeddings for semantic Top-K retrieval; if embedding fails, it falls back to local keyword section matching.
 
+## Configure Mem0 Memory
+
+Mem0 is optional. When configured, general chat retrieves relevant cross-conversation memories before each ReAct run and asynchronously stores the successful user/assistant turn afterward. Memories are isolated with ScriptAgent's internal user ID.
+
+Mem0 Platform:
+
+```bash
+export MEM0_PROVIDER="platform"
+export MEM0_API_KEY="m0-your-key"
+export MEM0_AGENT_ID="scriptagent"
+export MEM0_TOP_K="5"
+```
+
+Self-hosted Mem0 OSS:
+
+```bash
+export MEM0_PROVIDER="oss"
+export MEM0_BASE_URL="http://127.0.0.1:8888"
+export MEM0_API_KEY="optional-self-hosted-key"
+```
+
+If Mem0 is unavailable or not configured, chat continues with the existing local recent-message and conversation-summary strategy. Platform mode sends selected chat turns to Mem0's hosted service; use OSS mode when memory data must stay in your own deployment.
+
 ## Configure CreatiBI Publishing
 
 The publish action uses the local `cbi` CLI. Make sure you are logged in:

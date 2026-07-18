@@ -59,6 +59,7 @@ func (h *Handler) Routes() http.Handler {
 			private.Get("/model-calls", h.listModelCalls)
 			private.Get("/settings/model", h.getModelSettings)
 			private.Put("/settings/model", h.saveModelSettings)
+			private.Get("/settings/memory", h.getMemorySettings)
 		})
 	})
 

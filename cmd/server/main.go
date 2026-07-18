@@ -15,6 +15,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/creatibi"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/memory"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/secret"
 	"github.com/tian1363/scriptagent/internal/storage"
@@ -46,14 +47,29 @@ func main() {
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
 	secretBox := secret.NewBox(env("APP_ENCRYPTION_KEY", "scriptagent-dev-only-change-me"))
 	modelClient := buildModelClient(store, secretBox)
+	memoryClient := buildMemoryClient()
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient), authsvc.NewService(store), secretBox)
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient, memoryClient), creative.NewService(store, modelClient), authsvc.NewService(store), secretBox, memoryClient)
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func buildMemoryClient() *memory.Client {
+	client := memory.NewClient(memory.Config{
+		Provider: env("MEM0_PROVIDER", "platform"),
+		BaseURL:  os.Getenv("MEM0_BASE_URL"),
+		APIKey:   os.Getenv("MEM0_API_KEY"),
+		AgentID:  env("MEM0_AGENT_ID", "scriptagent"),
+		TopK:     envInt("MEM0_TOP_K", 5),
+		Timeout:  time.Duration(envInt("MEM0_TIMEOUT_SECONDS", 15)) * time.Second,
+	})
+	status := client.Status()
+	log.Printf("ScriptAgent memory: provider=%s configured=%t", status.Provider, status.Configured)
+	return client
 }
 
 func buildPublisher() webserver.Publisher {
