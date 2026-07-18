@@ -1458,10 +1458,14 @@ textarea:focus {
 }
 
 .result-output {
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   padding: var(--cbi-space-2);
   overflow: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-family: var(--cbi-font-mono);
   font-size: 12px;
   line-height: 1.65;
@@ -1470,7 +1474,7 @@ textarea:focus {
 }
 
 .result-output.json {
-  white-space: pre;
+  white-space: pre-wrap;
 }
 
 .timeline-output,
