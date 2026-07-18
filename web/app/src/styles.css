@@ -2143,9 +2143,13 @@ textarea:focus {
   flex: 1;
   height: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
   gap: var(--cbi-space-2);
   padding: var(--cbi-space-2);
 }
@@ -2158,21 +2162,16 @@ textarea:focus {
 
 .call-detail section {
   min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: block;
   border: 1px solid var(--cbi-border-default);
   border-radius: var(--cbi-radius-sm);
   overflow: hidden;
 }
 
 .call-detail section > .result-output {
-  flex: 1;
-  height: 0;
-  min-height: 0;
+  height: auto;
   overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow-y: visible;
 }
 
 .call-detail h3 {
