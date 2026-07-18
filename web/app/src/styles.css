@@ -2173,11 +2173,14 @@ textarea:focus {
 .main-pane-calls .call-detail {
   height: auto;
   overflow: visible;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
 }
 
 .main-pane-calls .call-detail section > .result-output {
   max-height: none;
   overflow: visible;
+  overscroll-behavior: auto;
 }
 
 .call-detail section {
