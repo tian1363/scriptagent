@@ -6,6 +6,10 @@ body {
   overflow: hidden;
 }
 
+body:has(.app-shell-calls) {
+  overflow-y: auto;
+}
+
 button,
 input,
 select,
@@ -389,6 +393,29 @@ button:disabled {
 
 .workspace-home {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell-calls {
+  height: auto;
+  min-height: 100vh;
+}
+
+.app-shell-calls .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.workspace-calls {
+  height: auto;
+  min-height: calc(100vh - var(--cbi-navbar-height));
+  align-items: start;
+}
+
+.workspace-calls > .history-pane {
+  position: sticky;
+  top: var(--cbi-navbar-height);
+  height: calc(100vh - var(--cbi-navbar-height));
 }
 
 .history-pane {
@@ -2162,7 +2189,9 @@ textarea:focus {
 
 .main-pane-calls {
   display: block;
-  overflow-y: auto;
+  height: auto;
+  min-height: calc(100vh - var(--cbi-navbar-height));
+  overflow: visible;
 }
 
 .main-pane-calls .model-calls-pane {

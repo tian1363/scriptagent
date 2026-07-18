@@ -699,7 +699,7 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${view === "calls" ? "app-shell-calls" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <img src={logo} alt="ScriptAgent" />
@@ -738,7 +738,7 @@ export function App() {
         </button>
       </header>
 
-      <main className={`workspace ${view === "products" ? "workspace-home" : ""}`}>
+      <main className={`workspace ${view === "products" ? "workspace-home" : ""} ${view === "calls" ? "workspace-calls" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
