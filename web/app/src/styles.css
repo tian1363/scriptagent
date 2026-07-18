@@ -2140,15 +2140,23 @@ textarea:focus {
 }
 
 .call-detail {
+  flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--cbi-space-2);
   padding: var(--cbi-space-2);
 }
 
+.model-calls-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .call-detail section {
+  min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

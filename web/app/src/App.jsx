@@ -1953,13 +1953,13 @@ function SettingsWorkspace({
 function ModelCallsWorkspace({ call, error }) {
   if (!call) {
     return (
-      <section className="result-pane full-height">
+      <section className="result-pane full-height model-calls-pane">
         <EmptyState text="暂无模型调用记录" />
       </section>
     );
   }
   return (
-    <section className="result-pane full-height">
+    <section className="result-pane full-height model-calls-pane">
       <div className="result-header">
         <div>
           <h2>{call.step || "模型调用"}</h2>
