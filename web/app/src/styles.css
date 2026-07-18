@@ -2141,6 +2141,7 @@ textarea:focus {
 
 .call-detail {
   flex: 1;
+  height: 0;
   min-height: 0;
   overflow: hidden;
   display: grid;
@@ -2158,11 +2159,20 @@ textarea:focus {
 .call-detail section {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--cbi-border-default);
   border-radius: var(--cbi-radius-sm);
   overflow: hidden;
+}
+
+.call-detail section > .result-output {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .call-detail h3 {
@@ -2282,6 +2292,21 @@ textarea:focus {
 
   .main-pane {
     min-width: 0;
+  }
+
+  .model-calls-pane {
+    overflow: visible;
+  }
+
+  .call-detail {
+    height: auto;
+    overflow: visible;
+  }
+
+  .call-detail section > .result-output {
+    flex: none;
+    height: auto;
+    max-height: 60vh;
   }
 
   .upload-grid,
