@@ -89,6 +89,28 @@ export MEM0_API_KEY="optional-self-hosted-key"
 
 If Mem0 is unavailable or not configured, chat continues with the existing local recent-message and conversation-summary strategy. Platform mode sends selected chat turns to Mem0's hosted service; use OSS mode when memory data must stay in your own deployment.
 
+## Configure Web Search
+
+Web search is optional and is exposed to the general-chat ReAct agent only after the deployment operator configures a provider. Search credentials stay on the server and are never returned to the browser or included in model-call logs.
+
+Tavily:
+
+```bash
+export SEARCH_PROVIDER="tavily"
+export SEARCH_API_KEY="tvly-your-key"
+export SEARCH_MAX_RESULTS="5"
+```
+
+Self-hosted SearXNG:
+
+```bash
+export SEARCH_PROVIDER="searxng"
+export SEARCH_BASE_URL="http://127.0.0.1:8888"
+export SEARCH_MAX_RESULTS="5"
+```
+
+Optional settings are `SEARCH_TIMEOUT_SECONDS` (default `15`) and `SEARCH_BASE_URL` for a Tavily-compatible gateway. The configuration page shows connection status without exposing the key. Search results are treated as untrusted external context, and the chat UI renders the sources used in the current answer as clickable citations.
+
 ## Configure CreatiBI Publishing
 
 The publish action uses the local `cbi` CLI. Make sure you are logged in:

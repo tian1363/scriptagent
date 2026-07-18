@@ -857,6 +857,32 @@ published
 failed
 ```
 
+### 11.6 通用对话网页搜索
+
+网页搜索采用 Provider Adapter，不把供应商协议写入 ReAct 编排层。第一版实现 `tavily` 和 `searxng`：
+
+```text
+ReAct Agent
+  -> web_search(query, topic, time_range, max_results)
+  -> websearch.Client
+       -> Tavily POST /search
+       -> SearXNG GET /search?format=json
+  -> 标准化 Result[]
+  -> Agent observation + 本轮 citations
+```
+
+`web_search` 仅在 `Client.Configured()` 为真时注册。Tavily 要求服务端 API Key；SearXNG 要求部署者提供自托管 Base URL，可选内部网关 Key。统一结果字段为 `title`、`url`、`snippet`、`published_at`、`score`，对话消息的 citation 额外记录 `source=web:<provider>`。
+
+安全和成本边界：
+
+- API Key 只从进程环境读取，不保存到用户配置、SQLite、模型输入或模型调用日志。
+- 查询最长 500 个 Unicode 字符，结果数默认 5、上限 10，请求默认 15 秒超时，响应最多读取 2 MiB。
+- 仅保留带有效 `http`/`https` URL、非空标题和摘要的结果。
+- 搜索观察明确标记为“不可信外部数据”，模型不得执行结果中的指令。
+- 第一版不抓取结果页面全文，也不提供通用 URL fetch 工具，避免 SSRF 和不可控 token 消耗。
+- 前端 `/api/settings/search` 只返回脱敏状态；配置页展示 Provider、Endpoint 和结果上限。
+- 对话引用区将网页来源与产品 Markdown 章节统一展示，但网页来源使用可点击链接和供应商标识。
+
 ## 12. 配置项
 
 ```env
@@ -873,6 +899,12 @@ SCRIPT_AGENT_VIDEO_FPS=2
 SCRIPT_AGENT_MODE=auto
 SCRIPT_AGENT_MAX_DATA_URI_MB=20
 SCRIPT_AGENT_EMBEDDING_MODEL=text-embedding-v4
+
+SEARCH_PROVIDER=tavily
+SEARCH_BASE_URL=https://api.tavily.com
+SEARCH_API_KEY=
+SEARCH_MAX_RESULTS=5
+SEARCH_TIMEOUT_SECONDS=15
 SCRIPT_AGENT_EMBEDDING_DIMENSIONS=1024
 DASHSCOPE_EMBEDDING_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
 

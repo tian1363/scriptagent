@@ -137,6 +137,8 @@ type ProductCitation struct {
 	Snippet     string  `json:"snippet"`
 	Score       float64 `json:"score,omitempty"`
 	Source      string  `json:"source"`
+	URL         string  `json:"url,omitempty"`
+	PublishedAt string  `json:"published_at,omitempty"`
 }
 
 type ProductChunkInput struct {

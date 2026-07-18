@@ -95,6 +95,10 @@ export async function getMemorySettings() {
   return request("/api/settings/memory");
 }
 
+export async function getSearchSettings() {
+  return request("/api/settings/search");
+}
+
 export async function saveModelSettings(settings) {
   return request("/api/settings/model", {
     method: "PUT",

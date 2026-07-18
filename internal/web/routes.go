@@ -60,6 +60,7 @@ func (h *Handler) Routes() http.Handler {
 			private.Get("/settings/model", h.getModelSettings)
 			private.Put("/settings/model", h.saveModelSettings)
 			private.Get("/settings/memory", h.getMemorySettings)
+			private.Get("/settings/search", h.getSearchSettings)
 		})
 	})
 

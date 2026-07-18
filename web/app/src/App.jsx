@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   FileText,
   History,
   Loader2,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
+  Search,
   Settings,
   KeyRound,
   LogOut,
@@ -33,6 +35,7 @@ import {
   getCurrentUser,
   getMemorySettings,
   getModelSettings,
+  getSearchSettings,
   getChat,
   getJob,
   getProductMarkdown,
@@ -197,6 +200,7 @@ export function App() {
   const [jobInitialRequirement, setJobInitialRequirement] = useState("");
   const [modelSettings, setModelSettings] = useState(null);
   const [memorySettings, setMemorySettings] = useState(null);
+  const [searchSettings, setSearchSettings] = useState(null);
   const [adminUsers, setAdminUsers] = useState([]);
   const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -266,6 +270,10 @@ export function App() {
     setMemorySettings(await getMemorySettings());
   }
 
+  async function refreshSearchSettings() {
+    setSearchSettings(await getSearchSettings());
+  }
+
   async function refreshAdminUsers() {
     if (currentUser?.role !== "admin") return;
     setIsLoadingAdminUsers(true);
@@ -285,6 +293,7 @@ export function App() {
     if (view === "settings") {
       await refreshModelSettings();
       await refreshMemorySettings();
+      await refreshSearchSettings();
       await refreshAdminUsers();
     }
   }
@@ -305,6 +314,7 @@ export function App() {
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
     refreshMemorySettings().catch(() => {});
+    refreshSearchSettings().catch(() => {});
     refreshAdminUsers().catch(() => {});
   }, [currentUser?.id]);
 
@@ -837,6 +847,7 @@ export function App() {
             <SettingsWorkspace
               modelSettings={modelSettings}
               memorySettings={memorySettings}
+              searchSettings={searchSettings}
               currentUser={currentUser}
               adminUsers={adminUsers}
               isLoadingAdminUsers={isLoadingAdminUsers}
@@ -1384,18 +1395,28 @@ function AgentStepsPanel({ steps }) {
 }
 
 function CitationPanel({ citations }) {
+  const webCount = citations.filter((citation) => citation.url).length;
   return (
     <section className="citation-panel">
       <div className="section-heading">
         <span>本轮引用</span>
-        <small>{citations.length} 个产品章节</small>
+        <small>{webCount ? `${webCount} 个网页来源` : `${citations.length} 个产品章节`}</small>
       </div>
       <div className="citation-list">
         {citations.map((citation, index) => (
-          <article key={`${citation.chunk_id || citation.chunk_index}-${index}`} className="citation-card">
+          <article key={`${citation.url || citation.chunk_id || citation.chunk_index}-${index}`} className={`citation-card ${citation.url ? "web-citation-card" : ""}`}>
             <div>
-              <strong>{citation.heading || "产品资料"}</strong>
-              <span>{citation.product_name} · {citation.source === "embedding" ? `相似度 ${Number(citation.score || 0).toFixed(3)}` : citation.source}</span>
+              {citation.url ? (
+                <a href={citation.url} target="_blank" rel="noreferrer">
+                  <strong>{citation.heading || "网页来源"}</strong>
+                  <ExternalLink size={13} />
+                </a>
+              ) : <strong>{citation.heading || "产品资料"}</strong>}
+              <span>
+                {citation.url
+                  ? `${String(citation.source || "web").replace("web:", "")} ${citation.published_at ? `· ${citation.published_at}` : ""}`
+                  : `${citation.product_name} · ${citation.source === "embedding" ? `相似度 ${Number(citation.score || 0).toFixed(3)}` : citation.source}`}
+              </span>
             </div>
             <p>{citation.snippet}</p>
           </article>
@@ -1797,6 +1818,7 @@ function ProductsWorkspace({
 function SettingsWorkspace({
   modelSettings,
   memorySettings,
+  searchSettings,
   currentUser,
   adminUsers,
   isLoadingAdminUsers,
@@ -1882,6 +1904,42 @@ function SettingsWorkspace({
               <span>
                 <small>Endpoint</small>
                 <strong>{memorySettings.base_url}</strong>
+              </span>
+            </div>
+          ) : null}
+        </div>
+        <div className="form-section memory-settings-panel">
+          <div className="section-heading">
+            <span>联网搜索</span>
+            <small>{searchSettings?.configured ? "ReAct 工具已启用" : "未配置"}</small>
+          </div>
+          <div className="security-callout">
+            <Search size={18} />
+            <div>
+              <strong>{searchSettings?.configured ? "Agent 可以检索公开网页" : "联网搜索尚未启用"}</strong>
+              <p>
+                {searchSettings?.configured
+                  ? `使用 ${searchSettings.provider}，每次最多返回 ${searchSettings.max_results || 5} 条结果。网页内容按不可信外部资料处理，并在回答中展示来源。`
+                  : "由部署者通过服务端环境变量配置 Tavily 或自托管 SearXNG。API Key 不会发送到浏览器。"}
+              </p>
+            </div>
+            <span className={`status-pill ${searchSettings?.configured ? "success" : "neutral"}`}>
+              {searchSettings?.configured ? "已连接" : "关闭"}
+            </span>
+          </div>
+          {searchSettings?.configured ? (
+            <div className="memory-config-grid">
+              <span>
+                <small>Provider</small>
+                <strong>{searchSettings.provider}</strong>
+              </span>
+              <span>
+                <small>最多结果</small>
+                <strong>{searchSettings.max_results}</strong>
+              </span>
+              <span>
+                <small>Endpoint</small>
+                <strong>{searchSettings.base_url}</strong>
               </span>
             </div>
           ) : null}

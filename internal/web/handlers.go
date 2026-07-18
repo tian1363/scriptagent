@@ -23,6 +23,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/storage"
 	"github.com/tian1363/scriptagent/internal/userctx"
 	"github.com/tian1363/scriptagent/internal/videoprompt"
+	"github.com/tian1363/scriptagent/internal/websearch"
 )
 
 type Handler struct {
@@ -36,6 +37,7 @@ type Handler struct {
 	auth      *authsvc.Service
 	secrets   *secret.Box
 	memory    *memory.Client
+	search    *websearch.Client
 }
 
 type Publisher interface {
@@ -47,7 +49,7 @@ type ChatResponder interface {
 	SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []chatpkg.AttachmentInput) (*jobs.ChatThread, error)
 }
 
-func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service, authService *authsvc.Service, secrets *secret.Box, memoryClient *memory.Client) *Handler {
+func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service, authService *authsvc.Service, secrets *secret.Box, memoryClient *memory.Client, searchClient *websearch.Client) *Handler {
 	if publisher == nil {
 		publisher = disabledPublisher{}
 	}
@@ -62,7 +64,16 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		auth:      authService,
 		secrets:   secrets,
 		memory:    memoryClient,
+		search:    searchClient,
 	}
+}
+
+func (h *Handler) getSearchSettings(w http.ResponseWriter, _ *http.Request) {
+	if h.search == nil {
+		writeJSON(w, http.StatusOK, websearch.Status{})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.search.Status())
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {

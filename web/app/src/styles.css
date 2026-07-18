@@ -468,6 +468,20 @@ body {
   border-radius: 9px;
 }
 
+.web-citation-card a {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.web-citation-card a:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 @media (max-width: 860px) {
   body {
     overflow: auto;

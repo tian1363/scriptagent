@@ -21,6 +21,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/storage"
 	"github.com/tian1363/scriptagent/internal/userctx"
 	webserver "github.com/tian1363/scriptagent/internal/web"
+	"github.com/tian1363/scriptagent/internal/websearch"
 )
 
 func main() {
@@ -48,8 +49,11 @@ func main() {
 	secretBox := secret.NewBox(env("APP_ENCRYPTION_KEY", "scriptagent-dev-only-change-me"))
 	modelClient := buildModelClient(store, secretBox)
 	memoryClient := buildMemoryClient()
+	searchClient := buildSearchClient()
+	chatService := chat.NewService(store, modelClient, memoryClient)
+	chatService.SetSearchClient(searchClient)
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient, memoryClient), creative.NewService(store, modelClient), authsvc.NewService(store), secretBox, memoryClient)
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chatService, creative.NewService(store, modelClient), authsvc.NewService(store), secretBox, memoryClient, searchClient)
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
@@ -69,6 +73,19 @@ func buildMemoryClient() *memory.Client {
 	})
 	status := client.Status()
 	log.Printf("ScriptAgent memory: provider=%s configured=%t", status.Provider, status.Configured)
+	return client
+}
+
+func buildSearchClient() *websearch.Client {
+	client := websearch.NewClient(websearch.Config{
+		Provider:   env("SEARCH_PROVIDER", "tavily"),
+		BaseURL:    os.Getenv("SEARCH_BASE_URL"),
+		APIKey:     os.Getenv("SEARCH_API_KEY"),
+		MaxResults: envInt("SEARCH_MAX_RESULTS", 5),
+		Timeout:    time.Duration(envInt("SEARCH_TIMEOUT_SECONDS", 15)) * time.Second,
+	})
+	status := client.Status()
+	log.Printf("ScriptAgent search: provider=%s configured=%t", status.Provider, status.Configured)
 	return client
 }
 
