@@ -2160,6 +2160,26 @@ textarea:focus {
   overflow: hidden;
 }
 
+.main-pane-calls {
+  display: block;
+  overflow-y: auto;
+}
+
+.main-pane-calls .model-calls-pane {
+  min-height: 100%;
+  overflow: visible;
+}
+
+.main-pane-calls .call-detail {
+  height: auto;
+  overflow: visible;
+}
+
+.main-pane-calls .call-detail section > .result-output {
+  max-height: none;
+  overflow: visible;
+}
+
 .call-detail section {
   min-width: 0;
   display: block;

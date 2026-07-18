@@ -750,7 +750,7 @@ export function App() {
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
-        <section className={`main-pane ${view === "products" ? "main-pane-home" : ""}`}>
+        <section className={`main-pane ${view === "products" ? "main-pane-home" : ""} ${view === "calls" ? "main-pane-calls" : ""}`}>
           {view === "jobs" ? (
             <JobsWorkspace
               selectedJob={selectedJob}
