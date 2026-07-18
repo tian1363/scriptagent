@@ -53,7 +53,7 @@ func main() {
 	chatService := chat.NewService(store, modelClient, memoryClient)
 	chatService.SetSearchClient(searchClient)
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
-	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chatService, creative.NewService(store, modelClient), authsvc.NewService(store), secretBox, memoryClient, searchClient)
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chatService, creative.NewService(store, modelClient, searchClient), authsvc.NewService(store), secretBox, memoryClient, searchClient)
 	runner.ResumeUnfinished()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)

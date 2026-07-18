@@ -79,11 +79,10 @@ export async function listCreativeReports(productId) {
   return request(`/api/products/${productId}/creative-reports`);
 }
 
-export async function createCreativeReport(productId, input) {
+export async function createCreativeReport(productId, formData) {
   return request(`/api/products/${productId}/creative-reports`, {
     method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify(input),
+    body: formData,
   });
 }
 

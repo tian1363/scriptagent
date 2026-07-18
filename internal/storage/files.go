@@ -37,6 +37,9 @@ func (s *LocalStore) SaveUserUpload(userID string, file multipart.File, header *
 	if kind == "chat" && !isChatAttachmentExt(ext) {
 		return "", errors.New("unsupported chat attachment type")
 	}
+	if kind == "creative" && !isChatAttachmentExt(ext) {
+		return "", errors.New("unsupported creative material type")
+	}
 	if kind == "markdown" && ext != ".md" && ext != ".markdown" {
 		return "", errors.New("unsupported markdown type")
 	}
@@ -45,7 +48,7 @@ func (s *LocalStore) SaveUserUpload(userID string, file multipart.File, header *
 	if kind == "markdown" {
 		limit = MaxMarkdownBytes
 	}
-	if kind == "chat" {
+	if kind == "chat" || kind == "creative" {
 		limit = MaxChatAttachmentBytes
 	}
 	if header.Size > limit {

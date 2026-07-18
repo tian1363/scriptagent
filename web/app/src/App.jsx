@@ -655,22 +655,16 @@ export function App() {
     const selectedProduct = products.find((product) => product.id === selectedProductId);
     if (!selectedProduct) return;
     const form = new FormData(event.currentTarget);
+    form.set("source_type", "multi_source");
+    form.set("product_name", String(form.get("product_name") || selectedProduct.title));
+    form.set("date_range", String(form.get("date_range") || "近 30 天"));
+    form.set("sort_metric", String(form.get("sort_metric") || "热度/曝光/播放优先"));
+    form.set("sample_count", String(form.get("sample_count") || 50));
+    form.set("search_comments", form.get("search_comments") ? "true" : "false");
     setError("");
     setIsCreatingCreativeReport(true);
     try {
-      const report = await createCreativeReport(selectedProduct.id, {
-        source_type: "dataeye",
-        dataeye_url: form.get("dataeye_url") || "",
-        dataeye_id: form.get("dataeye_id") || "",
-        product_name: form.get("product_name") || selectedProduct.title,
-        date_range: form.get("date_range") || "近 30 天",
-        media: form.get("media") || "",
-        country: form.get("country") || "",
-        sort_metric: form.get("sort_metric") || "热度/曝光/播放优先",
-        sample_count: Number(form.get("sample_count") || 50),
-        requirement: form.get("requirement") || "",
-        material_note: form.get("material_note") || "",
-      });
+      const report = await createCreativeReport(selectedProduct.id, form);
       const reports = await listCreativeReports(selectedProduct.id);
       setCreativeReports(reports);
       setSelectedCreativeReportId(report.id);
@@ -810,6 +804,7 @@ export function App() {
               isLoadingCreativeReports={isLoadingCreativeReports}
               isCreatingCreativeReport={isCreatingCreativeReport}
               isCreatingProduct={isCreatingProduct}
+              searchSettings={searchSettings}
               productStats={productStats}
               error={error}
               onSelect={setSelectedProductId}
@@ -1584,6 +1579,7 @@ function ProductsWorkspace({
   isLoadingCreativeReports,
   isCreatingCreativeReport,
   isCreatingProduct,
+  searchSettings,
   productStats,
   error,
   onSelect,
@@ -1696,10 +1692,42 @@ function ProductsWorkspace({
             <section className="creative-report-panel">
               <div className="section-heading">
                 <span>创意策略报告</span>
-                <small>配置 DataEye 来源，生成后可转为裂变脚本任务</small>
+                <small>汇总素材、链接、用户评论与产品资料</small>
               </div>
               <div className="creative-report-grid">
                 <form className="task-form compact-form" onSubmit={onCreateCreativeReport}>
+                  <div className="creative-source-section">
+                    <div className="section-heading">
+                      <span>分析素材</span>
+                      <small>最多 6 个，单个编码后不超过 20MB</small>
+                    </div>
+                    <MaterialUploadInput />
+                    <label>
+                      <span>素材链接</span>
+                      <textarea name="material_links" rows="3" placeholder="每行一个公开素材链接，最多 10 个。链接作为来源记录，不自动抓取页面。" />
+                    </label>
+                  </div>
+                  <div className="creative-source-section">
+                    <div className="section-heading">
+                      <span>用户声音</span>
+                      <small>{searchSettings?.configured ? `由 ${searchSettings.provider} 搜索` : "需要先配置联网搜索"}</small>
+                    </div>
+                    <label className={`source-toggle ${searchSettings?.configured ? "" : "disabled"}`}>
+                      <input name="search_comments" type="checkbox" disabled={!searchSettings?.configured} />
+                      <span>
+                        <strong>搜索公开用户评论与讨论</strong>
+                        <small>提炼高频赞扬、抱怨、疑问和购买阻力，并保留网页来源。</small>
+                      </span>
+                    </label>
+                    <label>
+                      <span>评论搜索词</span>
+                      <input name="comment_query" type="text" placeholder={`${selectedProduct.title} 用户评价 review（留空自动生成）`} disabled={!searchSettings?.configured} />
+                    </label>
+                  </div>
+                  <div className="section-heading source-config-heading">
+                    <span>平台数据配置</span>
+                    <small>可选 DataEye 来源</small>
+                  </div>
                   <div className="upload-grid">
                     <label>
                       <span>DataEye URL</span>
@@ -1781,6 +1809,7 @@ function ProductsWorkspace({
                               <span>转裂变任务</span>
                             </button>
                           </div>
+                          <ReportSourceSummary configJSON={selectedReport.source_config_json} />
                           <MarkdownContent content={selectedReport.report_markdown} />
                         </article>
                       ) : null}
@@ -1812,6 +1841,57 @@ function ProductsWorkspace({
         )}
       </section>
     </section>
+  );
+}
+
+function MaterialUploadInput() {
+  const [files, setFiles] = useState([]);
+  return (
+    <div className="material-upload-control">
+      <label className="material-file-input">
+        <Upload size={17} />
+        <span>{files.length ? `重新选择素材（已选 ${files.length} 个）` : "上传图片或视频"}</span>
+        <input
+          name="materials"
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+          multiple
+          onChange={(event) => setFiles(Array.from(event.target.files || []))}
+        />
+      </label>
+      {files.length ? (
+        <div className="material-file-list">
+          {files.slice(0, 6).map((file) => (
+            <span key={`${file.name}-${file.lastModified}`} title={file.name}>
+              {file.name}
+            </span>
+          ))}
+          {files.length > 6 ? <small>只会提交前 6 个文件</small> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReportSourceSummary({ configJSON }) {
+  let config = {};
+  try {
+    config = JSON.parse(configJSON || "{}");
+  } catch {
+    config = {};
+  }
+  const sources = [
+    config.materials?.length ? `已分析素材 ${config.materials.length}` : "",
+    config.material_links?.length ? `素材链接 ${config.material_links.length}` : "",
+    config.search_results?.length ? `评论来源 ${config.search_results.length}` : "",
+    config.dataeye_url || config.dataeye_id ? "DataEye 配置" : "",
+  ].filter(Boolean);
+  if (!sources.length) return null;
+  return (
+    <div className="report-source-summary">
+      <strong>本报告信息源</strong>
+      <div>{sources.map((source) => <span key={source}>{source}</span>)}</div>
+    </div>
   );
 }
 

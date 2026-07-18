@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -343,10 +344,43 @@ func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("creative report service is not configured"))
 		return
 	}
-	var input creative.DataEyeConfig
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+	r.Body = http.MaxBytesReader(w, r.Body, 130*1024*1024)
+	if err := r.ParseMultipartForm(8 * 1024 * 1024); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	input := creative.DataEyeConfig{
+		SourceType: r.FormValue("source_type"), DataEyeURL: r.FormValue("dataeye_url"),
+		DataEyeID: r.FormValue("dataeye_id"), ProductName: r.FormValue("product_name"),
+		DateRange: r.FormValue("date_range"), Media: r.FormValue("media"), Country: r.FormValue("country"),
+		SortMetric: r.FormValue("sort_metric"), Requirement: r.FormValue("requirement"), MaterialNote: r.FormValue("material_note"),
+		SearchComments: r.FormValue("search_comments") == "true", CommentQuery: r.FormValue("comment_query"),
+	}
+	input.SampleCount, _ = strconv.Atoi(r.FormValue("sample_count"))
+	links, err := parseMaterialLinks(r.FormValue("material_links"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.MaterialLinks = links
+	files := r.MultipartForm.File["materials"]
+	if len(files) > 6 {
+		writeError(w, http.StatusBadRequest, errors.New("最多上传 6 个素材文件"))
+		return
+	}
+	for _, header := range files {
+		file, openErr := header.Open()
+		if openErr != nil {
+			writeError(w, http.StatusBadRequest, openErr)
+			return
+		}
+		path, saveErr := h.files.SaveUserUpload(userIDFromRequest(r), file, header, "creative")
+		file.Close()
+		if saveErr != nil {
+			writeError(w, http.StatusBadRequest, saveErr)
+			return
+		}
+		input.Materials = append(input.Materials, creative.Material{Name: header.Filename, Path: path, Kind: strings.TrimPrefix(filepath.Ext(header.Filename), "."), Size: header.Size})
 	}
 	report, err := h.creative.GenerateReport(r.Context(), userIDFromRequest(r), chi.URLParam(r, "id"), input)
 	if err != nil {
@@ -354,6 +388,22 @@ func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, report)
+}
+
+func parseMaterialLinks(raw string) ([]string, error) {
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' })
+	if len(parts) > 10 {
+		return nil, errors.New("素材链接最多 10 个")
+	}
+	links := make([]string, 0, len(parts))
+	for _, part := range parts {
+		parsed, err := url.Parse(strings.TrimSpace(part))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, fmt.Errorf("无效素材链接：%s", part)
+		}
+		links = append(links, parsed.String())
+	}
+	return links, nil
 }
 
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {

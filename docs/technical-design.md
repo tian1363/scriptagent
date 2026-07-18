@@ -701,7 +701,7 @@ GET /api/products/{id}/creative-reports
 POST /api/products/{id}/creative-reports
 ```
 
-`POST /api/products/{id}/creative-reports` 使用 JSON：
+`POST /api/products/{id}/creative-reports` 使用 `multipart/form-data`：
 
 - `source_type`: 来源类型，第一版固定为 `dataeye`。
 - `dataeye_url`: DataEye 产品或素材页面 URL，可为空。
@@ -714,10 +714,18 @@ POST /api/products/{id}/creative-reports
 - `sample_count`: 样本数，默认 50。
 - `requirement`: 用户补充分析要求。
 - `material_note`: 用户手动补充的素材观察或 DataEye 导出摘要。
+- `materials`: 可重复文件字段，支持图片和视频，最多 6 个。
+- `material_links`: 换行或逗号分隔的公开素材 URL，最多 10 个。
+- `search_comments`: 是否搜索公开用户评论。
+- `comment_query`: 评论搜索词；为空时由产品名生成。
 
 实现约束：
 
-- 第一版生成报告时读取产品 Markdown 与 DataEye 来源配置，调用当前模型生成创意策略报告。
+- 生成报告时读取产品 Markdown，将上传图片/视频编码为多模态输入，并合并素材链接、DataEye 来源配置与评论搜索摘要。
+- 上传素材使用租户目录 `uploads/users/{user_id}/creative`，仅支持 PNG/JPEG/WebP/GIF/MP4/MOV/WebM；最多 6 个，单个 data-uri 不得超过 20 MiB。
+- 素材链接只做格式校验和来源记录，不由服务端直接抓取，避免 SSRF；报告必须标明“未读取链接内容”。
+- 勾选评论搜索但搜索 Provider 未配置时返回明确错误；已配置时使用统一 `websearch.Client`，默认检索近一个月最多 5 条结果。
+- 搜索结果作为不可信外部资料写入配置快照和模型提示，报告必须保留来源并区分用户观点与产品事实。
 - 在真实 DataEye 白名单拉取任务接入前，报告必须标注为策略预案，不得编造素材指标。
 - 模型调用 scope 为 `creative_report`，ref_id 为产品 ID，方便调试台追踪 token 与输入输出。
 - 报告保存到 `creative_reports` 表，产品详情读取历史报告并默认选中最新报告。
