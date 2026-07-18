@@ -2306,6 +2306,9 @@ textarea:focus {
     flex: none;
     height: auto;
     max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .upload-grid,
