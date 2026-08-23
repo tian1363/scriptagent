@@ -881,3 +881,269 @@ Go 后端 + React 前端 + CreatiBI Design System
 - 每组相关代码变更完成后必须提交 Git commit。
 - 不允许把无关改动混入同一次提交。
 - 不允许回滚用户或其他开发者已有改动，除非用户明确要求。
+
+## 20. 创作空间投放素材闭环技术设计
+
+### 20.1 演进原则
+
+- 继续使用 React + Vite、Go API、SQLite、本地文件存储和现有 Job Runner。
+- 现有脚本任务流水线继续运行，新功能通过领域实体和独立服务扩展。
+- `jobs` 只记录异步执行，不作为素材、脚本版本或实验的业务主表。
+- 先支持手工和文件导入投放数据，后续通过适配器连接聚光 API。
+- 所有模型生成结果必须通过 Schema 和业务规则校验后入库。
+
+### 20.2 前端模块拆分
+
+当前 `web/app/src/App.jsx` 承载大部分页面和状态。升级前先进行等价拆分，目标结构：
+
+```text
+src/
+├── app/
+│   ├── AppShell.jsx
+│   └── navigation.js
+├── pages/
+│   ├── WorkspaceListPage.jsx
+│   ├── WorkspaceDetailPage.jsx
+│   ├── MaterialLibraryPage.jsx
+│   ├── CreationTaskPage.jsx
+│   ├── ScriptEditorPage.jsx
+│   └── ExperimentPage.jsx
+├── features/
+│   ├── replication/
+│   ├── fission/
+│   ├── derivation/
+│   ├── compliance/
+│   └── performance/
+├── components/
+│   ├── MaterialCard.jsx
+│   ├── LifecycleBadge.jsx
+│   ├── VariableSelector.jsx
+│   ├── ScriptBeatEditor.jsx
+│   └── ExperimentTree.jsx
+├── api/
+└── styles/
+```
+
+第一阶段继续使用 React 本地状态。服务端缓存、请求去重和任务轮询建议逐步迁移到 TanStack Query，不引入 Redux。
+
+### 20.3 新增领域实体
+
+```text
+Workspace
+├── Products
+├── Materials
+│   └── MaterialVersions
+├── CreationTasks
+│   └── Scripts
+│       └── ScriptVersions
+└── Experiments
+    └── ExperimentVariants
+        └── PerformanceSnapshots
+```
+
+新增或扩展以下表：
+
+#### `materials`
+
+- `id`
+- `workspace_id`
+- `product_id`
+- `parent_material_id`
+- `source_type`
+- `creation_mode`
+- `platform`
+- `title`
+- `status`
+- `file_path`
+- `external_url`
+- `external_creative_id`
+- `created_at`
+- `updated_at`
+
+#### `material_versions`
+
+- `id`
+- `material_id`
+- `parent_version_id`
+- `version_no`
+- `changed_variables_json`
+- `script_id`
+- `created_at`
+
+#### `creative_genes`
+
+- `id`
+- `material_id`
+- `audience`
+- `pain_point`
+- `scenario`
+- `hook_type`
+- `selling_point`
+- `evidence_type`
+- `content_format`
+- `emotion`
+- `cta`
+- `keywords_json`
+- `updated_at`
+
+#### `script_versions`
+
+- `id`
+- `script_id`
+- `parent_version_id`
+- `version_no`
+- `source`
+- `content_json`
+- `changed_fields_json`
+- `created_at`
+
+#### `experiments`
+
+- `id`
+- `workspace_id`
+- `name`
+- `objective`
+- `mode`
+- `baseline_material_id`
+- `status`
+- `created_at`
+
+#### `experiment_variants`
+
+- `id`
+- `experiment_id`
+- `material_id`
+- `variable_name`
+- `variable_value`
+- `hypothesis`
+
+#### `performance_snapshots`
+
+- `id`
+- `material_id`
+- `window_start`
+- `window_end`
+- `impressions`
+- `clicks`
+- `interactions`
+- `conversions`
+- `spend`
+- `ctr`
+- `cpc`
+- `cvr`
+- `conversion_cost`
+- `frequency`
+- `source`
+- `imported_at`
+
+#### `insights`
+
+- `id`
+- `workspace_id`
+- `material_id`
+- `insight_type`
+- `evidence_json`
+- `recommendation`
+- `confidence`
+- `status`
+- `created_at`
+
+### 20.4 API 设计
+
+```text
+GET    /api/workspaces/{id}/dashboard
+GET    /api/workspaces/{id}/materials
+POST   /api/workspaces/{id}/materials
+GET    /api/materials/{id}
+POST   /api/materials/{id}/analyze
+POST   /api/materials/{id}/replicate
+POST   /api/materials/{id}/fission
+POST   /api/materials/{id}/derive
+
+GET    /api/materials/{id}/versions
+POST   /api/materials/{id}/versions
+
+POST   /api/experiments
+GET    /api/experiments/{id}
+POST   /api/experiments/{id}/performance/import
+GET    /api/experiments/{id}/diagnosis
+
+POST   /api/scripts/{id}/versions
+PATCH  /api/script-versions/{id}
+POST   /api/script-versions/{id}/compliance-check
+
+GET    /api/workspaces/{id}/insights
+POST   /api/insights/{id}/convert-to-task
+```
+
+分析、复刻、裂变、衍生、合规检查和导入诊断等耗时请求返回 `job_id`，继续通过 Job Runner 执行。第一阶段沿用轮询，后续可升级 SSE。
+
+### 20.5 Agent 与服务边界
+
+三个创作模式采用独立 Prompt 和 Schema，但共享产品资料检索、素材理解、创意基因、脚本结构、合规规则和 CreatiBI 映射。
+
+```text
+素材分析
+→ 创意结构提取
+→ 模式化脚本生成
+→ 合规与版权检查
+→ Go Schema/业务规则校验
+→ 保存素材与脚本版本
+```
+
+- 复刻任务必须输出结构迁移和不可迁移元素。
+- 裂变任务必须在严谨实验模式校验单一变量。
+- 衍生任务先保存机会池，再由用户选择机会生成脚本。
+- 投放诊断使用规则服务结合模型解释；状态计算和数值阈值由 Go 服务完成，模型不得自行编造指标。
+- 主脚本生产继续使用稳定顺序流水线，不迁移为开放式 ReAct。
+
+### 20.6 生命周期诊断
+
+诊断服务输入连续表现快照和空间基线，输出：
+
+- 当前生命周期状态；
+- 触发状态的证据；
+- 数据充分性；
+- 归因干扰项；
+- 下一轮创作建议。
+
+状态计算使用可配置窗口和相对变化，不写死跨行业统一 CTR/CPC 阈值。广告投放状态与内容资产状态分开存储。
+
+### 20.7 数据导入与平台适配
+
+第一阶段实现统一导入接口：
+
+```go
+type PerformanceImporter interface {
+    Validate(input ImportInput) error
+    Parse(input ImportInput) ([]PerformanceSnapshot, error)
+}
+```
+
+CSV 和 XLSX 使用独立实现。后续聚光连接使用同一领域模型：
+
+```go
+type AdPlatformAdapter interface {
+    ListCreatives(ctx context.Context, accountID string) ([]ExternalCreative, error)
+    PullPerformance(ctx context.Context, req PullRequest) ([]PerformanceSnapshot, error)
+}
+```
+
+平台凭据使用现有配置安全策略保存，接口不得返回完整密钥。
+
+### 20.8 兼容与迁移
+
+- 为现有任务结果提供惰性素材映射：用户首次打开旧任务时创建对应素材记录。
+- 不修改已有 `jobs`、产品和 CreatiBI 发布记录的业务含义。
+- 数据库迁移必须幂等，并为新增列提供默认值。
+- 在新素材库稳定前，保留原历史任务入口。
+
+### 20.9 实施顺序
+
+1. 拆分前端壳层、路由和现有页面，确保行为等价。
+2. 增加素材、版本和创意基因领域模型及迁移。
+3. 实现创作空间概览和素材库。
+4. 接入复刻、裂变、衍生三种任务模式。
+5. 增加结构化脚本版本和合规检查。
+6. 增加实验、数据导入、生命周期诊断和洞察转任务。
+7. 单独立项接入聚光平台数据。
