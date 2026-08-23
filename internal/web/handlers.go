@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -138,6 +139,67 @@ func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
 		"md_name": product.MDName,
 		"content": string(content),
 	})
+}
+
+func (h *Handler) listProductAssets(w http.ResponseWriter, r *http.Request) {
+	productID := chi.URLParam(r, "id")
+	if _, err := h.store.GetProduct(productID); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	assets, err := h.store.ListProductAssets(productID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, assets)
+}
+
+func (h *Handler) uploadProductAsset(w http.ResponseWriter, r *http.Request) {
+	productID := chi.URLParam(r, "id")
+	if _, err := h.store.GetProduct(productID); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err := r.ParseMultipartForm(storage.MaxAssetBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	file, header, err := r.FormFile("asset")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("请选择图片或视频"))
+		return
+	}
+	defer file.Close()
+	path, err := h.files.SaveUpload(file, header, "asset")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	kind := "image"
+	if ext == ".mp4" || ext == ".mov" || ext == ".webm" {
+		kind = "video"
+	}
+	asset, err := h.store.CreateProductAsset(jobs.ProductAsset{ProductID: productID, Kind: kind, Path: path, OriginalName: header.Filename, MimeType: mime.TypeByExtension(ext), SizeBytes: header.Size})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, asset)
+}
+
+func (h *Handler) getProductAssetFile(w http.ResponseWriter, r *http.Request) {
+	asset, err := h.store.GetProductAsset(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if asset.MimeType != "" {
+		w.Header().Set("Content-Type", asset.MimeType)
+	}
+	w.Header().Set("Content-Disposition", "inline; filename="+strconv.Quote(asset.OriginalName))
+	http.ServeFile(w, r, asset.Path)
 }
 
 func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {

@@ -75,6 +75,18 @@ type Product struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// ProductAsset is a reusable image or video attached to product knowledge.
+type ProductAsset struct {
+	ID           string    `json:"id"`
+	ProductID    string    `json:"product_id"`
+	Kind         string    `json:"kind"`
+	Path         string    `json:"-"`
+	OriginalName string    `json:"original_name"`
+	MimeType     string    `json:"mime_type"`
+	SizeBytes    int64     `json:"size_bytes"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type CreativeReport struct {
 	ID               string    `json:"id"`
 	ProductID        string    `json:"product_id"`

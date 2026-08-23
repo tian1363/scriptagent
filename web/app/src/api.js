@@ -35,6 +35,8 @@ export async function createProduct(formData) {
 export async function getProductMarkdown(id) {
   return request(`/api/products/${id}/markdown`);
 }
+export async function listProductAssets(id) { return request(`/api/products/${id}/assets`); }
+export async function uploadProductAsset(id, file) { const form = new FormData(); form.append("asset", file); return request(`/api/products/${id}/assets`, { method:"POST", body:form }); }
 export async function updateProduct(id, input) { return request(`/api/products/${id}`, { method:"PUT", headers:jsonHeaders, body:JSON.stringify(input) }); }
 export async function listSpaces() { return request("/api/spaces"); }
 export async function createSpace(input) { return request("/api/spaces", { method:"POST", headers:jsonHeaders, body:JSON.stringify(input) }); }

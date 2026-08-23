@@ -14,6 +14,7 @@ import (
 const (
 	MaxVideoBytes    = 500 * 1024 * 1024
 	MaxMarkdownBytes = 2 * 1024 * 1024
+	MaxAssetBytes    = 100 * 1024 * 1024
 )
 
 type LocalStore struct {
@@ -32,10 +33,16 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 	if kind == "markdown" && ext != ".md" && ext != ".markdown" {
 		return "", errors.New("unsupported markdown type")
 	}
+	if kind == "asset" && ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && ext != ".mp4" && ext != ".mov" && ext != ".webm" {
+		return "", errors.New("unsupported asset type")
+	}
 
 	limit := int64(MaxVideoBytes)
 	if kind == "markdown" {
 		limit = MaxMarkdownBytes
+	}
+	if kind == "asset" {
+		limit = MaxAssetBytes
 	}
 	if header.Size > limit {
 		return "", errors.New("file is too large")

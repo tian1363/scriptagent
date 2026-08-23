@@ -185,12 +185,18 @@ CREATE TABLE IF NOT EXISTS spaces (
   agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT
 );
+CREATE TABLE IF NOT EXISTS product_assets (
+  id TEXT PRIMARY KEY, product_id TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL,
+  original_name TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_id, chunk_index);
 CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_id, created_at DESC);
 `)
 	if err != nil {
 		return err
@@ -202,6 +208,45 @@ CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
 		return err
 	}
 	return err
+}
+
+func (s *Store) CreateProductAsset(asset ProductAsset) (*ProductAsset, error) {
+	asset.ID, asset.CreatedAt = newID(), time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO product_assets (id,product_id,kind,path,original_name,mime_type,size_bytes,created_at) VALUES (?,?,?,?,?,?,?,?)`, asset.ID, asset.ProductID, asset.Kind, asset.Path, asset.OriginalName, asset.MimeType, asset.SizeBytes, asset.CreatedAt.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return &asset, nil
+}
+
+func (s *Store) ListProductAssets(productID string) ([]ProductAsset, error) {
+	rows, err := s.db.Query(`SELECT id,product_id,kind,path,original_name,mime_type,size_bytes,created_at FROM product_assets WHERE product_id=? ORDER BY created_at DESC`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProductAsset{}
+	for rows.Next() {
+		var item ProductAsset
+		var created string
+		if err := rows.Scan(&item.ID, &item.ProductID, &item.Kind, &item.Path, &item.OriginalName, &item.MimeType, &item.SizeBytes, &created); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = parseTime(created)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetProductAsset(id string) (*ProductAsset, error) {
+	var item ProductAsset
+	var created string
+	err := s.db.QueryRow(`SELECT id,product_id,kind,path,original_name,mime_type,size_bytes,created_at FROM product_assets WHERE id=?`, id).Scan(&item.ID, &item.ProductID, &item.Kind, &item.Path, &item.OriginalName, &item.MimeType, &item.SizeBytes, &created)
+	if err != nil {
+		return nil, err
+	}
+	item.CreatedAt = parseTime(created)
+	return &item, nil
 }
 
 func (s *Store) CreateProduct(input CreateProductInput) (*Product, error) {
