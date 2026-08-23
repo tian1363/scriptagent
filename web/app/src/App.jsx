@@ -1,5 +1,6 @@
 import {
   Activity,
+  ChartNoAxesCombined,
   Bot,
   CheckCircle2,
   Clock3,
@@ -8,7 +9,9 @@ import {
   House,
   FolderKanban,
   Search,
+  ChevronDown,
   ChevronRight,
+  CircleHelp,
   Loader2,
   MessageSquare,
   Package,
@@ -32,6 +35,11 @@ import {
   updateProduct,
   generateVideoPrompts,
   getModelSettings,
+  getSpaceObservability,
+  getOwnerSession,
+  getOwnerOverview,
+  loginOwner,
+  logoutOwner,
   getChat,
   getJob,
   getProductMarkdown,
@@ -194,6 +202,9 @@ export function App() {
   const [modelSettings, setModelSettings] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(() => window.localStorage.getItem("scriptagent:debug-panel") === "true");
+  const [ownerSession, setOwnerSession] = useState({ configured: false, authenticated: false });
+  const [ownerOverview, setOwnerOverview] = useState(null);
+  const [isOwnerLoading, setIsOwnerLoading] = useState(false);
 
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -230,7 +241,7 @@ export function App() {
   }
 
   async function refreshModelCalls() {
-    const items = await listModelCalls({ limit: 100 });
+    const items = await listModelCalls({ limit: 1000 });
     setModelCalls(items);
     if (!selectedCallId && items[0]) {
       setSelectedCallId(items[0].id);
@@ -258,11 +269,24 @@ export function App() {
     setError("");
     if (view === "jobs") await refreshJobs();
     if (view === "chat") await refreshChats();
-    if (view === "calls" && showDebugPanel) await refreshModelCalls();
+    if (view === "calls" && showDebugPanel) await Promise.all([refreshModelCalls(), refreshJobs(), refreshSpaces()]);
     if (view === "products") await refreshProducts();
     if (view === "spaces") await refreshSpaces();
     if (view === "history") await Promise.all([refreshJobs(), refreshChats()]);
     if (view === "settings") await refreshModelSettings();
+    if (view === "admin" && ownerSession.authenticated) setOwnerOverview(await getOwnerOverview());
+  }
+
+  async function handleOwnerLogin(event) {
+    event.preventDefault(); const form = new FormData(event.currentTarget); setError(""); setIsOwnerLoading(true);
+    try { const session = await loginOwner(String(form.get("username") || ""), String(form.get("password") || "")); setOwnerSession(session); setOwnerOverview(await getOwnerOverview()); setView("admin"); event.currentTarget.reset(); }
+    catch (err) { setError(err.message); } finally { setIsOwnerLoading(false); }
+  }
+
+  async function handleOwnerLogout() {
+    setIsOwnerLoading(true); setError("");
+    try { const session = await logoutOwner(); setOwnerSession(session); setOwnerOverview(null); setView("settings"); }
+    catch (err) { setError(err.message); } finally { setIsOwnerLoading(false); }
   }
 
   useEffect(() => {
@@ -273,6 +297,7 @@ export function App() {
     refreshSpaces().catch(() => {});
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
+    getOwnerSession().then(setOwnerSession).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -531,7 +556,6 @@ export function App() {
         model: String(form.get("model") || ""),
       });
       setModelSettings(next);
-      event.currentTarget.reset();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -608,25 +632,22 @@ export function App() {
 
   return (
     <div className="app-shell agent-app-shell">
-      <AppSidebar view={view} onChange={setView} icon={agentIcon} />
+      <AppSidebar view={view} onChange={setView} icon={agentIcon} showDebugPanel={showDebugPanel} ownerAuthenticated={ownerSession.authenticated} />
       <div className="agent-frame">
         <header className="workspace-topbar">
           <div><span className="workspace-kicker">ScriptAgent</span><strong>{pageTitle(view)}</strong></div>
           <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新"><RefreshCw size={16} /></button>
         </header>
-      <main className={`workspace ${view === "products" ? "workspace-home" : ""}`}>
+      <main className={`workspace ${view === "products" || view === "calls" ? "workspace-home" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
         {view === "chat" ? (
           <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={handleNewChat} />
         ) : null}
-        {view === "calls" && showDebugPanel ? (
-          <CallsSidebar calls={modelCalls} selectedCallId={selectedCall?.id} onSelect={setSelectedCallId} />
-        ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
-        <section className={`main-pane ${view === "products" ? "main-pane-home" : ""}`}>
+        <section className={`main-pane ${view === "products" || view === "calls" ? "main-pane-home" : ""}`}>
           {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} onProduct={handleStartProductJob} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
           {view === "history" ? <HistoryWorkspace jobs={jobs} chats={chats} products={products} onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))} onChat={(id) => handleSelectChat(id).then(() => setView("chat"))} /> : null}
           {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} error={error} onCreate={handleCreateSpace} onStart={(productID, spaceID) => handleStartProductJob(productID, "", spaceID)} /> : null}
@@ -690,7 +711,8 @@ export function App() {
               onSend={handleSendChat}
             />
           ) : null}
-          {view === "calls" && showDebugPanel ? <ModelCallsWorkspace call={selectedCall} error={error} /> : null}
+          {view === "calls" && showDebugPanel ? <ModelCallsWorkspace calls={modelCalls} jobs={jobs} spaces={spaces} error={error} /> : null}
+          {view === "admin" && ownerSession.authenticated ? <OwnerDashboard overview={ownerOverview} isLoading={isOwnerLoading} error={error} onRefresh={() => refreshCurrent().catch((err) => setError(err.message))} onLogout={handleOwnerLogout} /> : null}
           {view === "settings" ? (
             <SettingsWorkspace
               modelSettings={modelSettings}
@@ -699,6 +721,9 @@ export function App() {
               error={error}
               onDebugPanel={setShowDebugPanel}
               onSave={handleSaveModelSettings}
+              ownerSession={ownerSession}
+              isOwnerLoading={isOwnerLoading}
+              onOwnerLogin={handleOwnerLogin}
             />
           ) : null}
         </section>
@@ -708,12 +733,12 @@ export function App() {
 }
 
 function pageTitle(view) {
-  return ({ home: "开始创作", history: "历史记录", spaces: "创作空间", products: "产品资料", jobs: "执行任务", chat: "对话", settings: "设置", calls: "调试台" })[view] || "ScriptAgent";
+  return ({ home: "开始创作", history: "历史记录", spaces: "创作空间", products: "产品资料", jobs: "执行任务", chat: "对话", settings: "设置", calls: "调试台", admin: "运营后台" })[view] || "ScriptAgent";
 }
 
-function AppSidebar({ view, onChange, icon }) {
+function AppSidebar({ view, onChange, icon, showDebugPanel, ownerAuthenticated }) {
   const items = [["home", "开始", House], ["history", "历史", History], ["spaces", "创作空间", FolderKanban], ["products", "产品资料", Package]];
-  return <aside className="app-sidebar"><button className="agent-brand" type="button" onClick={() => onChange("home")}><img src={icon} alt="ScriptAgent"/><span>ScriptAgent</span></button><nav>{items.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} type="button" onClick={() => onChange(id)}><Icon size={18}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><button className={view === "settings" ? "active" : ""} type="button" onClick={() => onChange("settings")}><Settings size={18}/><span>设置</span></button></div></aside>;
+  return <aside className="app-sidebar"><button className="agent-brand" type="button" onClick={() => onChange("home")}><img src={icon} alt="ScriptAgent"/><span>ScriptAgent</span></button><nav>{items.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} type="button" onClick={() => onChange(id)}><Icon size={18}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom">{ownerAuthenticated ? <button className={view === "admin" ? "active" : ""} type="button" onClick={() => onChange("admin")}><ChartNoAxesCombined size={18}/><span>运营后台</span></button> : null}{showDebugPanel ? <button className={view === "calls" ? "active" : ""} type="button" onClick={() => onChange("calls")}><Activity size={18}/><span>运行调试</span></button> : null}<button className={view === "settings" ? "active" : ""} type="button" onClick={() => onChange("settings")}><Settings size={18}/><span>设置</span></button></div></aside>;
 }
 
 function JobsSidebar({ jobs, selectedJob, onSelect }) {
@@ -1650,46 +1675,121 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
   );
 }
 
-function ModelCallsWorkspace({ call, error }) {
-  if (!call) {
-    return (
-      <section className="result-pane full-height">
-        <EmptyState text="暂无模型调用记录" />
-      </section>
-    );
-  }
+function ModelCallsWorkspace({ spaces = [], error }) {
+  const [expandedCallId, setExpandedCallId] = useState("");
+  const [selectedSpaceId, setSelectedSpaceId] = useState(() => spaces[0]?.id || "");
+  const [observability, setObservability] = useState({ runs: [], model_calls: [], memory_events: [] });
+  const [isLoadingObservability, setIsLoadingObservability] = useState(false);
+  const [observabilityError, setObservabilityError] = useState("");
+  const activeSpaceId = spaces.some((space) => space.id === selectedSpaceId) ? selectedSpaceId : spaces[0]?.id || "";
+  const visibleCalls = observability.model_calls || [];
+  const runs = observability.runs || [];
+  const memoryEvents = observability.memory_events || [];
+  const totalInput = visibleCalls.reduce((total, call) => total + Number(call.prompt_tokens || 0), 0);
+  const totalOutput = visibleCalls.reduce((total, call) => total + Number(call.output_tokens || 0), 0);
+  const totalLatency = visibleCalls.reduce((total, call) => total + Number(call.latency_ms || 0), 0);
+  const runCount = runs.length;
+
+  useEffect(() => {
+    if (!activeSpaceId) {
+      setObservability({ runs: [], model_calls: [], memory_events: [] });
+      return undefined;
+    }
+    let cancelled = false;
+    setIsLoadingObservability(true);
+    setObservabilityError("");
+    getSpaceObservability(activeSpaceId).then((result) => {
+      if (!cancelled) setObservability(result);
+    }).catch((err) => {
+      if (!cancelled) setObservabilityError(err.message);
+    }).finally(() => {
+      if (!cancelled) setIsLoadingObservability(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeSpaceId]);
+
+  const metrics = [
+    ["输入 Token", formatNumber(totalInput)],
+    ["输出 Token", formatNumber(totalOutput)],
+    ["缓存读取", "0"],
+    ["缓存写入", "0"],
+    ["总耗时", formatDuration(totalLatency)],
+    ["API 耗时", visibleCalls.length ? formatDuration(totalLatency) : "未返回"],
+    ["首 Token", "未返回"],
+    ["缓存命中率", "0%"],
+  ];
+
   return (
-    <section className="result-pane full-height">
-      <div className="result-header">
-        <div>
-          <h2>{call.step || "模型调用"}</h2>
-          <p>{call.scope} · {call.ref_id || "-"} · {formatTime(call.created_at)}</p>
+    <section className="debug-observer">
+      <header className="debug-observer-head">
+        <div className="debug-observer-title"><Activity size={20} /><strong>运行调试</strong></div>
+        <div className="debug-space-control">
+          <label htmlFor="debug-space">创作空间</label>
+          <select id="debug-space" value={activeSpaceId} onChange={(event) => { setSelectedSpaceId(event.target.value); setExpandedCallId(""); }}>
+            {spaces.length ? spaces.map((space) => <option value={space.id} key={space.id}>{space.title}</option>) : <option value="">暂无空间</option>}
+          </select>
+          <span>{runCount} 次运行</span>
         </div>
-        <div className="token-strip">
-          <span>输入 {call.prompt_tokens || 0}</span>
-          <span>输出 {call.output_tokens || 0}</span>
-          <span>合计 {call.total_tokens || 0}</span>
-          <span>{call.latency_ms || 0}ms</span>
-        </div>
-      </div>
+      </header>
       {error ? <div className="error-banner">{error}</div> : null}
-      {call.error_message ? <div className="error-banner">{call.error_message}</div> : null}
-      <div className="call-detail">
-        <section>
-          <h3>模型输入</h3>
-          <pre className="result-output json">{pretty(call.input_json)}</pre>
+      {observabilityError ? <div className="error-banner">{observabilityError}</div> : null}
+
+      <div className="debug-observer-body">
+        <div className="debug-intro">
+          <h1>Agent Loop 观测</h1>
+          <p>查看每次模型请求、响应、Token 与耗时。敏感信息会在服务端脱敏。</p>
+        </div>
+
+        <div className="debug-metric-grid">
+          {metrics.map(([label, value]) => <div className="debug-metric" key={label}><span>{label}</span><strong>{value}</strong></div>)}
+        </div>
+
+        <section className="debug-section">
+          <div className="debug-section-head"><h2>模型调用</h2><span>{visibleCalls.length} 次</span></div>
+          <div className="debug-call-list">
+            {isLoadingObservability ? <div className="debug-empty compact"><Loader2 className="spin" size={24}/><strong>正在加载空间运行记录</strong></div> : visibleCalls.length ? visibleCalls.map((call, index) => {
+              const expanded = expandedCallId === call.id;
+              return <article className={`debug-call ${expanded ? "expanded" : ""}`} key={call.id}>
+                <button type="button" aria-expanded={expanded} onClick={() => setExpandedCallId(expanded ? "" : call.id)}>
+                  {expanded ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <strong>第 {index + 1} 次模型请求</strong>
+                  <span className="debug-call-model">{call.scope || "agent"} · {call.step || "模型调用"}</span>
+                  <span className={`debug-call-status ${call.error_message ? "danger" : "success"}`}>{call.error_message ? "失败" : "完成"}</span>
+                </button>
+                {expanded ? <div className="debug-call-detail">
+                  <div className="debug-call-meta">
+                    <span>输入 {formatNumber(call.prompt_tokens || 0)}</span><span>输出 {formatNumber(call.output_tokens || 0)}</span><span>耗时 {formatDuration(call.latency_ms || 0)}</span><span>{formatTime(call.created_at)}</span>
+                  </div>
+                  {call.error_message ? <div className="error-banner">{call.error_message}</div> : null}
+                  <section><h3>模型输入</h3><pre className="result-output json">{pretty(call.input_json)}</pre></section>
+                  <section><h3>模型输出</h3><pre className="result-output markdown">{call.output_text || "-"}</pre></section>
+                  <section><h3>原始响应</h3><pre className="result-output json">{pretty(call.response_json)}</pre></section>
+                </div> : null}
+              </article>;
+            }) : <div className="debug-empty compact"><CircleHelp size={24}/><strong>暂无模型调用记录</strong><p>运行 Agent 后，请求详情会实时显示在这里。</p></div>}
+          </div>
         </section>
-        <section>
-          <h3>模型输出</h3>
-          <pre className="result-output markdown">{call.output_text || "-"}</pre>
-        </section>
-        <section>
-          <h3>原始响应</h3>
-          <pre className="result-output json">{pretty(call.response_json)}</pre>
+
+        <section className="debug-section memory-section">
+          <div className="debug-section-head"><h2>Memory 行为</h2><span>{memoryEvents.length} 条</span></div>
+          {memoryEvents.length ? <div className="debug-memory-list">{memoryEvents.map((event) => <article key={event.id}><strong>{event.kind}</strong><span>{event.payload || "-"}</span><time>{formatTime(event.created_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>本次运行没有 Memory 事件</strong><p>挂载、提取、Dream、同步和冲突会在这里实时显示。</p></div>}
         </section>
       </div>
     </section>
   );
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function formatDuration(milliseconds) {
+  const value = Number(milliseconds || 0);
+  if (!value) return "0 秒";
+  if (value < 1000) return `${value} 毫秒`;
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
 function FileField({ name, label, accept, icon, required = true }) {
