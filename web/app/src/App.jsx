@@ -638,7 +638,7 @@ export function App() {
           <div><span className="workspace-kicker">ScriptAgent</span><strong>{pageTitle(view)}</strong></div>
           <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新"><RefreshCw size={16} /></button>
         </header>
-      <main className={`workspace ${view === "products" || view === "calls" ? "workspace-home" : ""}`}>
+      <main className={`workspace ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
@@ -647,7 +647,7 @@ export function App() {
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
-        <section className={`main-pane ${view === "products" || view === "calls" ? "main-pane-home" : ""}`}>
+        <section className={`main-pane ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}>
           {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} onProduct={handleStartProductJob} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
           {view === "history" ? <HistoryWorkspace jobs={jobs} chats={chats} products={products} onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))} onChat={(id) => handleSelectChat(id).then(() => setView("chat"))} /> : null}
           {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} error={error} onCreate={handleCreateSpace} onStart={(productID, spaceID) => handleStartProductJob(productID, "", spaceID)} /> : null}
@@ -1254,7 +1254,7 @@ function AgentStart({ products, jobs, spaces, onProduct, onSpaces, onHistory }) 
   const active = safeJobs.filter((job) => runningStatuses.has(job.status));
   return <section className="agent-start">
     <div className="agent-intro"><span className="eyebrow">ScriptAgent</span><h1>今天想完成什么？</h1><p>说出目标，助手会读取资料、规划步骤并执行。</p></div>
-    <div className="agent-goal-card"><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子" /><div><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><button className="primary-button" type="button" disabled={!productID} onClick={() => onProduct(productID, goal)}><Play size={15}/>开始执行</button></div></div>
+    <div className="agent-goal-card"><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子" /><div><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><button className="primary-button" type="button" disabled={!goal.trim()} onClick={() => onProduct(productID, goal)}><Play size={15}/>{productID ? "开始执行" : "继续设置"}</button></div></div>
     <div className="agent-start-grid"><section><h2>正在进行</h2>{active.length ? active.map((job)=><button className="agent-list-row" key={job.id} onClick={onHistory}><span className="task-state-dot running"/><strong>{job.title}</strong><small>{statusLabel(job.status)}</small></button>) : <p>当前没有执行中的任务。</p>}</section><section><div className="section-heading"><span>最近空间</span><button className="mini-button" type="button" onClick={onSpaces}>查看全部</button></div>{safeSpaces.length ? safeSpaces.slice(0,3).map((space)=><button className="agent-list-row" key={space.id} onClick={onSpaces}><FolderKanban size={16}/><strong>{space.title}</strong><small>{space.summary || "继续创作"}</small></button>) : <button className="agent-list-row" onClick={onSpaces}><FolderKanban size={16}/><strong>创建第一个空间</strong><small>把目标和历史放在一起</small></button>}</section></div>
   </section>;
 }
@@ -1597,7 +1597,7 @@ function ProductsWorkspace({
   );
 }
 
-function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onDebugPanel, onSave }) {
+function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onDebugPanel, onSave, ownerSession, isOwnerLoading, onOwnerLogin }) {
   return (
     <section className="result-pane full-height">
       <div className="result-header">
@@ -1660,6 +1660,10 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
             <input type="checkbox" checked={showDebugPanel} onChange={(event) => onDebugPanel(event.target.checked)} />
           </label>
         </div>
+        <div className="form-section owner-login-section">
+          <div className="section-heading"><span>运营后台</span><small>{ownerSession?.authenticated ? "管理员已登录" : "仅所有者可见"}</small></div>
+          {ownerSession?.authenticated ? <div className="owner-authenticated"><CheckCircle2 size={18}/><div><strong>身份验证有效</strong><small>运营后台入口已显示在侧栏。</small></div></div> : ownerSession?.configured ? <div className="owner-login-fields"><label><span>管理员账号</span><input name="username" autoComplete="username" /></label><label><span>管理员密码</span><input name="password" type="password" autoComplete="current-password" /></label><button className="secondary-button" type="button" disabled={isOwnerLoading} onClick={(event) => { const form = event.currentTarget.closest("form"); onOwnerLogin({ preventDefault() {}, currentTarget: form }); }}>{isOwnerLoading ? "验证中" : "管理员登录"}</button></div> : <div className="security-callout"><KeyRound size={18}/><div><strong>尚未配置管理员账号</strong><p>在服务器设置 SCRIPT_AGENT_OWNER_USERNAME 和 SCRIPT_AGENT_OWNER_PASSWORD 后重启。</p></div></div>}
+        </div>
         <div className="submit-row">
           <div>
             <span>运行时配置</span>
@@ -1673,6 +1677,19 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
       </form>
     </section>
   );
+}
+
+function OwnerDashboard({ overview, isLoading, error, onRefresh, onLogout }) {
+  const totals = overview?.totals || {};
+  const metrics = [["创作空间", totals.spaces || 0], ["任务总数", totals.jobs || 0], ["Agent Runs", totals.runs || 0], ["模型调用", totals.model_calls || 0], ["Token 总量", formatNumber(totals.total_tokens || 0)], ["已发布脚本", totals.published_jobs || 0]];
+  return <section className="owner-dashboard">
+    <header className="owner-dashboard-head"><div><span>OWNER ONLY</span><h1>产品运营总览</h1><p>跨空间查看任务产出、Agent 运行和模型消耗。</p></div><div><button className="secondary-button" type="button" onClick={onRefresh} disabled={isLoading}><RefreshCw size={15}/>刷新</button><button className="secondary-button" type="button" onClick={onLogout} disabled={isLoading}>退出登录</button></div></header>
+    {error ? <div className="error-banner">{error}</div> : null}
+    {!overview || isLoading ? <div className="debug-empty"><Loader2 className="spin" size={26}/><strong>正在读取运营数据</strong></div> : <>
+      <div className="owner-metrics">{metrics.map(([label,value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
+      <div className="owner-dashboard-grid"><section><div className="debug-section-head"><h2>空间表现</h2><span>{overview.spaces?.length || 0} 个空间</span></div><div className="owner-space-table">{overview.spaces?.map((space) => <article key={space.id}><div><strong>{space.title}</strong><small>{space.runs} 次运行 · {space.model_calls} 次调用</small></div><span>{formatNumber(space.total_tokens)} tokens</span><span className={space.failed_runs ? "owner-failed" : "owner-healthy"}>{space.failed_runs ? `${space.failed_runs} 次失败` : "运行正常"}</span></article>)}</div></section><section><div className="debug-section-head"><h2>最近运行</h2><span>{overview.recent_runs?.length || 0} 条</span></div><div className="owner-run-list">{overview.recent_runs?.length ? overview.recent_runs.map((run) => <article key={run.ID}><div><strong>{run.SpaceTitle}</strong><small>{formatTime(run.StartedAt)}</small></div><span className={`debug-call-status ${run.Status === "failed" ? "danger" : "success"}`}>{run.Status === "failed" ? "失败" : run.Status === "completed" ? "完成" : "运行中"}</span></article>) : <div className="debug-empty compact">暂无运行记录</div>}</div></section></div>
+    </>}
+  </section>;
 }
 
 function ModelCallsWorkspace({ spaces = [], error }) {
