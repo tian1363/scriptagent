@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS model_settings (
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS spaces (
-  id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT NOT NULL,
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT,
   agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT
 );
@@ -193,6 +193,18 @@ CREATE TABLE IF NOT EXISTS product_assets (
   original_name TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, job_id TEXT, status TEXT NOT NULL,
+  started_at TEXT NOT NULL, finished_at TEXT, error_message TEXT,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS memory_events (
+  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
+  payload_json TEXT, created_at TEXT NOT NULL,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+  FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
@@ -200,6 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_
 CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_space ON agent_runs(space_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_events_space_run ON memory_events(space_id, run_id, created_at);
 `)
 	if err != nil {
 		return err
@@ -213,7 +227,63 @@ CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_
 	if err := s.ensureColumn("model_settings", "provider", "TEXT NOT NULL DEFAULT 'dashscope'"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("model_calls", "space_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("model_calls", "run_id", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`
+CREATE INDEX IF NOT EXISTS idx_model_calls_space ON model_calls(space_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_model_calls_run ON model_calls(run_id, created_at);
+UPDATE model_calls
+SET space_id = (SELECT jobs.space_id FROM jobs WHERE jobs.id = model_calls.ref_id)
+WHERE COALESCE(space_id, '') = '' AND scope = 'job';`); err != nil {
+		return err
+	}
+	if err := s.makeSpaceProductOptional(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at)`); err != nil {
+		return err
+	}
 	return err
+}
+
+func (s *Store) makeSpaceProductOptional() error {
+	rows, err := s.db.Query(`PRAGMA table_info(spaces)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	mandatory := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var fallback any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &fallback, &pk); err != nil {
+			return err
+		}
+		if name == "product_id" {
+			mandatory = notNull == 1
+		}
+	}
+	if !mandatory {
+		return rows.Err()
+	}
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys = ON`)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`CREATE TABLE spaces_next (id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT, agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT); INSERT INTO spaces_next SELECT id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at FROM spaces; DROP TABLE spaces; ALTER TABLE spaces_next RENAME TO spaces;`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateProductAsset(asset ProductAsset) (*ProductAsset, error) {
@@ -341,11 +411,14 @@ func (s *Store) UpdateProduct(id string, input UpdateProductInput) (*Product, er
 }
 
 func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
-	if _, err := s.GetProduct(strings.TrimSpace(input.ProductID)); err != nil {
-		return nil, fmt.Errorf("product not found: %w", err)
+	productID := strings.TrimSpace(input.ProductID)
+	if productID != "" {
+		if _, err := s.GetProduct(productID); err != nil {
+			return nil, fmt.Errorf("product not found: %w", err)
+		}
 	}
 	now := time.Now().UTC()
-	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: strings.TrimSpace(input.ProductID), AgentBrief: strings.TrimSpace(input.AgentBrief), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
+	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: productID, AgentBrief: strings.TrimSpace(input.AgentBrief), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,?,?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
@@ -356,7 +429,7 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 }
 
 func (s *Store) ListSpaces() ([]Space, error) {
-	rows, err := s.db.Query(`SELECT id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),product_id,COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +451,7 @@ func (s *Store) ListSpaces() ([]Space, error) {
 func (s *Store) GetSpace(id string) (*Space, error) {
 	var space Space
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
+	err := s.db.QueryRow(`SELECT id,title,COALESCE(summary,''),product_id,COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -862,10 +935,10 @@ func (s *Store) RecordModelCall(_ context.Context, record model.CallRecord) erro
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 INSERT INTO model_calls (
-  id, scope, ref_id, step, model, input_json, output_text, response_json,
+  id, scope, ref_id, space_id, run_id, step, model, input_json, output_text, response_json,
   prompt_tokens, output_tokens, total_tokens, latency_ms, error_message, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		newID(), valueOr(record.Scope, "unknown"), record.RefID, record.Step, record.Model,
+) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		newID(), valueOr(record.Scope, "unknown"), record.RefID, record.SpaceID, record.RunID, record.Step, record.Model,
 		record.InputJSON, record.OutputText, record.ResponseJSON,
 		record.PromptTokens, record.OutputTokens, record.TotalTokens, record.LatencyMS,
 		record.ErrorMessage, now.Format(time.RFC3339),
@@ -873,18 +946,26 @@ INSERT INTO model_calls (
 	return err
 }
 
-func (s *Store) ListModelCalls(refID string, limit int) ([]ModelCall, error) {
-	if limit <= 0 || limit > 200 {
+func (s *Store) ListModelCalls(refID, spaceID string, limit int) ([]ModelCall, error) {
+	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
 	query := `
-SELECT id, scope, ref_id, step, model, input_json, output_text, response_json,
+SELECT id, scope, ref_id, COALESCE(space_id, ''), COALESCE(run_id, ''), step, model, input_json, output_text, response_json,
        prompt_tokens, output_tokens, total_tokens, latency_ms, error_message, created_at
 FROM model_calls`
 	args := []any{}
+	conditions := []string{}
 	if strings.TrimSpace(refID) != "" {
-		query += ` WHERE ref_id = ?`
+		conditions = append(conditions, `ref_id = ?`)
 		args = append(args, refID)
+	}
+	if strings.TrimSpace(spaceID) != "" {
+		conditions = append(conditions, `space_id = ?`)
+		args = append(args, spaceID)
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 	query += ` ORDER BY created_at DESC LIMIT ?`
 	args = append(args, limit)
@@ -904,6 +985,111 @@ FROM model_calls`
 		result = append(result, *call)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) StartAgentRun(job Job) (*AgentRun, error) {
+	if strings.TrimSpace(job.SpaceID) == "" {
+		return nil, errors.New("agent run requires a space")
+	}
+	now := time.Now().UTC()
+	run := &AgentRun{ID: newID(), SpaceID: job.SpaceID, JobID: job.ID, Status: "running", StartedAt: now}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO agent_runs (id,space_id,job_id,status,started_at) VALUES (?,?,?,?,?)`, run.ID, run.SpaceID, run.JobID, run.Status, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func (s *Store) FinishAgentRun(runID, status, errorMessage string) error {
+	now := time.Now().UTC()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`UPDATE agent_runs SET status=?, finished_at=?, error_message=NULLIF(?,'') WHERE id=?`, status, now.Format(time.RFC3339), errorMessage, runID)
+	return err
+}
+
+func (s *Store) ListAgentRuns(spaceID string, limit int) ([]AgentRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,space_id,COALESCE(job_id,''),status,started_at,finished_at,COALESCE(error_message,'') FROM agent_runs WHERE space_id=? ORDER BY started_at DESC LIMIT ?`, spaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []AgentRun{}
+	for rows.Next() {
+		var run AgentRun
+		var started string
+		var finished sql.NullString
+		if err := rows.Scan(&run.ID, &run.SpaceID, &run.JobID, &run.Status, &started, &finished, &run.Error); err != nil {
+			return nil, err
+		}
+		run.StartedAt = parseTime(started)
+		if finished.Valid {
+			value := parseTime(finished.String)
+			run.FinishedAt = &value
+		}
+		result = append(result, run)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListMemoryEvents(spaceID string, limit int) ([]MemoryEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,space_id,run_id,kind,COALESCE(payload_json,''),created_at FROM memory_events WHERE space_id=? ORDER BY created_at DESC LIMIT ?`, spaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []MemoryEvent{}
+	for rows.Next() {
+		var event MemoryEvent
+		var created string
+		if err := rows.Scan(&event.ID, &event.SpaceID, &event.RunID, &event.Kind, &event.Payload, &created); err != nil {
+			return nil, err
+		}
+		event.CreatedAt = parseTime(created)
+		result = append(result, event)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) RecordMemoryEvent(spaceID, runID, kind, payload string) (*MemoryEvent, error) {
+	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(runID) == "" || strings.TrimSpace(kind) == "" {
+		return nil, errors.New("memory event requires space, run, and kind")
+	}
+	event := &MemoryEvent{ID: newID(), SpaceID: spaceID, RunID: runID, Kind: kind, Payload: payload, CreatedAt: time.Now().UTC()}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO memory_events (id,space_id,run_id,kind,payload_json,created_at) VALUES (?,?,?,?,NULLIF(?,''),?)`, event.ID, event.SpaceID, event.RunID, event.Kind, event.Payload, event.CreatedAt.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (s *Store) GetSpaceObservability(spaceID string, limit int) (*SpaceObservability, error) {
+	if _, err := s.GetSpace(spaceID); err != nil {
+		return nil, err
+	}
+	runs, err := s.ListAgentRuns(spaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	calls, err := s.ListModelCalls("", spaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.ListMemoryEvents(spaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &SpaceObservability{Runs: runs, ModelCalls: calls, MemoryEvents: events}, nil
 }
 
 type scanner interface {
@@ -1016,7 +1202,7 @@ func scanModelCall(row scanner) (*ModelCall, error) {
 	var createdAt string
 	var inputJSON, outputText, responseJSON, errorMessage sql.NullString
 	if err := row.Scan(
-		&call.ID, &call.Scope, &call.RefID, &call.Step, &call.Model,
+		&call.ID, &call.Scope, &call.RefID, &call.SpaceID, &call.RunID, &call.Step, &call.Model,
 		&inputJSON, &outputText, &responseJSON,
 		&call.PromptTokens, &call.OutputTokens, &call.TotalTokens, &call.LatencyMS,
 		&errorMessage, &createdAt,
