@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 	if err := s.ensureColumn("jobs", "fission_directions", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("jobs", "space_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("jobs", "parent_job_id", "TEXT"); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id TEXT PRIMARY KEY,
@@ -174,10 +180,17 @@ CREATE TABLE IF NOT EXISTS model_settings (
   model TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS spaces (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT NOT NULL,
+  agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT
+);
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
 `)
 	if err != nil {
 		return err
@@ -247,6 +260,68 @@ func (s *Store) GetProduct(id string) (*Product, error) {
 	return scanProduct(s.db.QueryRow(`
 SELECT id, title, md_path, md_name, created_at, updated_at
 FROM products WHERE id = ?`, id))
+}
+
+func (s *Store) UpdateProduct(id string, input UpdateProductInput) (*Product, error) {
+	product, err := s.GetProduct(id)
+	if err != nil {
+		return nil, err
+	}
+	title := normalizeTitle(valueOr(input.Title, product.Title))
+	now := time.Now().UTC()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`UPDATE products SET title=?, updated_at=? WHERE id=?`, title, now.Format(time.RFC3339), id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(`DELETE FROM product_chunks WHERE product_id=?`, id); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	product.Title, product.UpdatedAt = title, now
+	return product, nil
+}
+
+func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
+	if _, err := s.GetProduct(strings.TrimSpace(input.ProductID)); err != nil {
+		return nil, fmt.Errorf("product not found: %w", err)
+	}
+	now := time.Now().UTC()
+	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: strings.TrimSpace(input.ProductID), AgentBrief: strings.TrimSpace(input.AgentBrief), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,?,?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return space, nil
+}
+
+func (s *Store) ListSpaces() ([]Space, error) {
+	rows, err := s.db.Query(`SELECT id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Space{}
+	for rows.Next() {
+		var x Space
+		var c, u string
+		if err := rows.Scan(&x.ID, &x.Title, &x.Summary, &x.ProductID, &x.AgentBrief, &x.Status, &x.OriginSpaceID, &c, &u); err != nil {
+			return nil, err
+		}
+		x.CreatedAt = parseTime(c)
+		x.UpdatedAt = parseTime(u)
+		out = append(out, x)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
@@ -437,17 +512,19 @@ func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
 		Industry:          input.Industry,
 		FissionCount:      input.FissionCount,
 		FissionDirections: input.FissionDirections,
+		SpaceID:           input.SpaceID,
+		ParentJobID:       input.ParentJobID,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	_, err := s.db.Exec(`
 INSERT INTO jobs (
   id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-  requirement, industry, fission_count, fission_directions, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  requirement, industry, fission_count, fission_directions, space_id, parent_job_id, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Title, job.Status, job.VideoPath, job.VideoOriginalName,
 		job.ProductMDPath, job.ProductMDName, job.Requirement, job.Industry,
-		job.FissionCount, job.FissionDirections, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
+		job.FissionCount, job.FissionDirections, job.SpaceID, job.ParentJobID, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -459,7 +536,7 @@ func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -481,7 +558,7 @@ func (s *Store) ListUnfinishedJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
 FROM jobs
 WHERE status IN (?, ?, ?, ?, ?, ?, ?)
 ORDER BY created_at ASC`,
@@ -507,7 +584,7 @@ func (s *Store) GetJob(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
 FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
@@ -767,12 +844,12 @@ func scanJob(row scanner) (*Job, error) {
 	var job Job
 	var createdAt, updatedAt string
 	var analysisMarkdown, replicaScriptJSON, fissionScriptsJSON sql.NullString
-	var fissionDirections, creatibiResultJSON, errorMessage, runLog sql.NullString
+	var fissionDirections, creatibiResultJSON, errorMessage, runLog, spaceID, parentJobID sql.NullString
 	err := row.Scan(
 		&job.ID, &job.Title, &job.Status, &job.VideoPath, &job.VideoOriginalName,
 		&job.ProductMDPath, &job.ProductMDName, &job.Requirement, &job.Industry,
 		&job.FissionCount, &fissionDirections, &analysisMarkdown, &replicaScriptJSON,
-		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog,
+		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog, &spaceID, &parentJobID,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -785,6 +862,8 @@ func scanJob(row scanner) (*Job, error) {
 	job.CreatiBIResultJSON = creatibiResultJSON.String
 	job.ErrorMessage = errorMessage.String
 	job.RunLog = runLog.String
+	job.SpaceID = spaceID.String
+	job.ParentJobID = parentJobID.String
 	job.CreatedAt = parseTime(createdAt)
 	job.UpdatedAt = parseTime(updatedAt)
 	return &job, nil

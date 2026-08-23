@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -139,6 +140,79 @@ func (h *Handler) getProductMarkdown(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) updateProduct(w http.ResponseWriter, r *http.Request) {
+	product, err := h.store.GetProduct(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	var input struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, int64(storage.MaxMarkdownBytes)+4096)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Title, input.Content = strings.TrimSpace(input.Title), strings.TrimSpace(input.Content)
+	if input.Title == "" || input.Content == "" {
+		writeError(w, http.StatusBadRequest, errors.New("产品名称和资料内容不能为空"))
+		return
+	}
+	if len([]byte(input.Content)) > storage.MaxMarkdownBytes {
+		writeError(w, http.StatusBadRequest, errors.New("资料内容过大"))
+		return
+	}
+	temp, err := os.CreateTemp(filepath.Dir(product.MDPath), ".product-update-*.md")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	name := temp.Name()
+	defer os.Remove(name)
+	if _, err = temp.WriteString(input.Content + "\n"); err != nil {
+		temp.Close()
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err = temp.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err = os.Rename(name, product.MDPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	updated, err := h.store.UpdateProduct(product.ID, jobs.UpdateProductInput{Title: input.Title})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) listSpaces(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.store.ListSpaces()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+func (h *Handler) createSpace(w http.ResponseWriter, r *http.Request) {
+	var input jobs.CreateSpaceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	space, err := h.store.CreateSpace(input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, space)
+}
+
 func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
 	productID := chi.URLParam(r, "id")
 	if _, err := h.store.GetProduct(productID); err != nil {
@@ -218,6 +292,8 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		Industry:          industry,
 		FissionCount:      fissionCount,
 		FissionDirections: fissionDirections,
+		SpaceID:           strings.TrimSpace(r.FormValue("space_id")),
+		ParentJobID:       strings.TrimSpace(r.FormValue("parent_job_id")),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)

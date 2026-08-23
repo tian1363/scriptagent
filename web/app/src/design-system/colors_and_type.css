@@ -14,38 +14,38 @@
      COLOR TOKENS (raw)
      ===================================================== */
 
-  /* Primary — brand purple */
-  --cbi-primary:           #8B4EEF;
-  --cbi-primary-dark:      #6136A7;
-  --cbi-primary-light:     #A271F2;
+  /* Primary — ScriptAgent coral */
+  --cbi-primary:           #F0523D;
+  --cbi-primary-dark:      #D8422F;
+  --cbi-primary-light:     #F77B6A;
   --cbi-primary-contrast:  #FFFFFF;
-  --cbi-primary-tint:      #F6F0FA;   /* "mainWhite" — selected toggle bg */
+  --cbi-primary-tint:      #FFF0ED;
 
-  /* Secondary — deep indigo, rarely used */
-  --cbi-secondary:         #160C88;
-  --cbi-secondary-dark:    #0F085F;
-  --cbi-secondary-light:   #443C9F;
+  /* Secondary — charcoal */
+  --cbi-secondary:         #171513;
+  --cbi-secondary-dark:    #171513;
+  --cbi-secondary-light:   #4D4843;
 
   /* Surfaces */
-  --cbi-bg-default:        #FFFFFF;
-  --cbi-bg-paper:          #FFFFFF;
-  --cbi-bg-shell:          #F9F8F8;   /* sidebar/nav background (textExtend.ten) */
-  --cbi-bg-subtle:         #F3F1F1;   /* hover row, divider row (textExtend.twenty) */
-  --cbi-bg-disabled:       #FCFBFB;   /* (textExtend.five) */
+  --cbi-bg-default:        #FFFDF9;
+  --cbi-bg-paper:          #FFFDF9;
+  --cbi-bg-shell:          #FBF7F0;
+  --cbi-bg-subtle:         #F4EEE6;
+  --cbi-bg-disabled:       #FCF8F3;
 
   /* Text */
-  --cbi-text-primary:      #1E1F21;
-  --cbi-text-secondary:    #6D6E6F;
-  --cbi-text-hint:         #AFABAC;   /* placeholder / helper text */
+  --cbi-text-primary:      #171513;
+  --cbi-text-secondary:    #6B625A;
+  --cbi-text-hint:         #A69B91;
   --cbi-text-disabled:     #ECEAE9;   /* also default border */
   --cbi-text-inverse:      #FFFFFF;
 
   /* Borders & dividers */
-  --cbi-border-default:    #ECEAE9;   /* "textDisabled" — default outline */
-  --cbi-border-hover:      #AFABAC;   /* hover state on inputs/buttons */
-  --cbi-border-strong:     #D5D5D5;   /* (textExtend.forty) */
-  --cbi-divider:           #ECEAE9;
-  --cbi-divider-subtle:    #F3F1F1;
+  --cbi-border-default:    #E8E0D6;
+  --cbi-border-hover:      #B8ADA1;
+  --cbi-border-strong:     #D4C9BC;
+  --cbi-divider:           #E8E0D6;
+  --cbi-divider-subtle:    #F4EEE6;
 
   /* Semantic */
   --cbi-success:           #34C759;

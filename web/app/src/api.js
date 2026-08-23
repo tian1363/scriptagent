@@ -35,6 +35,9 @@ export async function createProduct(formData) {
 export async function getProductMarkdown(id) {
   return request(`/api/products/${id}/markdown`);
 }
+export async function updateProduct(id, input) { return request(`/api/products/${id}`, { method:"PUT", headers:jsonHeaders, body:JSON.stringify(input) }); }
+export async function listSpaces() { return request("/api/spaces"); }
+export async function createSpace(input) { return request("/api/spaces", { method:"POST", headers:jsonHeaders, body:JSON.stringify(input) }); }
 
 export async function listCreativeReports(productId) {
   return request(`/api/products/${productId}/creative-reports`);
@@ -116,9 +119,11 @@ export async function listModelCalls(params = {}) {
 
 async function request(path, init) {
   const res = await fetch(path, init);
-  const data = await res.json().catch(() => ({}));
+  const isJSON = (res.headers.get("content-type") || "").includes("application/json");
+  const data = isJSON ? await res.json().catch(() => ({})) : {};
   if (!res.ok) {
     throw new Error(data.error || `Request failed: ${res.status}`);
   }
+  if (!isJSON) throw new Error("服务暂时不可用，请稍后再试");
   return data;
 }

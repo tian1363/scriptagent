@@ -28,6 +28,8 @@ type Job struct {
 	Industry           string    `json:"industry"`
 	FissionCount       int       `json:"fission_count"`
 	FissionDirections  string    `json:"fission_directions,omitempty"`
+	SpaceID            string    `json:"space_id,omitempty"`
+	ParentJobID        string    `json:"parent_job_id,omitempty"`
 	AnalysisMarkdown   string    `json:"analysis_markdown,omitempty"`
 	ReplicaScriptJSON  string    `json:"replica_script_json,omitempty"`
 	FissionScriptsJSON string    `json:"fission_scripts_json,omitempty"`
@@ -37,6 +39,32 @@ type Job struct {
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
+
+const (
+	SpaceStatusActive = "active"
+)
+
+// Space preserves the context of a long-running creative project.
+type Space struct {
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Summary       string    `json:"summary,omitempty"`
+	ProductID     string    `json:"product_id"`
+	AgentBrief    string    `json:"agent_brief,omitempty"`
+	Status        string    `json:"status"`
+	OriginSpaceID string    `json:"origin_space_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type CreateSpaceInput struct {
+	Title         string `json:"title"`
+	Summary       string `json:"summary"`
+	ProductID     string `json:"product_id"`
+	AgentBrief    string `json:"agent_brief"`
+	OriginSpaceID string `json:"origin_space_id"`
+}
+type ForkSpaceInput struct{ Title, Summary, AgentBrief string }
 
 type Product struct {
 	ID        string    `json:"id"`
@@ -108,6 +136,8 @@ type CreateJobInput struct {
 	Industry          string
 	FissionCount      int
 	FissionDirections string
+	SpaceID           string
+	ParentJobID       string
 }
 
 type CreateProductInput struct {
@@ -115,6 +145,7 @@ type CreateProductInput struct {
 	MDPath string
 	MDName string
 }
+type UpdateProductInput struct{ Title string }
 
 type ModelSettings struct {
 	APIKey    string    `json:"-"`

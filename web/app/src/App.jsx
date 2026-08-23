@@ -5,6 +5,10 @@ import {
   Clock3,
   FileText,
   History,
+  House,
+  FolderKanban,
+  Search,
+  ChevronRight,
   Loader2,
   MessageSquare,
   Package,
@@ -23,6 +27,9 @@ import {
   createJob,
   createCreativeReport,
   createProduct,
+  createSpace,
+
+  updateProduct,
   generateVideoPrompts,
   getModelSettings,
   getChat,
@@ -30,17 +37,17 @@ import {
   getProductMarkdown,
   listCreativeReports,
   listProducts,
+  listSpaces,
   listSkills,
   listChats,
   listJobs,
   listModelCalls,
-  publishJob,
   retryJob,
   saveModelSettings,
   sendChatMessage,
   sendNewChatMessage,
 } from "./api.js";
-import logo from "./assets/logo-scriptagent.svg";
+import agentIcon from "./assets/scriptagent-agent-v2.png";
 
 const resultTabs = [
   ["run_log", "运行日志"],
@@ -48,7 +55,6 @@ const resultTabs = [
   ["replica_script_json", "复刻脚本"],
   ["fission_scripts_json", "裂变脚本"],
   ["video_prompts", "视频提示词"],
-  ["creatibi_result_json", "CreatiBI"],
 ];
 
 const runningStatuses = new Set([
@@ -101,10 +107,12 @@ function productInitial(title = "") {
   return title.trim().slice(0, 1).toUpperCase() || "S";
 }
 
-function buildProductStats(products, jobs) {
+function buildProductStats(products = [], jobs = []) {
   const result = new Map();
-  products.forEach((product) => {
-    const matchedJobs = jobs.filter((job) => job.product_md_name === product.md_name);
+  const safeProducts = Array.isArray(products) ? products : [];
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+  safeProducts.forEach((product) => {
+    const matchedJobs = safeJobs.filter((job) => job.product_md_name === product.md_name);
     const usableJobs = matchedJobs.filter((job) => job.status !== "failed");
     const scriptCount = usableJobs.reduce((total, job) => total + 1 + Number(job.fission_count || 0), 0);
     const latestJob = matchedJobs.reduce((latest, job) => {
@@ -159,16 +167,17 @@ const chatQuickTasks = [
 ];
 
 export function App() {
-  const [view, setView] = useState("products");
+  const [view, setView] = useState("home");
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [activeTab, setActiveTab] = useState("run_log");
   const [videoPromptContent, setVideoPromptContent] = useState("");
   const [isGeneratingVideoPrompts, setIsGeneratingVideoPrompts] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [products, setProducts] = useState([]);
+  const [spaces, setSpaces] = useState([]);
+  const [isCreatingSpace, setIsCreatingSpace] = useState(false);
   const [skills, setSkills] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productPreview, setProductPreview] = useState(null);
@@ -178,6 +187,7 @@ export function App() {
   const [isLoadingCreativeReports, setIsLoadingCreativeReports] = useState(false);
   const [isCreatingCreativeReport, setIsCreatingCreativeReport] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [jobInitialRequirement, setJobInitialRequirement] = useState("");
   const [modelSettings, setModelSettings] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -200,7 +210,7 @@ export function App() {
 
   async function refreshJobs(nextSelectedId) {
     const items = await listJobs();
-    setJobs(items);
+    setJobs(Array.isArray(items) ? items : []);
     const targetId = nextSelectedId || selectedJob?.id || items[0]?.id;
     if (targetId) {
       const current = await getJob(targetId);
@@ -210,7 +220,7 @@ export function App() {
 
   async function refreshChats(nextSelectedId) {
     const items = await listChats();
-    setChats(items);
+    setChats(Array.isArray(items) ? items : []);
     const targetId = nextSelectedId || selectedChat?.conversation?.id || items[0]?.id;
     if (targetId) {
       setSelectedChat(await getChat(targetId));
@@ -227,11 +237,12 @@ export function App() {
 
   async function refreshProducts(nextSelectedId) {
     const items = await listProducts();
-    setProducts(items);
+    setProducts(Array.isArray(items) ? items : []);
     if (nextSelectedId || (!selectedProductId && items[0])) {
       setSelectedProductId(nextSelectedId || items[0]?.id || "");
     }
   }
+  async function refreshSpaces() { const items = await listSpaces(); setSpaces(Array.isArray(items) ? items : []); }
 
   async function refreshSkills() {
     setSkills(await listSkills());
@@ -247,6 +258,8 @@ export function App() {
     if (view === "chat") await refreshChats();
     if (view === "calls" && showDebugPanel) await refreshModelCalls();
     if (view === "products") await refreshProducts();
+    if (view === "spaces") await refreshSpaces();
+    if (view === "history") await Promise.all([refreshJobs(), refreshChats()]);
     if (view === "settings") await refreshModelSettings();
   }
 
@@ -255,6 +268,7 @@ export function App() {
     refreshChats().catch(() => {});
     if (showDebugPanel) refreshModelCalls().catch(() => {});
     refreshProducts().catch(() => {});
+    refreshSpaces().catch(() => {});
     refreshSkills().catch(() => {});
     refreshModelSettings().catch(() => {});
   }, []);
@@ -394,23 +408,6 @@ export function App() {
     setSelectedJob(await getJob(id));
   }
 
-  async function handlePublish() {
-    if (!selectedJob) return;
-    setError("");
-    setIsPublishing(true);
-    try {
-      await publishJob(selectedJob.id);
-      setActiveTab("creatibi_result_json");
-      setVideoPromptContent("");
-      await refreshJobs(selectedJob.id);
-    } catch (err) {
-      setError(err.message);
-      await refreshJobs(selectedJob.id);
-    } finally {
-      setIsPublishing(false);
-    }
-  }
-
   async function handleRetry() {
     if (!selectedJob) return;
     setError("");
@@ -502,14 +499,16 @@ export function App() {
     }
   }
 
-  async function handleCreateProduct(event) {
-    event.preventDefault();
-    const formEl = event.currentTarget;
+  async function handleCreateProduct(eventOrForm) {
+    const isFormData = eventOrForm instanceof FormData;
+    if (!isFormData) eventOrForm.preventDefault();
+    const formEl = isFormData ? null : eventOrForm.currentTarget;
+    const form = isFormData ? eventOrForm : new FormData(formEl);
     setError("");
     setIsCreatingProduct(true);
     try {
-      const product = await createProduct(new FormData(formEl));
-      formEl.reset();
+      const product = await createProduct(form);
+      formEl?.reset();
       await refreshProducts(product.id);
     } catch (err) {
       setError(err.message);
@@ -539,14 +538,14 @@ export function App() {
   }
 
   const visibleContent = activeTab === "video_prompts" ? videoPromptContent : selectedJob?.[activeTab] || "";
-  const canPublish = selectedJob?.status === "completed" || selectedJob?.status === "published";
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
   const selectedCall = modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
   const productStats = useMemo(() => buildProductStats(products, jobs), [products, jobs]);
 
-  function handleStartProductJob(productId, requirement = "") {
+  function handleStartProductJob(productId, requirement = "", spaceId = "") {
     setSelectedProductId(productId);
     setJobInitialRequirement(requirement);
+    window.sessionStorage.setItem("scriptagent:space-id", spaceId);
     setView("jobs");
   }
 
@@ -581,6 +580,18 @@ export function App() {
     }
   }
 
+  async function handleUpdateProduct(id, title, content) {
+    setError(""); setIsSavingProduct(true);
+    try { await updateProduct(id, { title, content }); await refreshProducts(id); setProductPreview(await getProductMarkdown(id)); }
+    catch (err) { setError(err.message); throw err; }
+    finally { setIsSavingProduct(false); }
+  }
+  async function handleCreateSpace(event) {
+    event.preventDefault(); const form = new FormData(event.currentTarget); setError(""); setIsCreatingSpace(true);
+    try { await createSpace({ title:String(form.get("title")||""), summary:String(form.get("summary")||""), product_id:String(form.get("product_id")||""), agent_brief:String(form.get("agent_brief")||"") }); event.currentTarget.reset(); await refreshSpaces(); }
+    catch (err) { setError(err.message); } finally { setIsCreatingSpace(false); }
+  }
+
   function handleReportToJob(report) {
     if (!report) return;
     const requirement = [
@@ -594,40 +605,13 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <img src={logo} alt="ScriptAgent" />
-        </div>
-        <div className="view-switcher">
-          <button className={view === "jobs" ? "active" : ""} type="button" onClick={() => setView("jobs")}>
-            <FileText size={15} />
-            <span>脚本任务</span>
-          </button>
-          <button className={view === "products" ? "active" : ""} type="button" onClick={() => setView("products")}>
-            <Package size={15} />
-            <span>产品库</span>
-          </button>
-          <button className={view === "chat" ? "active" : ""} type="button" onClick={() => setView("chat")}>
-            <MessageSquare size={15} />
-            <span>通用对话</span>
-          </button>
-          {showDebugPanel ? (
-            <button className={view === "calls" ? "active" : ""} type="button" onClick={() => setView("calls")}>
-              <Activity size={15} />
-              <span>调试台</span>
-            </button>
-          ) : null}
-          <button className={view === "settings" ? "active" : ""} type="button" onClick={() => setView("settings")}>
-            <Settings size={15} />
-            <span>配置</span>
-          </button>
-        </div>
-        <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新">
-          <RefreshCw size={16} />
-        </button>
-      </header>
-
+    <div className="app-shell agent-app-shell">
+      <AppSidebar view={view} onChange={setView} icon={agentIcon} />
+      <div className="agent-frame">
+        <header className="workspace-topbar">
+          <div><span className="workspace-kicker">ScriptAgent</span><strong>{pageTitle(view)}</strong></div>
+          <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新"><RefreshCw size={16} /></button>
+        </header>
       <main className={`workspace ${view === "products" ? "workspace-home" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
@@ -641,6 +625,9 @@ export function App() {
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
         <section className={`main-pane ${view === "products" ? "main-pane-home" : ""}`}>
+          {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} onProduct={handleStartProductJob} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
+          {view === "history" ? <HistoryWorkspace jobs={jobs} chats={chats} products={products} onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))} onChat={(id) => handleSelectChat(id).then(() => setView("chat"))} /> : null}
+          {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} error={error} onCreate={handleCreateSpace} onStart={(productID, spaceID) => handleStartProductJob(productID, "", spaceID)} /> : null}
           {view === "jobs" ? (
             <JobsWorkspace
               selectedJob={selectedJob}
@@ -648,22 +635,19 @@ export function App() {
               visibleContent={visibleContent}
               isGeneratingVideoPrompts={isGeneratingVideoPrompts}
               isCreating={isCreating}
-              isPublishing={isPublishing}
               isRetrying={isRetrying}
-              canPublish={canPublish}
               canRetry={canRetry}
               products={products}
               initialProductId={selectedProductId}
               initialRequirement={jobInitialRequirement}
               error={error}
               onCreate={handleCreate}
-              onPublish={handlePublish}
               onRetry={handleRetry}
               onTab={setActiveTab}
             />
           ) : null}
           {view === "products" ? (
-            <ProductsWorkspace
+            <ProductKnowledgeWorkspace
               products={products}
               selectedProductId={selectedProductId}
               productPreview={productPreview}
@@ -673,6 +657,7 @@ export function App() {
               isLoadingCreativeReports={isLoadingCreativeReports}
               isCreatingCreativeReport={isCreatingCreativeReport}
               isCreatingProduct={isCreatingProduct}
+              isSavingProduct={isSavingProduct}
               productStats={productStats}
               error={error}
               onSelect={setSelectedProductId}
@@ -681,6 +666,7 @@ export function App() {
               onCreateCreativeReport={handleCreateCreativeReport}
               onReportToJob={handleReportToJob}
               onCreate={handleCreateProduct}
+              onUpdate={handleUpdateProduct}
             />
           ) : null}
           {view === "chat" ? (
@@ -714,9 +700,18 @@ export function App() {
             />
           ) : null}
         </section>
-      </main>
+      </main></div>
     </div>
   );
+}
+
+function pageTitle(view) {
+  return ({ home: "开始创作", history: "历史记录", spaces: "创作空间", products: "产品资料", jobs: "执行任务", chat: "对话", settings: "设置", calls: "调试台" })[view] || "ScriptAgent";
+}
+
+function AppSidebar({ view, onChange, icon }) {
+  const items = [["home", "开始", House], ["history", "历史", History], ["spaces", "创作空间", FolderKanban], ["products", "产品资料", Package]];
+  return <aside className="app-sidebar"><button className="agent-brand" type="button" onClick={() => onChange("home")}><img src={icon} alt="ScriptAgent"/><span>ScriptAgent</span></button><nav>{items.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} type="button" onClick={() => onChange(id)}><Icon size={18}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><button className={view === "settings" ? "active" : ""} type="button" onClick={() => onChange("settings")}><Settings size={18}/><span>设置</span></button></div></aside>;
 }
 
 function JobsSidebar({ jobs, selectedJob, onSelect }) {
@@ -857,6 +852,7 @@ function JobsWorkspace(props) {
           <p>先确认产品资产，再上传参考视频生成复刻脚本与裂变脚本。</p>
         </div>
         <form className="task-form" onSubmit={props.onCreate}>
+          <input type="hidden" name="space_id" value={window.sessionStorage.getItem("scriptagent:space-id") || ""} />
           <div className="form-section">
             <div className="section-heading">
               <span>1. 产品资产</span>
@@ -1223,6 +1219,43 @@ function FissionDirectionPicker({ count }) {
   );
 }
 
+function AgentStart({ products, jobs, spaces, onProduct, onSpaces, onHistory }) {
+  const [goal, setGoal] = useState("");
+  const [productID, setProductID] = useState(products[0]?.id || "");
+  const safeJobs = Array.isArray(jobs) ? jobs : [];
+  const safeSpaces = Array.isArray(spaces) ? spaces : [];
+  const active = safeJobs.filter((job) => runningStatuses.has(job.status));
+  return <section className="agent-start">
+    <div className="agent-intro"><span className="eyebrow">ScriptAgent</span><h1>今天想完成什么？</h1><p>说出目标，助手会读取资料、规划步骤并执行。</p></div>
+    <div className="agent-goal-card"><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子" /><div><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><button className="primary-button" type="button" disabled={!productID} onClick={() => onProduct(productID, goal)}><Play size={15}/>开始执行</button></div></div>
+    <div className="agent-start-grid"><section><h2>正在进行</h2>{active.length ? active.map((job)=><button className="agent-list-row" key={job.id} onClick={onHistory}><span className="task-state-dot running"/><strong>{job.title}</strong><small>{statusLabel(job.status)}</small></button>) : <p>当前没有执行中的任务。</p>}</section><section><div className="section-heading"><span>最近空间</span><button className="mini-button" type="button" onClick={onSpaces}>查看全部</button></div>{safeSpaces.length ? safeSpaces.slice(0,3).map((space)=><button className="agent-list-row" key={space.id} onClick={onSpaces}><FolderKanban size={16}/><strong>{space.title}</strong><small>{space.summary || "继续创作"}</small></button>) : <button className="agent-list-row" onClick={onSpaces}><FolderKanban size={16}/><strong>创建第一个空间</strong><small>把目标和历史放在一起</small></button>}</section></div>
+  </section>;
+}
+
+function HistoryWorkspace({ jobs, chats, products, onJob, onChat }) {
+  const [query,setQuery]=useState(""); const [kind,setKind]=useState("all");
+  const safeJobs=Array.isArray(jobs)?jobs:[],safeChats=Array.isArray(chats)?chats:[],safeProducts=Array.isArray(products)?products:[];
+  const items=[...safeJobs.map((job)=>({id:job.id,kind:"job",title:job.title,detail:`${statusLabel(job.status)} · ${safeProducts.find((p)=>p.md_name===job.product_md_name)?.title || job.product_md_name}`,at:job.updated_at})),...safeChats.map((chat)=>({id:chat.id,kind:"chat",title:chat.title,detail:chat.summary||"和 ScriptAgent 的对话",at:chat.updated_at}))].filter((item)=>(kind==="all"||item.kind===kind)&&`${item.title} ${item.detail}`.toLowerCase().includes(query.toLowerCase())).sort((a,b)=>new Date(b.at)-new Date(a.at));
+  return <section className="history-workspace"><span className="eyebrow">过去的工作都在这里</span><h1>继续，不必重新开始</h1><p>对话和执行任务放在一起；创作空间中的版本仍会保留在项目里。</p><div className="history-tools"><label><Search size={15}/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索标题或产品"/></label><div>{[["all","全部"],["job","执行任务"],["chat","对话"]].map(([key,label])=><button key={key} className={kind===key?"active":""} onClick={()=>setKind(key)}>{label}</button>)}</div></div>{items.length?<div className="history-list">{items.map((item)=><button key={`${item.kind}-${item.id}`} onClick={()=>item.kind==="job"?onJob(item.id):onChat(item.id)}><span>{item.kind==="job"?<Bot size={16}/>:<MessageSquare size={16}/>}</span><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{formatTime(item.at)}</time><ChevronRight size={16}/></button>)}</div>:<EmptyState text="还没有历史记录"/>}</section>;
+}
+
+function SpacesWorkspace({ spaces, products, jobs, isCreating, error, onCreate, onStart }) {
+  return <section className="spaces-workspace"><div className="spaces-head"><div><span className="eyebrow">长期创作</span><h1>创作空间</h1><p>把目标、产品资料和每一次执行留在同一个地方，随时接着做。</p></div></div><div className="spaces-grid"><section className="spaces-list">{spaces.length?spaces.map((space)=>{const count=jobs.filter((job)=>job.space_id===space.id).length;const product=products.find((item)=>item.id===space.product_id);return <article key={space.id}><FolderKanban size={18}/><div><strong>{space.title}</strong><p>{space.summary||"继续上次的创作"}</p><small>{product?.title||"未关联产品"} · {count} 次执行</small></div><button className="secondary-button" type="button" onClick={()=>onStart(space.product_id,space.id)}>继续创作</button></article>}):<EmptyState text="还没有空间，创建一个长期创作项目。"/>}</section><aside className="space-create"><span className="eyebrow">新空间</span><h2>开始一个长期创作</h2><form onSubmit={onCreate}><input name="title" placeholder="例如：夏季活动脚本" required/><select name="product_id" required defaultValue=""><option value="" disabled>选择产品资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><textarea name="summary" placeholder="这次想完成什么？" required/><textarea name="agent_brief" placeholder="长期要求：风格、受众、不能说什么（可选）"/><button className="primary-button" disabled={isCreating||!products.length}>{isCreating?"创建中":"创建空间"}</button></form>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
+}
+
+function ProductKnowledgeWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, isSavingProduct, error, onSelect, onStartJob, onCreate, onUpdate }) {
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [isNew, setIsNew] = useState(false);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const selected = products.find((item) => item.id === selectedProductId) || products[0];
+  const visible = products.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()));
+  useEffect(() => { if (!editing) { setTitle(selected?.title || ""); setContent(productPreview?.content || ""); } }, [selected?.id, productPreview?.content, editing]);
+  async function save(event) { event.preventDefault(); if (selected) { await onUpdate(selected.id, title, content); setEditing(false); } }
+  return <section className="knowledge-workspace"><header><div><span className="eyebrow">可持续更新的资料</span><h1>产品资料</h1><p>把产品说清楚一次，后续创作和执行都会自动带上它。</p></div><button className="primary-button" type="button" onClick={() => { setEditing(true); setIsNew(true); setTitle(""); setContent("# 产品资料\n\n## 卖点\n\n## 目标用户\n\n## 使用场景\n\n## 表达边界\n"); }}> <Plus size={16}/>新建</button></header><div className="knowledge-grid"><aside className="knowledge-list"><label className="knowledge-search"><Search size={15}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资料"/></label><div className="knowledge-entry-note">你可以上传 Markdown、粘贴文字，或在这里直接修改。</div>{visible.length ? visible.map((item) => <button className={selected?.id===item.id?"active":""} type="button" key={item.id} onClick={() => { setEditing(false); setIsNew(false); onSelect(item.id); }}><Package size={16}/><span><strong>{item.title}</strong><small>更新 {formatTime(item.updated_at)}</small></span><ChevronRight size={15}/></button>) : <EmptyState text="还没有匹配的资料" compact/>}</aside><main className="knowledge-reader">{editing ? <form className="living-product-editor" onSubmit={async (event) => { if (selected && !isNew) return save(event); event.preventDefault(); const data=new FormData(); data.append("title", title); data.append("product_md", new File([content], `${title || "产品资料"}.md`, {type:"text/markdown"})); await onCreate(data); setIsNew(false); setEditing(false); }}><div className="knowledge-editor-head"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="资料名称" required/><button className="secondary-button" type="button" onClick={() => { setEditing(false); setIsNew(false); setTitle(selected?.title || ""); setContent(productPreview?.content || ""); }}>取消</button><button className="primary-button" disabled={isSavingProduct || isCreatingProduct} type="submit">{isSavingProduct || isCreatingProduct ? "保存中" : "保存资料"}</button></div><textarea value={content} onChange={(event) => setContent(event.target.value)} aria-label="产品资料内容" required/></form> : selected ? <><div className="knowledge-reader-head"><div><span className="eyebrow">当前资料</span><h2>{selected.title}</h2><small>{selected.md_name} · 更新 {formatTime(selected.updated_at)}</small></div><div><button className="secondary-button" type="button" onClick={() => setEditing(true)}><FileText size={15}/>修改</button><button className="primary-button" type="button" onClick={() => onStartJob(selected.id)}><Play size={15}/>开始创作</button></div></div>{isLoadingProductPreview?<EmptyState text="正在读取资料"/>:productPreview?.content?<MarkdownContent content={productPreview.content}/>:<EmptyState text="资料为空，点击修改补充内容"/>}</> : <EmptyState text="从左侧选择资料，或新建一份"/>}</main><aside className="knowledge-checks"><span className="eyebrow">创作前检查</span><h2>资料是否够用？</h2>{["核心卖点","目标用户","使用场景","表达边界","可用素材"].map((label) => <div key={label}><span className={(content.includes(label) || productPreview?.content?.includes(label)) ? "check-ok" : "check-wait"}/><strong>{label}</strong><small>{(content.includes(label) || productPreview?.content?.includes(label)) ? "已记录" : "建议补充"}</small></div>)}<p>资料不完整也能开始。助手会在执行前提醒你缺少什么。</p>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
+}
+
 function ProductCover({ product, compact = false }) {
   const variant = productCoverVariant(product);
   return (
@@ -1289,6 +1322,7 @@ function ProductsWorkspace({
   isLoadingCreativeReports,
   isCreatingCreativeReport,
   isCreatingProduct,
+  isSavingProduct,
   productStats,
   error,
   onSelect,
@@ -1297,11 +1331,16 @@ function ProductsWorkspace({
   onCreateCreativeReport,
   onReportToJob,
   onCreate,
+  onUpdate,
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
   const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
   const selectedStats = selectedProduct ? productStats.get(selectedProduct.id) : null;
   const selectedReport = creativeReports.find((report) => report.id === selectedCreativeReportId) || creativeReports[0];
   const totalScripts = Array.from(productStats.values()).reduce((total, stats) => total + (stats.scriptCount || 0), 0);
+  useEffect(() => { if (!editing) { setEditTitle(selectedProduct?.title || ""); setEditContent(productPreview?.content || ""); } }, [selectedProduct?.id, productPreview?.content, editing]);
   return (
     <section className="product-home">
       <div className="product-home-hero">
@@ -1378,6 +1417,7 @@ function ProductsWorkspace({
               </div>
               <div className="dossier-actions">
                 <span className="status-pill success">可用于任务</span>
+                <button className="secondary-button" type="button" onClick={() => setEditing((value) => !value)}><FileText size={15} /><span>{editing ? "阅读资料" : "编辑资料"}</span></button>
                 <button className="secondary-button" type="button" onClick={() => onStartJob(selectedProduct.id)}>
                   <Play size={15} />
                   <span>生成新脚本</span>
@@ -1501,7 +1541,13 @@ function ProductsWorkspace({
                 <span>Markdown 预览</span>
                 <small>{isLoadingProductPreview ? "读取中" : productPreview?.md_name || selectedProduct.md_name}</small>
               </div>
-              {productPreview?.error ? (
+              {editing ? (
+                <form className="living-product-editor" onSubmit={async (event) => { event.preventDefault(); await onUpdate(selectedProduct.id, editTitle, editContent); setEditing(false); }}>
+                  <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required aria-label="产品名称" />
+                  <textarea value={editContent} onChange={(event) => setEditContent(event.target.value)} required aria-label="产品资料内容" />
+                  <button className="primary-button" type="submit" disabled={isSavingProduct}>{isSavingProduct ? "保存中" : "保存更新"}</button>
+                </form>
+              ) : productPreview?.error ? (
                 <div className="error-banner">{productPreview.error}</div>
               ) : isLoadingProductPreview ? (
                 <EmptyState text="正在读取产品 Markdown" compact />
@@ -1645,7 +1691,7 @@ function FileField({ name, label, accept, icon, required = true }) {
   );
 }
 
-function ResultHeader({ job, isPublishing, isRetrying, canPublish, canRetry, onPublish, onRetry }) {
+function ResultHeader({ job, isRetrying, canRetry, onRetry }) {
   const subtitle = useMemo(() => {
     if (!job) return "选择历史记录或创建新任务后查看结果。";
     return `${job.video_original_name} · ${job.product_md_name}`;
@@ -1666,10 +1712,6 @@ function ResultHeader({ job, isPublishing, isRetrying, canPublish, canRetry, onP
           <button className="secondary-button" type="button" onClick={onRetry} disabled={!canRetry || isRetrying}>
             {isRetrying ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
             <span>重试</span>
-          </button>
-          <button className="secondary-button" type="button" onClick={onPublish} disabled={!canPublish || isPublishing}>
-            {isPublishing ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
-            <span>{job.status === "published" ? "重新发布" : "发布至 CreatiBI"}</span>
           </button>
         </div>
       ) : null}
