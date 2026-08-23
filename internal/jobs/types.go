@@ -30,6 +30,7 @@ type Job struct {
 	FissionDirections  string    `json:"fission_directions,omitempty"`
 	SpaceID            string    `json:"space_id,omitempty"`
 	ParentJobID        string    `json:"parent_job_id,omitempty"`
+	ContextSnapshot    string    `json:"context_snapshot,omitempty"`
 	AnalysisMarkdown   string    `json:"analysis_markdown,omitempty"`
 	ReplicaScriptJSON  string    `json:"replica_script_json,omitempty"`
 	FissionScriptsJSON string    `json:"fission_scripts_json,omitempty"`
@@ -150,6 +151,7 @@ type CreateJobInput struct {
 	FissionDirections string
 	SpaceID           string
 	ParentJobID       string
+	ContextSnapshot   string
 }
 
 type CreateProductInput struct {

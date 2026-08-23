@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS jobs (
 	if err := s.ensureColumn("jobs", "parent_job_id", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("jobs", "context_snapshot", "TEXT"); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id TEXT PRIMARY KEY,
@@ -372,6 +375,18 @@ func (s *Store) ListSpaces() ([]Space, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) GetSpace(id string) (*Space, error) {
+	var space Space
+	var createdAt, updatedAt string
+	err := s.db.QueryRow(`SELECT id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	space.CreatedAt = parseTime(createdAt)
+	space.UpdatedAt = parseTime(updatedAt)
+	return &space, nil
+}
+
 func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -568,17 +583,18 @@ func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
 		FissionDirections: input.FissionDirections,
 		SpaceID:           input.SpaceID,
 		ParentJobID:       input.ParentJobID,
+		ContextSnapshot:   input.ContextSnapshot,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
 	_, err := s.db.Exec(`
 INSERT INTO jobs (
   id, title, status, video_path, video_original_name, product_md_path, product_md_name,
-  requirement, industry, fission_count, fission_directions, space_id, parent_job_id, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  requirement, industry, fission_count, fission_directions, space_id, parent_job_id, context_snapshot, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Title, job.Status, job.VideoPath, job.VideoOriginalName,
 		job.ProductMDPath, job.ProductMDName, job.Requirement, job.Industry,
-		job.FissionCount, job.FissionDirections, job.SpaceID, job.ParentJobID, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
+		job.FissionCount, job.FissionDirections, job.SpaceID, job.ParentJobID, job.ContextSnapshot, job.CreatedAt.Format(time.RFC3339), job.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -590,7 +606,7 @@ func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, context_snapshot, created_at, updated_at
 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -612,7 +628,7 @@ func (s *Store) ListUnfinishedJobs() ([]Job, error) {
 	rows, err := s.db.Query(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, context_snapshot, created_at, updated_at
 FROM jobs
 WHERE status IN (?, ?, ?, ?, ?, ?, ?)
 ORDER BY created_at ASC`,
@@ -638,7 +654,7 @@ func (s *Store) GetJob(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 SELECT id, title, status, video_path, video_original_name, product_md_path, product_md_name,
        requirement, industry, fission_count, fission_directions, analysis_markdown, replica_script_json,
-       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, created_at, updated_at
+       fission_scripts_json, creatibi_result_json, error_message, run_log, space_id, parent_job_id, context_snapshot, created_at, updated_at
 FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
@@ -898,12 +914,12 @@ func scanJob(row scanner) (*Job, error) {
 	var job Job
 	var createdAt, updatedAt string
 	var analysisMarkdown, replicaScriptJSON, fissionScriptsJSON sql.NullString
-	var fissionDirections, creatibiResultJSON, errorMessage, runLog, spaceID, parentJobID sql.NullString
+	var fissionDirections, creatibiResultJSON, errorMessage, runLog, spaceID, parentJobID, contextSnapshot sql.NullString
 	err := row.Scan(
 		&job.ID, &job.Title, &job.Status, &job.VideoPath, &job.VideoOriginalName,
 		&job.ProductMDPath, &job.ProductMDName, &job.Requirement, &job.Industry,
 		&job.FissionCount, &fissionDirections, &analysisMarkdown, &replicaScriptJSON,
-		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog, &spaceID, &parentJobID,
+		&fissionScriptsJSON, &creatibiResultJSON, &errorMessage, &runLog, &spaceID, &parentJobID, &contextSnapshot,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -918,6 +934,7 @@ func scanJob(row scanner) (*Job, error) {
 	job.RunLog = runLog.String
 	job.SpaceID = spaceID.String
 	job.ParentJobID = parentJobID.String
+	job.ContextSnapshot = contextSnapshot.String
 	job.CreatedAt = parseTime(createdAt)
 	job.UpdatedAt = parseTime(updatedAt)
 	return &job, nil

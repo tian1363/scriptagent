@@ -343,6 +343,11 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = product.Title
 	}
+	contextSnapshot, err := h.buildJobContextSnapshot(product, strings.TrimSpace(r.FormValue("space_id")))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	job, err := h.store.CreateJob(jobs.CreateJobInput{
 		Title:             title,
@@ -356,6 +361,7 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		FissionDirections: fissionDirections,
 		SpaceID:           strings.TrimSpace(r.FormValue("space_id")),
 		ParentJobID:       strings.TrimSpace(r.FormValue("parent_job_id")),
+		ContextSnapshot:   contextSnapshot,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -367,6 +373,32 @@ func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		"job_id": job.ID,
 		"status": job.Status,
 	})
+}
+
+func (h *Handler) buildJobContextSnapshot(product *jobs.Product, spaceID string) (string, error) {
+	markdown, err := os.ReadFile(product.MDPath)
+	if err != nil {
+		return "", err
+	}
+	assets, err := h.store.ListProductAssets(product.ID)
+	if err != nil {
+		return "", err
+	}
+	lines := []string{"# 任务上下文快照", "", "## 产品资料（创建任务时版本）", string(markdown)}
+	if spaceID != "" {
+		space, err := h.store.GetSpace(spaceID)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "", "## 创作空间", "名称："+space.Title, "目标："+space.Summary, "长期要求："+space.AgentBrief)
+	}
+	if len(assets) > 0 {
+		lines = append(lines, "", "## 可用图片/视频素材")
+		for _, asset := range assets {
+			lines = append(lines, "- "+asset.Kind+"："+asset.OriginalName)
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func (h *Handler) resolveJobProduct(r *http.Request) (*jobs.Product, error) {
