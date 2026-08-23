@@ -500,7 +500,7 @@ export function App() {
   }
 
   async function handleCreateProduct(eventOrForm) {
-    const isFormData = eventOrForm instanceof FormData;
+    const isFormData = Boolean(eventOrForm && typeof eventOrForm.append === "function" && typeof eventOrForm.get === "function");
     if (!isFormData) eventOrForm.preventDefault();
     const formEl = isFormData ? null : eventOrForm.currentTarget;
     const form = isFormData ? eventOrForm : new FormData(formEl);
@@ -508,7 +508,6 @@ export function App() {
     setIsCreatingProduct(true);
     try {
       const product = await createProduct(form);
-      formEl?.reset();
       await refreshProducts(product.id);
     } catch (err) {
       setError(err.message);
