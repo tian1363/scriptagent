@@ -53,9 +53,13 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 		return jobs.ScriptResult{}, errors.New("qwen client is not configured")
 	}
 	progress(jobs.StatusAnalyzingVideo, "开始读取产品 Markdown 和参考视频。")
-	product, err := os.ReadFile(job.ProductMDPath)
-	if err != nil {
-		return jobs.ScriptResult{}, err
+	product := []byte(job.ContextSnapshot)
+	if len(product) == 0 {
+		var err error
+		product, err = os.ReadFile(job.ProductMDPath)
+		if err != nil {
+			return jobs.ScriptResult{}, err
+		}
 	}
 	videoDataURL, err := videoDataURL(ctx, job.VideoPath, a.maxDataURIBytes, progress)
 	if err != nil {
