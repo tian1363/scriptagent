@@ -161,6 +161,7 @@ type UpdateProductInput struct{ Title string }
 
 type ModelSettings struct {
 	APIKey    string    `json:"-"`
+	Provider  string    `json:"provider"`
 	Endpoint  string    `json:"endpoint"`
 	Model     string    `json:"model"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -170,6 +171,7 @@ type PublicModelSettings struct {
 	Configured bool      `json:"configured"`
 	Source     string    `json:"source"`
 	APIKeyMask string    `json:"api_key_mask,omitempty"`
+	Provider   string    `json:"provider"`
 	Endpoint   string    `json:"endpoint"`
 	Model      string    `json:"model"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`

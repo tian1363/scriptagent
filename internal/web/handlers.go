@@ -566,6 +566,7 @@ func (h *Handler) getModelSettings(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		APIKey   string `json:"api_key"`
+		Provider string `json:"provider"`
 		Endpoint string `json:"endpoint"`
 		Model    string `json:"model"`
 	}
@@ -575,6 +576,7 @@ func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.store.SaveModelSettings(jobs.ModelSettings{
 		APIKey:   input.APIKey,
+		Provider: input.Provider,
 		Endpoint: input.Endpoint,
 		Model:    input.Model,
 	}); err != nil {
@@ -590,6 +592,7 @@ func (h *Handler) publicModelSettings() jobs.PublicModelSettings {
 			Configured: true,
 			Source:     "user",
 			APIKeyMask: maskAPIKey(settings.APIKey),
+			Provider:   settings.Provider,
 			Endpoint:   settings.Endpoint,
 			Model:      settings.Model,
 			UpdatedAt:  settings.UpdatedAt,
@@ -600,6 +603,7 @@ func (h *Handler) publicModelSettings() jobs.PublicModelSettings {
 		Configured: strings.TrimSpace(apiKey) != "",
 		Source:     "env",
 		APIKeyMask: maskAPIKey(apiKey),
+		Provider:   "dashscope",
 		Endpoint:   valueOr(os.Getenv("DASHSCOPE_ENDPOINT"), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"),
 		Model:      valueOr(os.Getenv("SCRIPT_AGENT_MODEL"), "qwen3.6-plus"),
 	}

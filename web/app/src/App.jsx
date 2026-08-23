@@ -526,6 +526,7 @@ export function App() {
     try {
       const next = await saveModelSettings({
         api_key: String(form.get("api_key") || ""),
+        provider: String(form.get("provider") || "dashscope"),
         endpoint: String(form.get("endpoint") || ""),
         model: String(form.get("model") || ""),
       });
@@ -1577,7 +1578,7 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
       <div className="result-header">
         <div>
           <h2>模型配置</h2>
-          <p>部署给其他用户使用时，每个用户可在这里配置自己的 DashScope 模型。</p>
+          <p>选择模型厂商，或接入任意兼容 OpenAI Chat Completions 协议的模型服务。</p>
         </div>
         <span className={`status-pill ${modelSettings?.configured ? "success" : "danger"}`}>
           <KeyRound size={13} />
@@ -1595,12 +1596,20 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
         </div>
         <div className="form-section">
           <div className="section-heading">
-            <span>DashScope</span>
+            <span>模型服务</span>
             <small>{modelSettings?.api_key_mask ? `当前 Key：${modelSettings.api_key_mask}` : "保存后立即生效"}</small>
           </div>
           <label>
+            <span>接口类型</span>
+            <select name="provider" defaultValue={modelSettings?.provider || "dashscope"}>
+              <option value="dashscope">DashScope（支持本地视频理解）</option>
+              <option value="openai">OpenAI 兼容接口（文本任务）</option>
+            </select>
+            <small className="field-hint">兼容接口可用于 OpenAI、DeepSeek、Moonshot、OpenRouter、Groq、Ollama、vLLM 等服务。</small>
+          </label>
+          <label>
             <span>API Key</span>
-            <input name="api_key" type="password" placeholder={modelSettings?.configured ? "留空则保留当前 Key" : "请输入 DashScope API Key"} autoComplete="new-password" />
+            <input name="api_key" type="password" placeholder={modelSettings?.configured ? "留空则保留当前 Key" : "输入对应厂商的 API Key"} autoComplete="new-password" />
           </label>
           <div className="upload-grid">
             <label>
@@ -1608,8 +1617,8 @@ function SettingsWorkspace({ modelSettings, showDebugPanel, isSaving, error, onD
               <input name="model" type="text" defaultValue={modelSettings?.model || "qwen3.6-plus"} />
             </label>
             <label>
-              <span>Endpoint</span>
-              <input name="endpoint" type="text" defaultValue={modelSettings?.endpoint || "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"} />
+              <span>接口地址</span>
+              <input name="endpoint" type="text" defaultValue={modelSettings?.endpoint || "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"} placeholder="完整的 Chat Completions 地址" />
             </label>
           </div>
         </div>

@@ -41,6 +41,7 @@ type DashScopeConfig struct {
 
 type RuntimeConfig struct {
 	APIKey   string
+	Provider string
 	Endpoint string
 	Model    string
 	Source   string
@@ -96,6 +97,9 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	runtime := c.runtimeConfig()
 	if runtime.APIKey == "" {
 		return Generation{}, errors.New("DASHSCOPE_API_KEY is not configured")
+	}
+	if runtime.Provider == "openai" {
+		return c.generateOpenAICompatible(ctx, callCtx, runtime, content)
 	}
 	reqBody := requestBody{
 		Model: runtime.Model,
@@ -177,6 +181,7 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 	runtime := RuntimeConfig{
 		APIKey:   c.apiKey,
+		Provider: "dashscope",
 		Endpoint: c.endpoint,
 		Model:    c.model,
 		Source:   "env",
@@ -186,6 +191,7 @@ func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 			runtime.APIKey = provided.APIKey
 			runtime.Endpoint = valueOr(provided.Endpoint, runtime.Endpoint)
 			runtime.Model = valueOr(provided.Model, runtime.Model)
+			runtime.Provider = valueOr(provided.Provider, runtime.Provider)
 			runtime.Source = valueOr(provided.Source, "user")
 		}
 	}

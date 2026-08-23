@@ -207,6 +207,9 @@ CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_
 	if err := s.ensureColumn("chat_conversations", "summary_message_id", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("model_settings", "provider", "TEXT NOT NULL DEFAULT 'dashscope'"); err != nil {
+		return err
+	}
 	return err
 }
 
@@ -487,6 +490,10 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 	if apiKey == "" && existing != nil {
 		apiKey = existing.APIKey
 	}
+	provider := strings.TrimSpace(settings.Provider)
+	if provider == "" {
+		provider = "dashscope"
+	}
 	endpoint := strings.TrimSpace(settings.Endpoint)
 	if endpoint == "" {
 		endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
@@ -497,19 +504,20 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 	}
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
-INSERT INTO model_settings (id, api_key, endpoint, model, updated_at)
-VALUES ('default', ?, ?, ?, ?)
+INSERT INTO model_settings (id, api_key, endpoint, model, provider, updated_at)
+VALUES ('default', ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   api_key = excluded.api_key,
   endpoint = excluded.endpoint,
   model = excluded.model,
+  provider = excluded.provider,
   updated_at = excluded.updated_at`,
-		apiKey, endpoint, modelName, now.Format(time.RFC3339),
+		apiKey, endpoint, modelName, provider, now.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &ModelSettings{APIKey: apiKey, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
+	return &ModelSettings{APIKey: apiKey, Provider: provider, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
 }
 
 func (s *Store) GetModelSettings() (*ModelSettings, error) {
@@ -517,8 +525,8 @@ func (s *Store) GetModelSettings() (*ModelSettings, error) {
 	var updatedAt string
 	var apiKey sql.NullString
 	err := s.db.QueryRow(`
-SELECT api_key, endpoint, model, updated_at
-FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &settings.Model, &updatedAt)
+SELECT api_key, endpoint, model, provider, updated_at
+FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &settings.Model, &settings.Provider, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -534,6 +542,7 @@ func (s *Store) GetModelRuntimeConfig() (model.RuntimeConfig, error) {
 	}
 	return model.RuntimeConfig{
 		APIKey:   settings.APIKey,
+		Provider: settings.Provider,
 		Endpoint: settings.Endpoint,
 		Model:    settings.Model,
 		Source:   "user",
