@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Send,
   Settings,
+  Sparkles,
   KeyRound,
   Upload,
   Video,
@@ -1033,6 +1034,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -1040,6 +1042,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
 
   function handleSkill(skill) {
     onDraft(skill.invocation_prompt || `调用 ${skill.name} skill。`);
+    setShowSkillMenu(false);
   }
 
   return (
@@ -1074,7 +1077,6 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>
-            {skills?.length ? <SkillLauncher skills={skills} onSelect={handleSkill} compact /> : null}
             {agentSteps?.length ? <AgentStepsPanel steps={agentSteps} /> : null}
             {citations?.length ? <CitationPanel citations={citations} /> : null}
             {messages.map((message) => (
@@ -1097,28 +1099,38 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
             <div ref={messagesEndRef} />
           </>
         ) : (
-          <ChatTaskStarter skills={skills} onSelect={onDraft} onSkill={handleSkill} />
+          <ChatTaskStarter onSelect={onDraft} />
         )}
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
+        {showSkillMenu && skills?.length ? <SkillCommandMenu skills={skills} onSelect={handleSkill} onClose={() => setShowSkillMenu(false)} /> : null}
         {attachment ? <div className="attachment-chip"><span>{attachment.name}</span><button type="button" onClick={() => onAttachment(null)}>移除</button></div> : null}
-        <label className="chat-attachment-button" title="添加图片或视频素材">
-          <Upload size={15} />
-          <span>素材</span>
-          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => onAttachment(event.target.files?.[0] || null)} />
-        </label>
-        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：分析这个素材的前三秒钩子。" />
-        <button className="primary-button" type="submit" disabled={isSending || (!draft.trim() && !attachment)}>
-          {isSending ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
-          <span>{isSending ? "发送中" : "发送"}</span>
-        </button>
+        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="3" placeholder="发消息或创建任务… / 使用技能，添加素材" />
+        <div className="chat-composer-toolbar">
+          <div className="composer-tools">
+            <label className="composer-add" title="添加图片或视频素材">
+              <Plus size={22} />
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => onAttachment(event.target.files?.[0] || null)} />
+            </label>
+            <button className={`composer-tool ${showSkillMenu ? "active" : ""}`} type="button" onClick={() => setShowSkillMenu((value) => !value)}>
+              <Sparkles size={16} /><span>技能</span><ChevronRight size={14} />
+            </button>
+            <label className={`composer-tool composer-connector ${attachment ? "active" : ""}`} title="添加图片或视频素材">
+              <Upload size={15} /><span>{attachment ? "已添加素材" : "素材"}</span><ChevronRight size={14} />
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => onAttachment(event.target.files?.[0] || null)} />
+            </label>
+          </div>
+          <button className="composer-send" type="submit" disabled={isSending || (!draft.trim() && !attachment)} aria-label={isSending ? "发送中" : "发送"}>
+            {isSending ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+          </button>
+        </div>
       </form>
     </section>
   );
 }
 
-function ChatTaskStarter({ skills, onSelect, onSkill }) {
+function ChatTaskStarter({ onSelect }) {
   return (
     <section className="chat-starter">
       <div>
@@ -1133,24 +1145,25 @@ function ChatTaskStarter({ skills, onSelect, onSkill }) {
           </button>
         ))}
       </div>
-      {skills?.length ? <SkillLauncher skills={skills} onSelect={onSkill} /> : null}
     </section>
   );
 }
 
-function SkillLauncher({ skills, onSelect, compact = false }) {
+function SkillCommandMenu({ skills, onSelect, onClose }) {
   return (
-    <section className={`skill-launcher ${compact ? "compact" : ""}`}>
-      <div className="section-heading">
-        <span>可主动调用的 Skill</span>
-        <small>{skills.length} 个</small>
+    <section className="skill-command-menu">
+      <div className="skill-command-head">
+        <span>技能</span>
+        <small>{skills.length}</small>
+        <button type="button" onClick={onClose}>关闭</button>
       </div>
-      <div className="skill-list">
+      <div className="skill-command-list">
         {skills.map((skill) => (
           <button key={skill.name} type="button" onClick={() => onSelect(skill)}>
-            <span>{skill.category}</span>
+            <span className="skill-command-icon"><Sparkles size={17} /></span>
             <strong>{skill.title}</strong>
             <small>{skill.description}</small>
+            <em>{skill.category}</em>
           </button>
         ))}
       </div>
