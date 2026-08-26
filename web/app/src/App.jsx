@@ -7,7 +7,6 @@ import {
   FileText,
   History,
   House,
-  Image as ImageIcon,
   FolderKanban,
   Search,
   ChevronDown,
@@ -25,7 +24,6 @@ import {
   KeyRound,
   Upload,
   Video,
-  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1104,11 +1102,11 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
-        {attachment ? <AttachmentPreview attachment={attachment} onRemove={() => onAttachment(null)} /> : null}
+        {attachment ? <div className="attachment-chip"><span>{attachment.name}</span><button type="button" onClick={() => onAttachment(null)}>移除</button></div> : null}
         <label className="chat-attachment-button" title="添加图片或视频素材">
           <Upload size={15} />
           <span>素材</span>
-          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => { onAttachment(event.target.files?.[0] || null); event.target.value = ""; }} />
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => onAttachment(event.target.files?.[0] || null)} />
         </label>
         <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：分析这个素材的前三秒钩子。" />
         <button className="primary-button" type="submit" disabled={isSending || (!draft.trim() && !attachment)}>
@@ -1118,46 +1116,6 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       </form>
     </section>
   );
-}
-
-function AttachmentPreview({ attachment, onRemove }) {
-  const [previewURL, setPreviewURL] = useState("");
-  const isImage = attachment?.type?.startsWith("image/");
-  const isVideo = attachment?.type?.startsWith("video/");
-
-  useEffect(() => {
-    if (!attachment || (!isImage && !isVideo)) {
-      setPreviewURL("");
-      return undefined;
-    }
-    const url = URL.createObjectURL(attachment);
-    setPreviewURL(url);
-    return () => URL.revokeObjectURL(url);
-  }, [attachment, isImage, isVideo]);
-
-  return (
-    <div className="attachment-preview">
-      <div className="attachment-thumbnail">
-        {isImage && previewURL ? <img src={previewURL} alt="待分析素材预览" /> : null}
-        {isVideo && previewURL ? <video src={previewURL} muted preload="metadata" aria-label="待分析视频预览" /> : null}
-        {!previewURL ? (isVideo ? <Video size={20} /> : <ImageIcon size={20} />) : null}
-      </div>
-      <div className="attachment-details">
-        <strong title={attachment.name}>{attachment.name}</strong>
-        <span>{isVideo ? "视频素材" : "图片素材"} · {formatFileSize(attachment.size)}</span>
-        <small>将交给模型进行多模态解析</small>
-      </div>
-      <button className="attachment-remove" type="button" onClick={onRemove} aria-label={`移除 ${attachment.name}`} title="移除素材">
-        <X size={16} />
-      </button>
-    </div>
-  );
-}
-
-function formatFileSize(bytes = 0) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function ChatTaskStarter({ skills, onSelect, onSkill }) {
