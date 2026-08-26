@@ -10,6 +10,7 @@ import {
   FolderKanban,
   Search,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleHelp,
   Loader2,
@@ -218,6 +219,7 @@ export function App() {
   const [chatAgentSteps, setChatAgentSteps] = useState([]);
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isChatHistoryCollapsed, setIsChatHistoryCollapsed] = useState(() => window.localStorage.getItem("scriptagent:chat-history-collapsed") === "true");
 
   const [modelCalls, setModelCalls] = useState([]);
   const [selectedCallId, setSelectedCallId] = useState("");
@@ -669,12 +671,12 @@ export function App() {
           <div><span className="workspace-kicker">ScriptAgent</span><strong>{pageTitle(view)}</strong></div>
           <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新"><RefreshCw size={16} /></button>
         </header>
-      <main className={`workspace ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""}`}>
+      <main className={`workspace ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""} ${view === "chat" && isChatHistoryCollapsed ? "chat-history-collapsed" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
         ) : null}
         {view === "chat" ? (
-          <ChatSidebar chats={chats} selectedChat={selectedChat} onSelect={handleSelectChat} onNew={handleNewChat} />
+          <ChatSidebar chats={chats} selectedChat={selectedChat} collapsed={isChatHistoryCollapsed} onSelect={handleSelectChat} onNew={handleNewChat} onToggle={() => setIsChatHistoryCollapsed((value) => { const next = !value; window.localStorage.setItem("scriptagent:chat-history-collapsed", String(next)); return next; })} />
         ) : null}
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
@@ -822,19 +824,22 @@ function SettingsSidebar({ modelSettings }) {
   );
 }
 
-function ChatSidebar({ chats, selectedChat, onSelect, onNew }) {
+function ChatSidebar({ chats, selectedChat, collapsed, onSelect, onNew, onToggle }) {
   return (
-    <aside className="history-pane">
+    <aside className={`history-pane chat-history-pane ${collapsed ? "collapsed" : ""}`}>
       <div className="pane-heading split">
         <span>
           <MessageSquare size={16} />
-          对话记录
+          <b>对话记录</b>
         </span>
-        <button className="mini-button" type="button" onClick={onNew}>
-          新对话
-        </button>
+        <div className="chat-history-actions">
+          <button className="mini-button" type="button" onClick={onNew}>新对话</button>
+          <button className="history-toggle" type="button" onClick={onToggle} title={collapsed ? "展开历史对话" : "收起历史对话"} aria-label={collapsed ? "展开历史对话" : "收起历史对话"}>
+            {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+          </button>
+        </div>
       </div>
-      <div className="history-list">
+      {!collapsed ? <div className="history-list">
         {chats.length ? (
           chats.map((chat) => (
             <button
@@ -844,13 +849,13 @@ function ChatSidebar({ chats, selectedChat, onSelect, onNew }) {
               onClick={() => onSelect(chat.id).catch(() => {})}
             >
               <span className="history-title">{chat.title}</span>
-              <span className="history-meta">{formatTime(chat.updated_at)}</span>
+              <time className="history-meta">{formatChatTime(chat.updated_at)}</time>
             </button>
           ))
         ) : (
           <EmptyState text="暂无对话" compact />
         )}
-      </div>
+      </div> : null}
     </aside>
   );
 }
@@ -2115,6 +2120,13 @@ function pretty(value) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatChatTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  const part = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}/${part(date.getMonth() + 1)}/${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
 }
 
 function reportConfigLabel(raw) {

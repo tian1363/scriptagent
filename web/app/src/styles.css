@@ -215,6 +215,10 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.workspace.chat-history-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
 .history-pane {
   min-width: 0;
   background: var(--cbi-bg-2);
@@ -244,6 +248,14 @@ button:disabled {
   gap: var(--cbi-space-1);
 }
 
+.pane-heading.split span b { font: inherit; }
+.chat-history-actions { display: flex; align-items: center; gap: 5px; }
+.history-toggle { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; color: var(--cbi-fg-2); background: transparent; cursor: pointer; }
+.history-toggle:hover { background: var(--cbi-bg-3); color: var(--cbi-fg-1); }
+.chat-history-pane.collapsed .pane-heading { height: 100%; justify-content: center; padding: 10px 0; }
+.chat-history-pane.collapsed .pane-heading > span,
+.chat-history-pane.collapsed .mini-button { display: none; }
+
 .history-list {
   flex: 1;
   overflow: auto;
@@ -262,6 +274,10 @@ button:disabled {
   background: transparent;
   color: var(--cbi-fg-1);
   transition: background var(--cbi-transition-fast), border-color var(--cbi-transition-fast), box-shadow var(--cbi-transition-fast), transform var(--cbi-transition-fast);
+}
+
+.history-list > .history-item {
+  display: grid;
 }
 
 .history-item:hover,
@@ -290,6 +306,13 @@ button:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat-history-pane .history-meta {
+  overflow: visible;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: clip;
 }
 
 .main-pane {
