@@ -6,6 +6,13 @@ body {
   overflow: hidden;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
 button,
 input,
 select,
@@ -129,8 +136,8 @@ textarea {
 .living-product-editor textarea { min-height:420px; resize:vertical; line-height:1.7; }
 
 /* Agent workspace navigation: history is a destination, not a task-side effect. */
-.agent-app-shell { display: flex; height: 100vh; background: var(--cbi-bg-1); }
-.app-sidebar { width: 224px; flex: 0 0 224px; display: flex; flex-direction: column; padding: 18px 12px; border-right: 1px solid var(--cbi-divider); background: #fffdf9; }
+.agent-app-shell { display: flex; height: 100vh; overflow: hidden; background: var(--cbi-bg-1); }
+.app-sidebar { width: 224px; height: 100vh; overflow: hidden; flex: 0 0 224px; display: flex; flex-direction: column; padding: 18px 12px; border-right: 1px solid var(--cbi-divider); background: #fffdf9; }
 .agent-brand { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border: 0; background: transparent; color: var(--cbi-fg-1); font-weight: 760; letter-spacing: -.03em; font-size: 16px; cursor: pointer; text-align: left; }
 .agent-brand img { width: 32px; height: 32px; object-fit: contain; animation: agent-float 4.8s ease-in-out infinite; }
 .app-sidebar nav { display: grid; gap: 4px; margin-top: 28px; }
@@ -144,6 +151,11 @@ textarea {
 .agent-app-shell .main-pane { min-width: 0; min-height: 0; }
 .agent-app-shell .main-pane:has(.agent-start), .agent-app-shell .main-pane:has(.history-workspace), .agent-app-shell .main-pane:has(.spaces-workspace) { display: block; padding: 0; background: transparent; }
 @media (min-width: 561px) {
+  .agent-app-shell {
+    position: fixed;
+    inset: 0;
+  }
+
   .agent-app-shell .main-pane:has(.chat-pane) {
     overflow: hidden;
     grid-template-rows: minmax(0, 1fr);
