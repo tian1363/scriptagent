@@ -33,6 +33,7 @@ import {
   createCreativeReport,
   createProduct,
   createSpace,
+  createSkill,
 
   updateProduct,
   generateVideoPrompts,
@@ -263,6 +264,12 @@ export function App() {
 
   async function refreshSkills() {
     setSkills(await listSkills());
+  }
+
+  async function handleCreateSkill(input) {
+    const skill = await createSkill(input);
+    await refreshSkills();
+    return skill;
   }
 
   async function refreshModelSettings() {
@@ -743,6 +750,7 @@ export function App() {
               onDraft={setChatDraft}
               onAttachment={setChatAttachment}
               onProduct={setChatProductId}
+              onCreateSkill={handleCreateSkill}
               onSend={handleSendChat}
             />
           ) : null}
@@ -1035,7 +1043,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, attachment, onDraft, onAttachment, onProduct, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, attachment, onDraft, onAttachment, onProduct, onCreateSkill, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const messagesEndRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
@@ -1094,7 +1102,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
-        {showSkillMenu && skills?.length ? <SkillCommandMenu skills={skills} onSelect={handleSkill} onClose={() => setShowSkillMenu(false)} /> : null}
+        {showSkillMenu ? <SkillCommandMenu skills={skills || []} onSelect={handleSkill} onCreate={onCreateSkill} onClose={() => setShowSkillMenu(false)} /> : null}
         {attachment ? <AttachmentPreview attachment={attachment} onRemove={() => onAttachment(null)} /> : null}
         <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="3" placeholder="发消息或创建任务… / 使用技能，添加素材" />
         <div className="chat-composer-toolbar">
@@ -1167,23 +1175,77 @@ function ChatTaskStarter({ onSelect }) {
   );
 }
 
-function SkillCommandMenu({ skills, onSelect, onClose }) {
+function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
+  const [selectedSkill, setSelectedSkill] = useState(skills[0] || null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [draft, setDraft] = useState({ name: "", title: "", description: "", category: "自定义", invocation_prompt: "", content: "" });
+
+  function updateDraft(key, value) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveSkill() {
+    setCreateError("");
+    setIsSaving(true);
+    try {
+      const skill = await onCreate(draft);
+      setSelectedSkill(skill);
+      setIsCreating(false);
+      setDraft({ name: "", title: "", description: "", category: "自定义", invocation_prompt: "", content: "" });
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <section className="skill-command-menu">
       <div className="skill-command-head">
         <span>技能</span>
         <small>{skills.length}</small>
+        <button type="button" onClick={() => setIsCreating(true)}>创建 Skill</button>
         <button type="button" onClick={onClose}>关闭</button>
       </div>
-      <div className="skill-command-list">
-        {skills.map((skill) => (
-          <button key={skill.name} type="button" onClick={() => onSelect(skill)}>
-            <span className="skill-command-icon"><Sparkles size={17} /></span>
-            <strong>{skill.title}</strong>
-            <small>{skill.description}</small>
-            <em>{skill.category}</em>
-          </button>
-        ))}
+      <div className="skill-command-body">
+        <div className="skill-command-list">
+          {skills.map((skill) => (
+            <button className={selectedSkill?.name === skill.name && !isCreating ? "active" : ""} key={skill.name} type="button" onClick={() => { setSelectedSkill(skill); setIsCreating(false); }}>
+              <span className="skill-command-icon"><Sparkles size={17} /></span>
+              <strong>{skill.title}</strong>
+              <small>{skill.description}</small>
+              <em>{skill.category}</em>
+            </button>
+          ))}
+        </div>
+        {isCreating ? (
+          <div className="skill-create-panel">
+            <div className="skill-preview-heading"><div><span>Skill Creator</span><strong>创建自定义 Skill</strong></div></div>
+            <label><span>名称</span><input value={draft.title} onChange={(event) => updateDraft("title", event.target.value)} placeholder="例如：小红书标题优化" /></label>
+            <label><span>标识</span><input value={draft.name} onChange={(event) => updateDraft("name", event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="xiaohongshu-title-review" /><small>小写字母、数字和连字符</small></label>
+            <label><span>描述</span><textarea value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="说明它做什么，以及什么情况下应该使用。" /></label>
+            <label><span>分类</span><input value={draft.category} onChange={(event) => updateDraft("category", event.target.value)} /></label>
+            <label><span>调用提示</span><input value={draft.invocation_prompt} onChange={(event) => updateDraft("invocation_prompt", event.target.value)} placeholder="可留空，由 Skill Creator 自动生成" /></label>
+            <label><span>正文</span><textarea className="skill-content-editor" value={draft.content} onChange={(event) => updateDraft("content", event.target.value)} placeholder={"# 工作流程\n\n1. 读取输入...\n2. 按规则处理...\n\n## 输出格式\n..."} /></label>
+            {createError ? <div className="error-banner">{createError}</div> : null}
+            <button className="primary-button" type="button" disabled={isSaving || !draft.name || !draft.title || !draft.description || !draft.content} onClick={saveSkill}>{isSaving ? "创建中" : "创建并启用"}</button>
+          </div>
+        ) : selectedSkill ? (
+          <div className="skill-preview-panel">
+            <div className="skill-preview-heading">
+              <div><span>{selectedSkill.source === "custom" ? "自定义 Skill" : "内置 Skill"}</span><strong>{selectedSkill.title}</strong></div>
+              <em>{selectedSkill.category}</em>
+            </div>
+            <dl className="skill-metadata">
+              <div><dt>名称</dt><dd>{selectedSkill.name}</dd></div>
+              <div><dt>描述</dt><dd>{selectedSkill.description}</dd></div>
+            </dl>
+            <div className="skill-preview-content"><MarkdownContent content={selectedSkill.content || "暂无正文"} /></div>
+            <button className="primary-button" type="button" onClick={() => onSelect(selectedSkill)}>使用这个 Skill</button>
+          </div>
+        ) : <div className="skill-preview-empty">还没有 Skill，可以创建一个。</div>}
       </div>
     </section>
   );

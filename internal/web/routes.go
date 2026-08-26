@@ -26,6 +26,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", h.health)
 		api.Get("/skills", h.listSkills)
+		api.Post("/skills", h.createSkill)
 		api.Get("/products", h.listProducts)
 		api.Post("/products", h.createProduct)
 		api.Put("/products/{id}", h.updateProduct)

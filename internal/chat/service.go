@@ -42,7 +42,8 @@ type BuiltInSkillInfo struct {
 	Description      string `json:"description"`
 	Category         string `json:"category"`
 	InvocationPrompt string `json:"invocation_prompt"`
-	Content          string `json:"-"`
+	Content          string `json:"content"`
+	Source           string `json:"source"`
 }
 
 type AttachmentInput struct {
@@ -304,6 +305,16 @@ func (s *Service) productContext(ctx context.Context, conversationID, runID, pro
 }
 
 func (s *Service) reactTools(conversationID, runID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
+	skillNames := []string{}
+	for _, skill := range BuiltInSkills() {
+		skillNames = append(skillNames, skill.Name)
+	}
+	if custom, err := s.store.ListCustomSkills(); err == nil {
+		for _, skill := range custom {
+			skillNames = append(skillNames, skill.Name)
+		}
+	}
+	sort.Strings(skillNames)
 	return []reactagent.Tool{
 		{
 			Name:        "list_products",
@@ -395,14 +406,14 @@ func (s *Service) reactTools(conversationID, runID, selectedProductID, userQuery
 		},
 		{
 			Name:        "call_skill",
-			Description: "调用 ScriptAgent 内置 skill 模板，获得某类任务的工作流、提示词约束或输出结构。",
-			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | material_replication_analysis | seedance_video_prompt_writer"}`,
+			Description: "调用 ScriptAgent skill，获得某类任务的工作流、提示词约束或输出结构。可用 skill：" + strings.Join(skillNames, ", "),
+			InputSchema: `{"skill":"skill name"}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var input struct {
 					Skill string `json:"skill"`
 				}
 				_ = json.Unmarshal(raw, &input)
-				return builtInSkill(input.Skill)
+				return s.skillContent(input.Skill)
 			},
 		},
 	}
@@ -588,10 +599,34 @@ func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProduc
 
 func BuiltInSkills() []BuiltInSkillInfo {
 	items := append([]BuiltInSkillInfo(nil), builtInSkillCatalog...)
+	for index := range items {
+		items[index].Source = "built-in"
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].Name < items[j].Name
 	})
 	return items
+}
+
+func (s *Service) skillContent(name string) (string, error) {
+	if content, err := builtInSkill(name); err == nil {
+		return content, nil
+	}
+	skill, err := s.store.GetCustomSkillByName(strings.ToLower(strings.TrimSpace(name)))
+	if err == nil {
+		return skill.Content, nil
+	}
+	available := []string{}
+	for _, item := range BuiltInSkills() {
+		available = append(available, item.Name)
+	}
+	if custom, listErr := s.store.ListCustomSkills(); listErr == nil {
+		for _, item := range custom {
+			available = append(available, item.Name)
+		}
+	}
+	sort.Strings(available)
+	return "", fmt.Errorf("unknown skill %q, available: %s", name, strings.Join(available, ", "))
 }
 
 func builtInSkill(name string) (string, error) {

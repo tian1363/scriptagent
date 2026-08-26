@@ -2,11 +2,32 @@ package chat
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
 )
+
+func TestCustomSkillCanBeResolvedByAgentTool(t *testing.T) {
+	store, err := jobs.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	_, err = store.CreateCustomSkill(jobs.CreateCustomSkillInput{Name: "review-hooks", Title: "钩子检查", Description: "检查钩子", Category: "自定义", InvocationPrompt: "调用 review-hooks", Content: "# 钩子检查\n\n检查前三秒。"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, nil)
+	content, err := service.skillContent("review-hooks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "检查前三秒") {
+		t.Fatalf("unexpected content: %s", content)
+	}
+}
 
 func TestChatPromptIncludesProductContext(t *testing.T) {
 	prompt := chatPrompt([]jobs.ChatMessage{

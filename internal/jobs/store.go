@@ -183,6 +183,11 @@ CREATE TABLE IF NOT EXISTS model_settings (
   model TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS custom_skills (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT NOT NULL,
+  category TEXT NOT NULL, invocation_prompt TEXT NOT NULL, content TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS spaces (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT,
   agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -222,6 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_
 CREATE INDEX IF NOT EXISTS idx_agent_runs_space ON agent_runs(space_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_memory_events_space_run ON memory_events(space_id, run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at DESC);
 `)
 	if err != nil {
 		return err
@@ -1322,6 +1328,56 @@ func scanModelCall(row scanner) (*ModelCall, error) {
 	call.ErrorMessage = errorMessage.String
 	call.CreatedAt = parseTime(createdAt)
 	return &call, nil
+}
+
+func (s *Store) CreateCustomSkill(input CreateCustomSkillInput) (*CustomSkill, error) {
+	now := time.Now().UTC()
+	skill := &CustomSkill{
+		ID: newID(), Name: strings.TrimSpace(input.Name), Title: strings.TrimSpace(input.Title),
+		Description: strings.TrimSpace(input.Description), Category: strings.TrimSpace(input.Category),
+		InvocationPrompt: strings.TrimSpace(input.InvocationPrompt), Content: strings.TrimSpace(input.Content),
+		Source: "custom", CreatedAt: now, UpdatedAt: now,
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO custom_skills (id,name,title,description,category,invocation_prompt,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		skill.ID, skill.Name, skill.Title, skill.Description, skill.Category, skill.InvocationPrompt, skill.Content,
+		now.Format(time.RFC3339), now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return skill, nil
+}
+
+func (s *Store) ListCustomSkills() ([]CustomSkill, error) {
+	rows, err := s.db.Query(`SELECT id,name,title,description,category,invocation_prompt,content,created_at,updated_at FROM custom_skills ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CustomSkill{}
+	for rows.Next() {
+		var item CustomSkill
+		var createdAt, updatedAt string
+		if err := rows.Scan(&item.ID, &item.Name, &item.Title, &item.Description, &item.Category, &item.InvocationPrompt, &item.Content, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		item.Source, item.CreatedAt, item.UpdatedAt = "custom", parseTime(createdAt), parseTime(updatedAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetCustomSkillByName(name string) (*CustomSkill, error) {
+	var item CustomSkill
+	var createdAt, updatedAt string
+	err := s.db.QueryRow(`SELECT id,name,title,description,category,invocation_prompt,content,created_at,updated_at FROM custom_skills WHERE name=?`, strings.TrimSpace(name)).Scan(
+		&item.ID, &item.Name, &item.Title, &item.Description, &item.Category, &item.InvocationPrompt, &item.Content, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	item.Source, item.CreatedAt, item.UpdatedAt = "custom", parseTime(createdAt), parseTime(updatedAt)
+	return &item, nil
 }
 
 func (s *Store) ensureColumn(table, column, columnType string) error {

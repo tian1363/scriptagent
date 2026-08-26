@@ -25,6 +25,10 @@ export async function listSkills() {
   return request("/api/skills");
 }
 
+export async function createSkill(input) {
+  return request("/api/skills", { method: "POST", headers: jsonHeaders, body: JSON.stringify(input) });
+}
+
 export async function createProduct(formData) {
   return request("/api/products", {
     method: "POST",

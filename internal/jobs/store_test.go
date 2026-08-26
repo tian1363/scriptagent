@@ -237,3 +237,37 @@ func TestStoreModelRuntimeConfig(t *testing.T) {
 		t.Fatalf("unexpected runtime config: %+v", runtime)
 	}
 }
+
+func TestStoreCustomSkills(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	created, err := store.CreateCustomSkill(CreateCustomSkillInput{
+		Name: "review-hooks", Title: "钩子检查", Description: "检查短视频开头钩子。",
+		Category: "脚本策略", InvocationPrompt: "调用 review-hooks skill。", Content: "# 钩子检查\n\n检查前三秒。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Source != "custom" {
+		t.Fatalf("unexpected source: %s", created.Source)
+	}
+
+	got, err := store.GetCustomSkillByName("review-hooks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != created.Content || got.Title != "钩子检查" {
+		t.Fatalf("unexpected skill: %+v", got)
+	}
+	items, err := store.ListCustomSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Name != "review-hooks" {
+		t.Fatalf("unexpected skills: %+v", items)
+	}
+}
