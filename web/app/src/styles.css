@@ -1317,7 +1317,23 @@ textarea:focus {
 }
 
 .result-output.json {
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.debug-call-detail,
+.debug-call-detail section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.debug-call-detail .result-output {
+  max-width: 100%;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .timeline-output,
