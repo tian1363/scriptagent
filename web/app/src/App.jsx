@@ -33,6 +33,7 @@ import {
   createCreativeReport,
   createProduct,
   createSpace,
+  updateSpace,
   createSkill,
 
   updateProduct,
@@ -470,7 +471,10 @@ export function App() {
     setChatAgentSteps([]);
     setIsChatThinking(false);
     setChatAttachment(null);
-    setSelectedChat(await getChat(id));
+    const thread = await getChat(id);
+    setSelectedChat(thread);
+    const sourceSpace = spaces.find((space) => space.id === thread.conversation?.space_id);
+    setChatProductId(sourceSpace?.product_id || thread.conversation?.product_id || "");
   }
 
   function handleNewChat() {
@@ -482,9 +486,10 @@ export function App() {
     setChatAgentSteps([]);
     setIsChatThinking(false);
     setChatAttachment(null);
+    setChatProductId("");
   }
 
-  async function sendChatToAgent(content, productID, conversationID = "", attachment = null) {
+  async function sendChatToAgent(content, productID, conversationID = "", attachment = null, spaceID = "") {
     content = content.trim();
     if (!content && !attachment) return;
     setError("");
@@ -508,7 +513,7 @@ export function App() {
     try {
       const thread = conversationID
         ? await sendChatMessage(conversationID, content, productID, attachment)
-        : await sendNewChatMessage(content, productID, attachment);
+        : await sendNewChatMessage(content, productID, attachment, spaceID);
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
       setChatCitations(thread.citations || []);
@@ -562,7 +567,10 @@ export function App() {
       space.agent_brief ? `长期要求：${space.agent_brief}` : "",
       "请结合这些长期上下文判断当前最合适的下一步；需要资料时主动读取，需要补充信息时直接提问。不要自动启动固定工作流。",
     ].filter(Boolean).join("\n");
-    await handleStartAgentChat(space.product_id || "", spaceContext);
+    setView("chat");
+    setSelectedChat({ conversation: { space_id: space.id, product_id: space.product_id || "", title: space.title }, messages: [] });
+    setChatProductId(space.product_id || "");
+    await sendChatToAgent(spaceContext, space.product_id || "", "", null, space.id);
   }
 
   async function handleCreateProduct(eventOrForm) {
@@ -658,6 +666,14 @@ export function App() {
     catch (err) { setError(err.message); } finally { setIsCreatingSpace(false); }
   }
 
+  async function handleUpdateSpace(id, input) {
+    setError("");
+    const updated = await updateSpace(id, input);
+    await refreshSpaces();
+    if (selectedChat?.conversation?.space_id === id) setChatProductId(updated.product_id || "");
+    return updated;
+  }
+
   function handleReportToJob(report) {
     if (!report) return;
     const requirement = [
@@ -690,7 +706,7 @@ export function App() {
         <section className={`main-pane ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}>
           {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} isSending={isSending} onSend={handleStartAgentChat} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
           {view === "history" ? <HistoryWorkspace jobs={jobs} chats={chats} products={products} onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))} onChat={(id) => handleSelectChat(id).then(() => setView("chat"))} /> : null}
-          {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} isSending={isSending} error={error} onCreate={handleCreateSpace} onStart={handleStartSpaceAgent} /> : null}
+          {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} isSending={isSending} error={error} onCreate={handleCreateSpace} onUpdate={handleUpdateSpace} onStart={handleStartSpaceAgent} /> : null}
           {view === "jobs" ? (
             <JobsWorkspace
               selectedJob={selectedJob}
@@ -750,6 +766,8 @@ export function App() {
               onDraft={setChatDraft}
               onAttachment={setChatAttachment}
               onProduct={setChatProductId}
+              sourceSpace={spaces.find((space) => space.id === selectedChat?.conversation?.space_id)}
+              onEditSpace={() => setView("spaces")}
               onCreateSkill={handleCreateSkill}
               onSend={handleSendChat}
             />
@@ -1043,7 +1061,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, attachment, onDraft, onAttachment, onProduct, onCreateSkill, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, sourceSpace, isSending, error, attachment, onDraft, onAttachment, onProduct, onCreateSkill, onEditSpace, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const messagesEndRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
@@ -1063,7 +1081,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
         <label className="chat-product-select">
           <Package size={15} />
           <span>产品资料</span>
-          <select value={selectedProductId} onChange={(event) => onProduct(event.target.value)}>
+          <select value={selectedProductId} disabled={Boolean(sourceSpace)} onChange={(event) => onProduct(event.target.value)}>
             <option value="">未选择</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
@@ -1071,6 +1089,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
               </option>
             ))}
           </select>
+          {sourceSpace ? <><span className="space-context-lock">由「{sourceSpace.title}」管理</span><button className="space-context-edit" type="button" onClick={onEditSpace}>回空间修改</button></> : null}
         </label>
       </div>
       <div className="chat-messages">
@@ -1419,8 +1438,25 @@ function HistoryWorkspace({ jobs, chats, products, onJob, onChat }) {
   return <section className="history-workspace"><span className="eyebrow">过去的工作都在这里</span><h1>继续，不必重新开始</h1><p>对话和执行任务放在一起；创作空间中的版本仍会保留在项目里。</p><div className="history-tools"><label><Search size={15}/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索标题或产品"/></label><div>{[["all","全部"],["job","执行任务"],["chat","对话"]].map(([key,label])=><button key={key} className={kind===key?"active":""} onClick={()=>setKind(key)}>{label}</button>)}</div></div>{items.length?<div className="history-list">{items.map((item)=><button key={`${item.kind}-${item.id}`} onClick={()=>item.kind==="job"?onJob(item.id):onChat(item.id)}><span>{item.kind==="job"?<Bot size={16}/>:<MessageSquare size={16}/>}</span><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{formatTime(item.at)}</time><ChevronRight size={16}/></button>)}</div>:<EmptyState text="还没有历史记录"/>}</section>;
 }
 
-function SpacesWorkspace({ spaces, products, jobs, isCreating, isSending, error, onCreate, onStart }) {
-  return <section className="spaces-workspace"><div className="spaces-head"><div><span className="eyebrow">长期创作</span><h1>创作空间</h1><p>空间保存目标、长期要求和产品上下文；Agent 会先理解任务，再决定下一步。</p></div></div><div className="spaces-grid"><section className="spaces-list">{spaces.length?spaces.map((space)=>{const count=jobs.filter((job)=>job.space_id===space.id).length;const product=products.find((item)=>item.id===space.product_id);return <article key={space.id}><FolderKanban size={18}/><div><strong>{space.title}</strong><p>{space.summary||"继续上次的创作"}</p><small>{product?.title||"暂未关联资料"} · {count} 次执行</small></div><button className="secondary-button" type="button" disabled={isSending} onClick={()=>onStart(space)}>{isSending?"Agent 思考中":"和 Agent 继续"}</button></article>}):<EmptyState text="还没有空间，创建一个长期创作项目。"/>}</section><aside className="space-create"><span className="eyebrow">新空间</span><h2>开始一个长期创作</h2><p>先保存稳定目标，之后通过 Agent 对话逐步推进，不会自动套用固定工作流。</p><form onSubmit={onCreate}><input name="title" placeholder="例如：夏季活动脚本" required/><select name="product_id" defaultValue=""><option value="">暂不选择产品资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><textarea name="summary" placeholder="长期目标：最终希望达成什么？" required/><textarea name="agent_brief" placeholder="长期要求：风格、受众、边界和偏好（可选）"/><button className="primary-button" disabled={isCreating}>{isCreating?"创建中":"创建空间"}</button></form>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
+function SpacesWorkspace({ spaces, products, jobs, isCreating, isSending, error, onCreate, onUpdate, onStart }) {
+  return <section className="spaces-workspace"><div className="spaces-head"><div><span className="eyebrow">长期创作</span><h1>创作空间</h1><p>空间保存目标、长期要求和产品上下文；修改只影响之后的新对话内容。</p></div></div><div className="spaces-grid"><section className="spaces-list">{spaces.length ? spaces.map((space) => <SpaceCard key={space.id} space={space} products={products} jobCount={jobs.filter((job) => job.space_id === space.id).length} isSending={isSending} onUpdate={onUpdate} onStart={onStart} />) : <EmptyState text="还没有空间，创建一个长期创作项目。"/>}</section><aside className="space-create"><span className="eyebrow">新空间</span><h2>开始一个长期创作</h2><p>先保存稳定目标，之后通过 Agent 对话逐步推进。</p><form onSubmit={onCreate}><input name="title" placeholder="例如：夏季活动脚本" required/><select name="product_id" defaultValue=""><option value="">暂不选择产品资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><textarea name="summary" placeholder="长期目标：最终希望达成什么？" required/><textarea name="agent_brief" placeholder="长期要求：风格、受众、边界和偏好（可选）"/><button className="primary-button" disabled={isCreating}>{isCreating?"创建中":"创建空间"}</button></form>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
+}
+
+function SpaceCard({ space, products, jobCount, isSending, onUpdate, onStart }) {
+  const [editing, setEditing] = useState(false);
+  const [productID, setProductID] = useState(space.product_id || "");
+  const [saving, setSaving] = useState(false);
+  const product = products.find((item) => item.id === space.product_id);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onUpdate(space.id, { title: space.title, summary: space.summary || "", agent_brief: space.agent_brief || "", product_id: productID });
+      setEditing(false);
+    } finally { setSaving(false); }
+  }
+
+  return <article className={editing ? "editing" : ""}><FolderKanban size={18}/><div><strong>{space.title}</strong><p>{space.summary||"继续上次的创作"}</p>{editing ? <div className="space-product-editor"><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择产品资料</option>{products.map((item)=><option key={item.id} value={item.id}>{item.title}</option>)}</select><small>保存后只影响之后发送的新消息。</small></div> : <small>{product?.title||"暂未关联资料"} · {jobCount} 次执行</small>}</div><div className="space-card-actions">{editing ? <><button className="mini-button" type="button" onClick={() => { setProductID(space.product_id || ""); setEditing(false); }}>取消</button><button className="primary-button" type="button" disabled={saving} onClick={save}>{saving?"保存中":"保存"}</button></> : <><button className="mini-button" type="button" onClick={() => setEditing(true)}>修改资料</button><button className="secondary-button" type="button" disabled={isSending} onClick={()=>onStart(space)}>{isSending?"Agent 思考中":"和 Agent 继续"}</button></>}</div></article>;
 }
 
 function ProductKnowledgeWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, isSavingProduct, error, onSelect, onStartJob, onCreate, onUpdate }) {

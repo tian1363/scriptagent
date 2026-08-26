@@ -271,3 +271,47 @@ func TestStoreCustomSkills(t *testing.T) {
 		t.Fatalf("unexpected skills: %+v", items)
 	}
 }
+
+func TestSpaceChatContextAndProductUpdate(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.CreateProduct(CreateProductInput{Title: "产品一", MDPath: "/tmp/one.md", MDName: "one.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateProduct(CreateProductInput{Title: "产品二", MDPath: "/tmp/two.md", MDName: "two.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, err := store.CreateSpace(CreateSpaceInput{Title: "内容空间", Summary: "长期目标", ProductID: first.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := store.CreateChatConversationWithContext("继续空间", space.ID, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddChatMessage(conversation.ID, "user", "历史消息"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.UpdateSpace(space.ID, UpdateSpaceInput{Title: space.Title, Summary: space.Summary, ProductID: second.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ProductID != second.ID {
+		t.Fatalf("expected updated product, got %s", updated.ProductID)
+	}
+	thread, err := store.GetChatThread(conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.Conversation.SpaceID != space.ID || thread.Conversation.ProductID != first.ID {
+		t.Fatalf("historical snapshot changed: %+v", thread.Conversation)
+	}
+	if len(thread.Messages) != 1 || thread.Messages[0].Content != "历史消息" {
+		t.Fatalf("historical messages changed: %+v", thread.Messages)
+	}
+}

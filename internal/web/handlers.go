@@ -339,6 +339,20 @@ func (h *Handler) createSpace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, space)
 }
 
+func (h *Handler) updateSpace(w http.ResponseWriter, r *http.Request) {
+	var input jobs.UpdateSpaceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	space, err := h.store.UpdateSpace(chi.URLParam(r, "id"), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, space)
+}
+
 func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
 	productID := chi.URLParam(r, "id")
 	if _, err := h.store.GetProduct(productID); err != nil {
@@ -608,7 +622,21 @@ func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.SendWithAttachments(r.Context(), chi.URLParam(r, "id"), input.Content, input.ProductID, attachments)
+	conversationID := chi.URLParam(r, "id")
+	threadBefore, err := h.store.GetChatThread(conversationID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if threadBefore.Conversation.SpaceID != "" {
+		space, spaceErr := h.store.GetSpace(threadBefore.Conversation.SpaceID)
+		if spaceErr != nil {
+			writeError(w, http.StatusBadRequest, spaceErr)
+			return
+		}
+		input.ProductID = space.ProductID
+	}
+	thread, err := h.chat.SendWithAttachments(r.Context(), conversationID, input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -626,7 +654,26 @@ func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.SendWithAttachments(r.Context(), "", input.Content, input.ProductID, attachments)
+	conversationID := ""
+	if input.SpaceID != "" {
+		space, spaceErr := h.store.GetSpace(input.SpaceID)
+		if spaceErr != nil {
+			writeError(w, http.StatusBadRequest, spaceErr)
+			return
+		}
+		input.ProductID = space.ProductID
+		title := input.Content
+		if strings.TrimSpace(title) == "" {
+			title = "素材分析"
+		}
+		conversation, createErr := h.store.CreateChatConversationWithContext(title, space.ID, space.ProductID)
+		if createErr != nil {
+			writeError(w, http.StatusInternalServerError, createErr)
+			return
+		}
+		conversationID = conversation.ID
+	}
+	thread, err := h.chat.SendWithAttachments(r.Context(), conversationID, input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -637,6 +684,7 @@ func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
 type chatMessageInput struct {
 	Content   string
 	ProductID string
+	SpaceID   string
 }
 
 func (h *Handler) parseChatMessageInput(r *http.Request) (chatMessageInput, []chatpkg.AttachmentInput, error) {
@@ -644,7 +692,7 @@ func (h *Handler) parseChatMessageInput(r *http.Request) (chatMessageInput, []ch
 		if err := r.ParseMultipartForm(storage.MaxChatAttachmentBytes + 1024*1024); err != nil {
 			return chatMessageInput{}, nil, err
 		}
-		input := chatMessageInput{Content: r.FormValue("content"), ProductID: r.FormValue("product_id")}
+		input := chatMessageInput{Content: r.FormValue("content"), ProductID: r.FormValue("product_id"), SpaceID: r.FormValue("space_id")}
 		file, header, err := r.FormFile("attachment")
 		if errors.Is(err, http.ErrMissingFile) {
 			return input, nil, nil
@@ -662,11 +710,12 @@ func (h *Handler) parseChatMessageInput(r *http.Request) (chatMessageInput, []ch
 	var input struct {
 		Content   string `json:"content"`
 		ProductID string `json:"product_id"`
+		SpaceID   string `json:"space_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		return chatMessageInput{}, nil, err
 	}
-	return chatMessageInput{Content: input.Content, ProductID: input.ProductID}, nil, nil
+	return chatMessageInput{Content: input.Content, ProductID: input.ProductID, SpaceID: input.SpaceID}, nil, nil
 }
 
 func chatAttachmentKind(name string) string {

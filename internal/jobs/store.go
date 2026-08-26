@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
+  space_id TEXT,
+  product_id TEXT,
   summary TEXT,
   summary_message_id TEXT,
   created_at TEXT NOT NULL,
@@ -233,6 +235,12 @@ CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at
 		return err
 	}
 	if err := s.ensureColumn("chat_conversations", "summary", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "space_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_conversations", "product_id", "TEXT"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("chat_conversations", "summary_message_id", "TEXT"); err != nil {
@@ -472,6 +480,35 @@ func (s *Store) GetSpace(id string) (*Space, error) {
 	space.CreatedAt = parseTime(createdAt)
 	space.UpdatedAt = parseTime(updatedAt)
 	return &space, nil
+}
+
+func (s *Store) UpdateSpace(id string, input UpdateSpaceInput) (*Space, error) {
+	productID := strings.TrimSpace(input.ProductID)
+	if productID != "" {
+		if _, err := s.GetProduct(productID); err != nil {
+			return nil, fmt.Errorf("product not found: %w", err)
+		}
+	}
+	current, err := s.GetSpace(id)
+	if err != nil {
+		return nil, err
+	}
+	title := normalizeTitle(input.Title)
+	if strings.TrimSpace(input.Title) == "" {
+		title = current.Title
+	}
+	now := time.Now().UTC()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	res, err := s.db.Exec(`UPDATE spaces SET title=?,summary=?,product_id=NULLIF(?,''),agent_brief=?,updated_at=? WHERE id=?`, title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), now.Format(time.RFC3339), id)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireOne(res); err != nil {
+		return nil, err
+	}
+	current.Title, current.Summary, current.ProductID, current.AgentBrief, current.UpdatedAt = title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), now
+	return current, nil
 }
 
 func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
@@ -820,20 +857,21 @@ WHERE id = ?`,
 }
 
 func (s *Store) CreateChatConversation(title string) (*ChatConversation, error) {
+	return s.CreateChatConversationWithContext(title, "", "")
+}
+
+func (s *Store) CreateChatConversationWithContext(title, spaceID, productID string) (*ChatConversation, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
 	now := time.Now().UTC()
 	conversation := &ChatConversation{
-		ID:        newID(),
-		Title:     normalizeTitle(title),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID: newID(), Title: normalizeTitle(title), SpaceID: strings.TrimSpace(spaceID), ProductID: strings.TrimSpace(productID), CreatedAt: now, UpdatedAt: now,
 	}
 	_, err := s.db.Exec(`
-INSERT INTO chat_conversations (id, title, created_at, updated_at)
-VALUES (?, ?, ?, ?)`,
-		conversation.ID, conversation.Title, now.Format(time.RFC3339), now.Format(time.RFC3339),
+INSERT INTO chat_conversations (id, title, space_id, product_id, created_at, updated_at)
+VALUES (?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?)`,
+		conversation.ID, conversation.Title, conversation.SpaceID, conversation.ProductID, now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -843,7 +881,7 @@ VALUES (?, ?, ?, ?)`,
 
 func (s *Store) ListChatConversations() ([]ChatConversation, error) {
 	rows, err := s.db.Query(`
-SELECT id, title, summary, summary_message_id, created_at, updated_at
+SELECT id, title, COALESCE(space_id,''), COALESCE(product_id,''), summary, summary_message_id, created_at, updated_at
 FROM chat_conversations
 ORDER BY updated_at DESC`)
 	if err != nil {
@@ -864,7 +902,7 @@ ORDER BY updated_at DESC`)
 
 func (s *Store) GetChatThread(id string) (*ChatThread, error) {
 	conversation, err := scanChatConversation(s.db.QueryRow(`
-SELECT id, title, summary, summary_message_id, created_at, updated_at
+SELECT id, title, COALESCE(space_id,''), COALESCE(product_id,''), summary, summary_message_id, created_at, updated_at
 FROM chat_conversations WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
@@ -1243,7 +1281,7 @@ func scanChatConversation(row scanner) (*ChatConversation, error) {
 	var conversation ChatConversation
 	var createdAt, updatedAt string
 	var summary, summaryMessageID sql.NullString
-	if err := row.Scan(&conversation.ID, &conversation.Title, &summary, &summaryMessageID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&conversation.ID, &conversation.Title, &conversation.SpaceID, &conversation.ProductID, &summary, &summaryMessageID, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	conversation.Summary = summary.String

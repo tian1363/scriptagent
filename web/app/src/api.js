@@ -44,6 +44,7 @@ export async function uploadProductAsset(id, file) { const form = new FormData()
 export async function updateProduct(id, input) { return request(`/api/products/${id}`, { method:"PUT", headers:jsonHeaders, body:JSON.stringify(input) }); }
 export async function listSpaces() { return request("/api/spaces"); }
 export async function createSpace(input) { return request("/api/spaces", { method:"POST", headers:jsonHeaders, body:JSON.stringify(input) }); }
+export async function updateSpace(id, input) { return request(`/api/spaces/${id}`, { method:"PUT", headers:jsonHeaders, body:JSON.stringify(input) }); }
 export async function getSpaceObservability(id, limit = 100) { return request(`/api/spaces/${id}/observability?limit=${limit}`); }
 export async function getOwnerSession() { return request("/api/owner/session"); }
 export async function getOwnerOverview() { return request("/api/owner/overview"); }
@@ -104,18 +105,19 @@ export async function getChat(id) {
   return request(`/api/chats/${id}`);
 }
 
-export async function sendNewChatMessage(content, productId = "", attachment = null) {
+export async function sendNewChatMessage(content, productId = "", attachment = null, spaceId = "") {
   if (attachment) {
     const form = new FormData();
     form.append("content", content);
     form.append("product_id", productId);
+    form.append("space_id", spaceId);
     form.append("attachment", attachment);
     return request("/api/chats/messages", { method: "POST", body: form });
   }
   return request("/api/chats/messages", {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ content, product_id: productId }),
+    body: JSON.stringify({ content, product_id: productId, space_id: spaceId }),
   });
 }
 

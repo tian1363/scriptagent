@@ -1546,6 +1546,10 @@ textarea:focus {
   font: inherit;
 }
 
+.chat-product-select select:disabled { opacity: 1; color: var(--cbi-fg-1); cursor: default; }
+.space-context-lock { color: var(--cbi-fg-3); font-size: 11px; }
+.space-context-edit { padding: 5px 8px; border: 0; border-radius: 8px; color: #477dff; background: rgba(71, 125, 255, .08); cursor: pointer; font-size: 11px; }
+
 .chat-messages {
   min-height: 0;
   overflow: auto;
@@ -2074,6 +2078,10 @@ textarea:focus {
 .spaces-list article,
 .knowledge-list button,
 .product-assets { border-color: rgba(74, 65, 59, .07); }
+.space-card-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.space-product-editor { display: grid; gap: 5px; margin-top: 8px; }
+.space-product-editor select { min-width: 220px; height: 36px; padding: 0 10px; border: 0; border-radius: 9px; color: var(--cbi-fg-1); background: var(--cbi-bg-3); }
+.space-product-editor small { color: var(--cbi-fg-3); }
 
 .token-strip {
   display: flex;

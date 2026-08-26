@@ -65,6 +65,12 @@ type CreateSpaceInput struct {
 	AgentBrief    string `json:"agent_brief"`
 	OriginSpaceID string `json:"origin_space_id"`
 }
+type UpdateSpaceInput struct {
+	Title      string `json:"title"`
+	Summary    string `json:"summary"`
+	ProductID  string `json:"product_id"`
+	AgentBrief string `json:"agent_brief"`
+}
 type ForkSpaceInput struct{ Title, Summary, AgentBrief string }
 
 type Product struct {
@@ -197,6 +203,8 @@ type RunContext struct {
 type ChatConversation struct {
 	ID               string    `json:"id"`
 	Title            string    `json:"title"`
+	SpaceID          string    `json:"space_id,omitempty"`
+	ProductID        string    `json:"product_id,omitempty"`
 	Summary          string    `json:"summary,omitempty"`
 	SummaryMessageID string    `json:"summary_message_id,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
