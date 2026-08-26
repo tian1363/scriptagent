@@ -691,10 +691,6 @@ export function App() {
     <div className="app-shell agent-app-shell">
       <AppSidebar view={view} onChange={setView} icon={agentIcon} showDebugPanel={showDebugPanel} ownerAuthenticated={ownerSession.authenticated} />
       <div className="agent-frame">
-        <header className="workspace-topbar">
-          <div><span className="workspace-kicker">ScriptAgent</span><strong>{pageTitle(view)}</strong></div>
-          <button className="icon-button" type="button" onClick={() => refreshCurrent().catch((err) => setError(err.message))} title="刷新"><RefreshCw size={16} /></button>
-        </header>
       <main className={`workspace ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""} ${view === "chat" && isChatHistoryCollapsed ? "chat-history-collapsed" : ""}`}>
         {view === "jobs" ? (
           <JobsSidebar jobs={jobs} selectedJob={selectedJob} onSelect={handleSelectJob} />
@@ -792,10 +788,6 @@ export function App() {
       </main></div>
     </div>
   );
-}
-
-function pageTitle(view) {
-  return ({ home: "开始创作", history: "历史记录", spaces: "创作空间", products: "产品资料", jobs: "执行任务", chat: "对话", settings: "设置", calls: "调试台", admin: "运营后台" })[view] || "ScriptAgent";
 }
 
 function AppSidebar({ view, onChange, icon, showDebugPanel, ownerAuthenticated }) {
