@@ -1064,11 +1064,12 @@ function JobsWorkspace(props) {
 
 function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, sourceSpace, isSending, error, attachment, onDraft, onAttachment, onProduct, onCreateSkill, onEditSpace, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
-  const messagesEndRef = useRef(null);
+  const messagesRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
+    const messageList = messagesRef.current;
+    if (messageList) messageList.scrollTop = messageList.scrollHeight;
   }, [messages.length, isThinking, typingMessage?.visible]);
 
   function handleSkill(skill) {
@@ -1093,7 +1094,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
           {sourceSpace ? <><span className="space-context-lock">由「{sourceSpace.title}」管理</span><button className="space-context-edit" type="button" onClick={onEditSpace}>回空间修改</button></> : null}
         </label>
       </div>
-      <div className="chat-messages">
+      <div className="chat-messages" ref={messagesRef}>
         {messages.length || isThinking || typingMessage ? (
           <>
             {citations?.length ? <CitationPanel citations={citations} /> : null}
@@ -1104,7 +1105,6 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
               <AgentResponseProgress hasProduct={Boolean(selectedProductId)} hasAttachment={Boolean(attachment)} />
             ) : null}
             {typingMessage ? <ChatMessageBubble message={{ ...typingMessage, content: typingMessage.visible }} isTyping /> : null}
-            <div ref={messagesEndRef} />
           </>
         ) : (
           <ChatTaskStarter onSelect={onDraft} />

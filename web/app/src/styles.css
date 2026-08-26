@@ -138,12 +138,12 @@ textarea {
 .app-sidebar nav button:hover, .sidebar-bottom button:hover { background: #f6eee7; color: var(--cbi-fg-1); }
 .app-sidebar nav button.active, .sidebar-bottom button.active { background: #f8dfd8; color: #a33425; font-weight: 680; }
 .sidebar-bottom { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--cbi-divider); }
-.agent-frame { min-width: 0; flex: 1; display: flex; flex-direction: column; }
-.workspace-topbar { height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; border-bottom: 1px solid var(--cbi-divider); background: rgba(255,253,249,.88); }
+.agent-frame { min-width: 0; min-height: 0; height: 100vh; overflow: hidden; flex: 1; display: flex; flex-direction: column; }
+.workspace-topbar { height: 68px; flex: 0 0 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; border-bottom: 1px solid var(--cbi-divider); background: rgba(255,253,249,.88); }
 .workspace-topbar div { display: grid; gap: 1px; }
 .workspace-topbar strong { font-size: 15px; letter-spacing: -.02em; }
 .workspace-kicker { color: var(--cbi-fg-3); font-size: 11px; }
-.agent-app-shell .workspace { height: calc(100vh - 68px); }
+.agent-app-shell .workspace { min-height: 0; height: calc(100vh - 68px); overflow: hidden; }
 .agent-app-shell .workspace:has(.agent-start), .agent-app-shell .workspace:has(.history-workspace), .agent-app-shell .workspace:has(.spaces-workspace) { display: block; }
 .agent-app-shell .main-pane { min-width: 0; }
 .agent-app-shell .main-pane:has(.agent-start), .agent-app-shell .main-pane:has(.history-workspace), .agent-app-shell .main-pane:has(.spaces-workspace) { display: block; padding: 0; background: transparent; }
@@ -1553,6 +1553,8 @@ textarea:focus {
 .chat-messages {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: var(--cbi-space-2);
   display: grid;
   align-content: start;
