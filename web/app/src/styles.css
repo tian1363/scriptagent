@@ -143,10 +143,21 @@ textarea {
 .workspace-topbar div { display: grid; gap: 1px; }
 .workspace-topbar strong { font-size: 15px; letter-spacing: -.02em; }
 .workspace-kicker { color: var(--cbi-fg-3); font-size: 11px; }
-.agent-app-shell .workspace { min-height: 0; height: calc(100vh - 68px); overflow: hidden; }
+.agent-app-shell .workspace { min-height: 0; height: calc(100vh - 68px); overflow: hidden; grid-template-rows: minmax(0, 1fr); }
 .agent-app-shell .workspace:has(.agent-start), .agent-app-shell .workspace:has(.history-workspace), .agent-app-shell .workspace:has(.spaces-workspace) { display: block; }
-.agent-app-shell .main-pane { min-width: 0; }
+.agent-app-shell .main-pane { min-width: 0; min-height: 0; }
 .agent-app-shell .main-pane:has(.agent-start), .agent-app-shell .main-pane:has(.history-workspace), .agent-app-shell .main-pane:has(.spaces-workspace) { display: block; padding: 0; background: transparent; }
+@media (min-width: 561px) {
+  .agent-app-shell .main-pane:has(.chat-pane) {
+    overflow: hidden;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .agent-app-shell .main-pane:has(.chat-pane) .chat-pane {
+    height: 100%;
+    overflow: hidden;
+  }
+}
 .agent-start,.history-workspace,.spaces-workspace { width: min(1120px,100%); padding: 48px 48px 64px; }
 .agent-intro { max-width: 720px; }
 .agent-intro h1,.history-workspace h1,.spaces-head h1 { font-size: clamp(34px,4vw,48px); line-height: 1.08; }
