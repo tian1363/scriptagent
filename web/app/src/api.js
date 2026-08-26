@@ -29,6 +29,10 @@ export async function createSkill(input) {
   return request("/api/skills", { method: "POST", headers: jsonHeaders, body: JSON.stringify(input) });
 }
 
+export async function updateSkill(id, input) {
+  return request(`/api/skills/${id}`, { method: "PUT", headers: jsonHeaders, body: JSON.stringify(input) });
+}
+
 export async function createProduct(formData) {
   return request("/api/products", {
     method: "POST",

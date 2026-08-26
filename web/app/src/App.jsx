@@ -35,6 +35,7 @@ import {
   createSpace,
   updateSpace,
   createSkill,
+  updateSkill,
 
   updateProduct,
   generateVideoPrompts,
@@ -267,8 +268,8 @@ export function App() {
     setSkills(await listSkills());
   }
 
-  async function handleCreateSkill(input) {
-    const skill = await createSkill(input);
+  async function handleSaveSkill(input, id = "") {
+    const skill = id ? await updateSkill(id, input) : await createSkill(input);
     await refreshSkills();
     return skill;
   }
@@ -765,7 +766,7 @@ export function App() {
               onProduct={setChatProductId}
               sourceSpace={spaces.find((space) => space.id === selectedChat?.conversation?.space_id)}
               onEditSpace={() => setView("spaces")}
-              onCreateSkill={handleCreateSkill}
+              onCreateSkill={handleSaveSkill}
               onSend={handleSendChat}
             />
           ) : null}
@@ -1241,6 +1242,8 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [creatorPrompt, setCreatorPrompt] = useState("");
+  const [editingSkillId, setEditingSkillId] = useState("");
   const [draft, setDraft] = useState({ name: "", title: "", description: "", category: "自定义", invocation_prompt: "", content: "" });
 
   function updateDraft(key, value) {
@@ -1251,9 +1254,11 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
     setCreateError("");
     setIsSaving(true);
     try {
-      const skill = await onCreate(draft);
+      const skill = await onCreate(draft, editingSkillId);
       setSelectedSkill(skill);
       setIsCreating(false);
+      setEditingSkillId("");
+      setCreatorPrompt("");
       setDraft({ name: "", title: "", description: "", category: "自定义", invocation_prompt: "", content: "" });
     } catch (err) {
       setCreateError(err.message);
@@ -1262,12 +1267,34 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
     }
   }
 
+  function startCreate() {
+    setCreateError("");
+    setEditingSkillId("");
+    setCreatorPrompt("");
+    setDraft({ name: "", title: "", description: "", category: "自定义", invocation_prompt: "", content: "" });
+    setIsCreating(true);
+  }
+
+  function createFromPrompt() {
+    if (!creatorPrompt.trim()) return;
+    setDraft(skillDraftFromPrompt(creatorPrompt));
+  }
+
+  function startEdit(skill) {
+    if (skill.source !== "custom") return;
+    setCreateError("");
+    setEditingSkillId(skill.id);
+    setCreatorPrompt("");
+    setDraft({ name: skill.name, title: skill.title, description: skill.description, category: skill.category || "自定义", invocation_prompt: skill.invocation_prompt || "", content: skill.content || "" });
+    setIsCreating(true);
+  }
+
   return (
     <section className="skill-command-menu">
       <div className="skill-command-head">
         <span>技能</span>
         <small>{skills.length}</small>
-        <button type="button" onClick={() => setIsCreating(true)}>创建 Skill</button>
+        <button className="skill-create-entry" type="button" onClick={startCreate}><Plus size={14} />新建技能</button>
         <button type="button" onClick={onClose}>关闭</button>
       </div>
       <div className="skill-command-body">
@@ -1283,7 +1310,8 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
         </div>
         {isCreating ? (
           <div className="skill-create-panel">
-            <div className="skill-preview-heading"><div><span>Skill Creator</span><strong>创建自定义 Skill</strong></div></div>
+            <div className="skill-preview-heading"><div><span>Skill Creator</span><strong>{editingSkillId ? "编辑自定义技能" : "创建自定义技能"}</strong></div></div>
+            {!editingSkillId ? <div className="skill-creator-quick"><label><span>一句话描述你想要的技能</span><textarea value={creatorPrompt} onChange={(event) => setCreatorPrompt(event.target.value)} placeholder="例如：帮我检查短视频前三秒钩子，并给出三个替换方案" /></label><button className="secondary-button" type="button" disabled={!creatorPrompt.trim()} onClick={createFromPrompt}><Sparkles size={15} />生成技能草稿</button></div> : null}
             <label><span>名称</span><input value={draft.title} onChange={(event) => updateDraft("title", event.target.value)} placeholder="例如：小红书标题优化" /></label>
             <label><span>标识</span><input value={draft.name} onChange={(event) => updateDraft("name", event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="xiaohongshu-title-review" /><small>小写字母、数字和连字符</small></label>
             <label><span>描述</span><textarea value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="说明它做什么，以及什么情况下应该使用。" /></label>
@@ -1291,7 +1319,7 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
             <label><span>调用提示</span><input value={draft.invocation_prompt} onChange={(event) => updateDraft("invocation_prompt", event.target.value)} placeholder="可留空，由 Skill Creator 自动生成" /></label>
             <label><span>正文</span><textarea className="skill-content-editor" value={draft.content} onChange={(event) => updateDraft("content", event.target.value)} placeholder={"# 工作流程\n\n1. 读取输入...\n2. 按规则处理...\n\n## 输出格式\n..."} /></label>
             {createError ? <div className="error-banner">{createError}</div> : null}
-            <button className="primary-button" type="button" disabled={isSaving || !draft.name || !draft.title || !draft.description || !draft.content} onClick={saveSkill}>{isSaving ? "创建中" : "创建并启用"}</button>
+            <button className="primary-button" type="button" disabled={isSaving || !draft.name || !draft.title || !draft.description || !draft.content} onClick={saveSkill}>{isSaving ? "保存中" : editingSkillId ? "保存修改" : "创建并启用"}</button>
           </div>
         ) : selectedSkill ? (
           <div className="skill-preview-panel">
@@ -1304,12 +1332,26 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
               <div><dt>描述</dt><dd>{selectedSkill.description}</dd></div>
             </dl>
             <div className="skill-preview-content"><MarkdownContent content={selectedSkill.content || "暂无正文"} /></div>
-            <button className="primary-button" type="button" onClick={() => onSelect(selectedSkill)}>使用这个 Skill</button>
+            <div className="skill-preview-actions"><button className="primary-button" type="button" onClick={() => onSelect(selectedSkill)}>使用这个 Skill</button>{selectedSkill.source === "custom" ? <button className="secondary-button" type="button" onClick={() => startEdit(selectedSkill)}>编辑技能</button> : <span>系统预置技能，仅支持查看和使用</span>}</div>
           </div>
         ) : <div className="skill-preview-empty">还没有 Skill，可以创建一个。</div>}
       </div>
     </section>
   );
+}
+
+function skillDraftFromPrompt(prompt) {
+  const description = prompt.trim().replace(/\s+/g, " ");
+  const title = description.replace(/[，。！？,.!?].*$/, "").slice(0, 18) || "自定义技能";
+  const suffix = Date.now().toString(36).slice(-6);
+  return {
+    name: `custom-skill-${suffix}`,
+    title,
+    description,
+    category: "自定义",
+    invocation_prompt: `使用「${title}」技能：${description}`,
+    content: `# ${title}\n\n## 目标\n${description}\n\n## 工作流程\n1. 理解用户输入与期望结果。\n2. 按目标检查和处理内容。\n3. 给出清晰、可执行的结果。\n\n## 输出要求\n- 先给结论，再给具体建议。\n- 信息不足时明确提出需要补充的内容。\n- 不编造未提供的事实。`,
+  };
 }
 
 function AgentStepsPanel({ steps }) {

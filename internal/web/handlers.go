@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +134,58 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, skill)
+}
+
+func (h *Handler) updateSkill(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name             string `json:"name"`
+		Title            string `json:"title"`
+		Description      string `json:"description"`
+		Category         string `json:"category"`
+		InvocationPrompt string `json:"invocation_prompt"`
+		Content          string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 128*1024)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Name = strings.ToLower(strings.TrimSpace(input.Name))
+	input.Title, input.Description = strings.TrimSpace(input.Title), strings.TrimSpace(input.Description)
+	input.Category, input.InvocationPrompt, input.Content = strings.TrimSpace(input.Category), strings.TrimSpace(input.InvocationPrompt), strings.TrimSpace(input.Content)
+	if !customSkillNamePattern.MatchString(input.Name) || len(input.Name) > 64 {
+		writeError(w, http.StatusBadRequest, errors.New("skill name must use lowercase letters, digits, and hyphens, up to 64 characters"))
+		return
+	}
+	if input.Title == "" || input.Description == "" || input.Content == "" {
+		writeError(w, http.StatusBadRequest, errors.New("title, description, and content are required"))
+		return
+	}
+	if input.Category == "" {
+		input.Category = "自定义"
+	}
+	if input.InvocationPrompt == "" {
+		input.InvocationPrompt = fmt.Sprintf("调用 %s skill，%s", input.Name, input.Description)
+	}
+	if !strings.HasPrefix(input.Content, "# ") {
+		input.Content = "# " + input.Title + "\n\n" + input.Content
+	}
+	skill, err := h.store.UpdateCustomSkill(chi.URLParam(r, "id"), jobs.CreateCustomSkillInput{
+		Name: input.Name, Title: input.Title, Description: input.Description, Category: input.Category,
+		InvocationPrompt: input.InvocationPrompt, Content: input.Content,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeError(w, http.StatusConflict, errors.New("skill name already exists"))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, skill)
 }
 
 func (h *Handler) getJob(w http.ResponseWriter, r *http.Request) {

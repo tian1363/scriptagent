@@ -1669,6 +1669,8 @@ textarea:focus {
 .skill-command-head small { color: var(--cbi-fg-3); }
 .skill-command-head button { border: 0; background: transparent; color: var(--cbi-fg-3); cursor: pointer; }
 .skill-command-head button:first-of-type { margin-left: auto; color: #477dff; }
+.skill-command-head .skill-create-entry { min-height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border-radius: 9px; background: rgba(71,125,255,.09); color: #376bd6; font-weight: 600; }
+.skill-command-head .skill-create-entry:hover { background: rgba(71,125,255,.15); }
 .skill-command-body { min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-columns: minmax(270px, .8fr) minmax(420px, 1.5fr); border-top: 1px solid var(--cbi-divider); }
 .skill-command-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 10px; border-right: 1px solid var(--cbi-divider); }
 .skill-command-list button { width: 100%; min-width: 0; display: grid; grid-template-columns: 38px auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px 12px; border: 0; border-radius: 12px; background: transparent; color: var(--cbi-fg-1); text-align: left; cursor: pointer; }
@@ -1678,7 +1680,7 @@ textarea:focus {
 .skill-command-list strong { white-space: nowrap; font-size: 15px; }
 .skill-command-list small { min-width: 0; overflow: hidden; color: var(--cbi-fg-3); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .skill-command-list em { grid-column: 2 / -1; color: var(--cbi-fg-3); font-size: 11px; font-style: normal; }
-.skill-preview-panel,
+.skill-preview-panel { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 14px; padding: 20px; }
 .skill-create-panel { min-width: 0; min-height: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; display: grid; align-content: start; gap: 14px; padding: 20px; }
 .skill-preview-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .skill-preview-heading div { display: grid; gap: 3px; }
@@ -1689,7 +1691,7 @@ textarea:focus {
 .skill-metadata div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; }
 .skill-metadata dt { color: var(--cbi-fg-3); font-size: 12px; }
 .skill-metadata dd { min-width: 0; margin: 0; color: var(--cbi-fg-1); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.skill-preview-content { min-height: 180px; padding: 14px; border: 1px solid var(--cbi-divider); border-radius: 10px; background: var(--cbi-bg-1); }
+.skill-preview-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 14px; border: 1px solid var(--cbi-divider); border-radius: 10px; background: var(--cbi-bg-1); }
 .skill-preview-content .markdown-content { padding: 0; }
 .skill-preview-panel > .primary-button,
 .skill-create-panel > .primary-button { justify-self: start; }
@@ -1699,12 +1701,18 @@ textarea:focus {
 .skill-create-panel textarea { min-height: 74px; resize: vertical; }
 .skill-create-panel textarea.skill-content-editor { min-height: 180px; font-family: var(--cbi-font-mono); font-size: 12px; line-height: 1.55; }
 .skill-create-panel label small { color: var(--cbi-fg-3); }
+.skill-creator-quick { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; padding: 14px; border-radius: 12px; background: rgba(71,125,255,.06); }
+.skill-creator-quick textarea { min-height: 68px; background: #fff; }
+.skill-creator-quick .secondary-button { margin-bottom: 1px; white-space: nowrap; }
+.skill-preview-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; background: var(--cbi-bg-1); }
+.skill-preview-actions > span { color: var(--cbi-fg-3); font-size: 11px; }
 .skill-preview-empty { display: grid; place-items: center; color: var(--cbi-fg-3); }
 
 @media (max-width: 760px) {
   .skill-command-menu { height: min(680px, 76vh); }
   .skill-command-body { grid-template-columns: 1fr; grid-template-rows: minmax(120px, 30%) minmax(0, 1fr); }
   .skill-command-list { border-right: 0; border-bottom: 1px solid var(--cbi-divider); }
+  .skill-creator-quick { grid-template-columns: 1fr; }
 }
 
 .chat-message {

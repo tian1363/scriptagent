@@ -1387,6 +1387,30 @@ func (s *Store) CreateCustomSkill(input CreateCustomSkillInput) (*CustomSkill, e
 	return skill, nil
 }
 
+func (s *Store) UpdateCustomSkill(id string, input CreateCustomSkillInput) (*CustomSkill, error) {
+	now := time.Now().UTC()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	result, err := s.db.Exec(`UPDATE custom_skills SET name=?,title=?,description=?,category=?,invocation_prompt=?,content=?,updated_at=? WHERE id=?`,
+		strings.TrimSpace(input.Name), strings.TrimSpace(input.Title), strings.TrimSpace(input.Description), strings.TrimSpace(input.Category),
+		strings.TrimSpace(input.InvocationPrompt), strings.TrimSpace(input.Content), now.Format(time.RFC3339), strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if count, countErr := result.RowsAffected(); countErr != nil || count == 0 {
+		return nil, sql.ErrNoRows
+	}
+	var item CustomSkill
+	var createdAt, updatedAt string
+	err = s.db.QueryRow(`SELECT id,name,title,description,category,invocation_prompt,content,created_at,updated_at FROM custom_skills WHERE id=?`, strings.TrimSpace(id)).Scan(
+		&item.ID, &item.Name, &item.Title, &item.Description, &item.Category, &item.InvocationPrompt, &item.Content, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	item.Source, item.CreatedAt, item.UpdatedAt = "custom", parseTime(createdAt), parseTime(updatedAt)
+	return &item, nil
+}
+
 func (s *Store) ListCustomSkills() ([]CustomSkill, error) {
 	rows, err := s.db.Query(`SELECT id,name,title,description,category,invocation_prompt,content,created_at,updated_at FROM custom_skills ORDER BY updated_at DESC`)
 	if err != nil {

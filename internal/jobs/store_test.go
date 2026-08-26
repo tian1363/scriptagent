@@ -270,6 +270,16 @@ func TestStoreCustomSkills(t *testing.T) {
 	if len(items) != 1 || items[0].Name != "review-hooks" {
 		t.Fatalf("unexpected skills: %+v", items)
 	}
+	updated, err := store.UpdateCustomSkill(created.ID, CreateCustomSkillInput{
+		Name: "review-hooks", Title: "钩子深度检查", Description: "检查并改写前三秒钩子。",
+		Category: "脚本策略", InvocationPrompt: "调用 review-hooks skill 深度检查。", Content: "# 钩子深度检查\n\n给出三个替换方案。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "钩子深度检查" || updated.Content == created.Content {
+		t.Fatalf("unexpected updated skill: %+v", updated)
+	}
 }
 
 func TestSpaceChatContextAndProductUpdate(t *testing.T) {
