@@ -396,7 +396,7 @@ func (s *Service) reactTools(conversationID, runID, selectedProductID, userQuery
 		{
 			Name:        "call_skill",
 			Description: "调用 ScriptAgent 内置 skill 模板，获得某类任务的工作流、提示词约束或输出结构。",
-			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | creatibi_storyboard_mapping | dataeye_hot_material_analysis | seedance_video_prompt_writer"}`,
+			InputSchema: `{"skill":"fission_strategy | product_markdown_writer | script_review | material_replication_analysis | seedance_video_prompt_writer"}`,
 			Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 				var input struct {
 					Skill string `json:"skill"`
@@ -666,63 +666,55 @@ var builtInSkillCatalog = []BuiltInSkillInfo{
 `),
 	},
 	{
-		Name:             "creatibi_storyboard_mapping",
-		Title:            "CreatiBI 分镜映射",
-		Description:      "说明脚本字段如何映射到 CreatiBI 分镜脚本格式。",
-		Category:         "发布生产",
-		InvocationPrompt: "调用 creatibi_storyboard_mapping skill，帮我检查脚本字段如何填充到 CreatiBI 分镜格式。",
+		Name:             "material_replication_analysis",
+		Title:            "素材分析",
+		Description:      "多模态拆解上传的图片或视频，解析设计与内容表达，并给出可执行的复刻建议。",
+		Category:         "素材复刻",
+		InvocationPrompt: "调用 material_replication_analysis skill，分析我上传的图片或视频，拆解它的设计方式、内容表达和视听结构，并给出可执行的视频复刻建议。",
 		Content: strings.TrimSpace(`
-# Skill: creatibi_storyboard_mapping
-用途：把脚本字段映射到 CreatiBI 分镜脚本格式。
-字段映射：
-- voiceover/subtitle -> Copy
-- visual/action/props_scene/shot_size -> Description
-- time_range/camera_intent/purpose/audio -> Note
-- action/props_scene/shot_size/audio -> property.Movement/Prop/ShotSize/text.SoundEffec
-约束：保存脚本内容时必须保留脚本名称和目标专案 ID；裂变脚本应作为复刻脚本的子任务。
-`),
-	},
-	{
-		Name:             "dataeye_hot_material_analysis",
-		Title:            "DataEye 爆款分析",
-		Description:      "基于 DataEye 素材口径提炼爆款特征和下一批创意方向。",
-		Category:         "创意策略",
-		InvocationPrompt: "调用 dataeye_hot_material_analysis skill，帮我设计近 30 天爆款素材分析流程和创意方向输出结构。",
-		Content: strings.TrimSpace(`
-# Skill: dataeye_hot_material_analysis
-用途：基于 DataEye 近 30 天表现好的素材，提炼爆款特征，并输出下一批短视频创意方向指导。
+# Skill: material_replication_analysis
+用途：利用模型的多模态能力，拆解用户上传的图片或视频素材，说明素材是怎么设计、怎么表达内容的，并将观察转化为可执行的视频复刻建议。
 
-适用输入：
-- 产品名称、产品 ID 或 DataEye 产品页 URL。
-- 时间范围，默认近 30 天。
-- 样本数量，建议 30-100 条。
-- 排序指标，优先使用热度、曝光、播放、点赞、评论、转发、下载等 DataEye 可见指标。
-- 可选过滤：媒体、国家/地区、语言、素材类型、投放平台。
+输入规则：
+- 必须以当前对话实际上传的图片或视频为主要证据，不得假装看过未上传的素材。
+- 没有附件时，先请用户上传图片或视频；不要输出空泛的行业模板。
+- 如果只上传图片，只分析可见画面和版式，不推断无法确认的时序、声音或动态。
+- 如果上传视频，按实际可见内容分析时间线、镜头、动作、字幕和视听节奏；听不清或看不清的信息明确标注。
+- 产品资料仅用于理解产品事实，不能覆盖素材本身的视觉证据。
 
-数据源规则：
-- 优先使用 DataEye 导出的 materials_raw.json、manifest_fast.json 和已下载视频。
-- 如果当前对话没有素材数据，先要求用户提供 DataEye 产品 URL/ID/名称，或上传 DataEye 导出结果。
-- 不得编造播放、曝光、热度、下载、投放时间等指标；无法确认时必须写“数据源未提供”。
-- 若只拿到视频文件而没有指标，只能做创意内容特征分析，不能声称“高表现”。
+分析框架：
+1. 素材概览：素材类型、画幅、时长（可判断时）、核心主题、目标受众和主要传播意图。
+2. 内容表达：开头如何抓注意力，信息按什么顺序展开，采用口播、剧情、演示、对比、UGC、结果展示或其他形式，情绪和说服逻辑如何推进。
+3. 画面设计：主体、人物、产品、场景、道具、构图、景别、机位、镜头运动、色彩、光线、质感、UI、字幕与花字的层级关系。
+4. 时间与节奏：首帧、前 3 秒钩子、关键转折、镜头长度、剪辑密度、信息密度、高潮和 CTA 的出现位置。
+5. 声音设计：旁白、人物对白、BGM、音效及它们与画面节奏的配合；不可确认时明确说明。
+6. 复刻机制：区分必须保留的结构机制、可以替换的表现元素，以及不应直接复制的品牌、人物、版权或平台水印元素。
 
-分析步骤：
-1. 样本筛选：锁定近 30 天，按可用指标筛出 Top 素材，并记录样本范围、排序口径和缺失字段。
-2. 单条拆解：抽取首帧、前 3 秒钩子、主体画面、节奏、字幕/花字、BGM/音效、产品卖点、角色/场景/道具/UI、CTA、画幅、语言和平台。
-3. 聚类归因：把相似素材归为创意母题，例如问题钩子、反差演示、强结果展示、口播种草、剧情冲突、UGC 实拍、游戏高光重剪。
-4. 爆款特征：总结共性、差异化、可复用元素、不可复用/风险元素。
-5. 创意方向：给出 5-8 个方向，每个方向只绑定 1 个主变化点，便于后续进入裂变脚本 A/B 测试。
+输出结构：
+## 一句话判断
+概括素材最核心的创意机制和表达方式。
 
-建议输出结构：
-- 数据范围与样本说明。
-- Top 素材观察表：素材 ID/标题、指标、首帧、前 3 秒钩子、卖点、CTA、可复用点。
-- 爆款共性特征。
-- 创意母题聚类。
-- 下一批创意方向指导：方向名、适用素材、核心假设、脚本 brief、建议裂变元素、验收指标。
-- 风险与待补数据。
+## 素材拆解
+- 内容形式与叙事结构
+- 首帧与前 3 秒钩子
+- 分段时间线或画面区域
+- 画面、文字与声音设计
+- 产品/卖点如何被呈现
+- CTA 与转化路径
 
-产品化建议：
-- 做成“爆款素材分析任务”：选择产品 -> 配置 DataEye 来源和近 30 天筛选 -> 拉取素材 -> 生成爆款分析报告 -> 一键转入裂变脚本任务。
-- DataEye 拉取应作为后端白名单任务执行，普通 ReAct 对话只调用分析结果和本地素材库，不直接执行任意系统命令。
+## 为什么有效
+只基于可观察设计，解释注意力、理解成本、情绪、信任和行动驱动机制；没有投放数据时不得声称素材已经验证为爆款。
+
+## 视频复刻方案
+- 建议时长与画幅
+- 分镜顺序：每镜包含时间、画面、动作、景别/机位、字幕/旁白、声音和目的
+- 可直接复用的结构
+- 需要替换的产品、角色、场景、文案与品牌元素
+- 拍摄/生成素材清单
+- 剪辑、字幕、BGM 与音效建议
+
+## 复刻风险与验证
+列出版权、品牌一致性、不可确认信息和制作难点，并给出首帧、钩子或 CTA 的最小 A/B 测试建议。
 `),
 	},
 	{

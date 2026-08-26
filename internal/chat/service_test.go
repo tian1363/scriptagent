@@ -118,26 +118,26 @@ func TestCosineSimilarity(t *testing.T) {
 	}
 }
 
-func TestBuiltInSkillIncludesDataEyeHotMaterialAnalysis(t *testing.T) {
-	skill, err := builtInSkill("dataeye_hot_material_analysis")
+func TestBuiltInSkillIncludesMaterialReplicationAnalysis(t *testing.T) {
+	skill, err := builtInSkill("material_replication_analysis")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(skill, "DataEye") {
-		t.Fatal("expected DataEye guidance")
+	if !strings.Contains(skill, "多模态") {
+		t.Fatal("expected multimodal analysis guidance")
 	}
-	if !strings.Contains(skill, "近 30 天") {
-		t.Fatal("expected recent 30 day analysis guidance")
+	if !strings.Contains(skill, "视频复刻方案") {
+		t.Fatal("expected video replication guidance")
 	}
-	if !strings.Contains(skill, "不得编造") {
-		t.Fatal("expected metric anti-fabrication rule")
+	if !strings.Contains(skill, "不得假装看过") {
+		t.Fatal("expected attachment evidence rule")
 	}
 }
 
 func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
 	skills := BuiltInSkills()
-	if len(skills) < 6 {
-		t.Fatalf("expected at least 6 skills, got %d", len(skills))
+	if len(skills) < 5 {
+		t.Fatalf("expected at least 5 skills, got %d", len(skills))
 	}
 	found := map[string]bool{}
 	for _, skill := range skills {
@@ -146,7 +146,7 @@ func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
 		}
 		found[skill.Name] = true
 	}
-	for _, name := range []string{"fission_strategy", "dataeye_hot_material_analysis", "seedance_video_prompt_writer"} {
+	for _, name := range []string{"fission_strategy", "material_replication_analysis", "seedance_video_prompt_writer"} {
 		if !found[name] {
 			t.Fatalf("expected skill %s in catalog", name)
 		}

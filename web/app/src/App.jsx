@@ -167,8 +167,8 @@ const chatQuickTasks = [
     description: "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。",
   },
   {
-    title: "分析爆款素材",
-    description: "调用 dataeye_hot_material_analysis skill，帮我设计近 30 天爆款素材分析流程和创意方向输出结构。",
+    title: "拆解并复刻素材",
+    description: "调用 material_replication_analysis skill，分析我上传的图片或视频，拆解设计方式、内容表达和视听结构，并给出视频复刻建议。",
   },
   {
     title: "生成视频提示词",
