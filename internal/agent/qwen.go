@@ -48,7 +48,7 @@ func NewQwenScriptAgent(cfg QwenConfig) *QwenScriptAgent {
 	}
 }
 
-func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
+func (a *QwenScriptAgent) Run(ctx context.Context, run jobs.RunContext, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
 	if a.client == nil {
 		return jobs.ScriptResult{}, errors.New("qwen client is not configured")
 	}
@@ -68,9 +68,12 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 
 	progress(jobs.StatusAnalyzingVideo, "开始调用 qwen3.6-plus 进行视频理解。")
 	analysisResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "job",
-		RefID: job.ID,
-		Step:  "video_analysis",
+		Scope:     run.Scope,
+		RefID:     run.RefID,
+		SpaceID:   run.SpaceID,
+		RunID:     run.RunID,
+		TraceName: "script-generation-workflow",
+		Step:      "video_analysis",
 	}, []model.ContentItem{
 		{Video: videoDataURL, FPS: a.videoFPS},
 		{Text: videoAnalysisPrompt(job, string(product))},
@@ -83,9 +86,12 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 	progress(jobs.StatusExtractingStructure, "视频理解完成，准备生成复刻结构。")
 	progress(jobs.StatusGeneratingReplica, "开始调用 qwen3.6-plus 生成复刻脚本。")
 	replicaResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "job",
-		RefID: job.ID,
-		Step:  "replica_script",
+		Scope:     run.Scope,
+		RefID:     run.RefID,
+		SpaceID:   run.SpaceID,
+		RunID:     run.RunID,
+		TraceName: "script-generation-workflow",
+		Step:      "replica_script",
 	}, []model.ContentItem{
 		{Text: replicaScriptPrompt(job, string(product), analysis)},
 	})
@@ -106,11 +112,14 @@ func (a *QwenScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.P
 
 	progress(jobs.StatusGeneratingFission, "开始基于复刻脚本生成裂变脚本。")
 	fissionResult, err := a.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "job",
-		RefID: job.ID,
-		Step:  "fission_scripts",
+		Scope:     run.Scope,
+		RefID:     run.RefID,
+		SpaceID:   run.SpaceID,
+		RunID:     run.RunID,
+		TraceName: "script-generation-workflow",
+		Step:      "fission_scripts",
 	}, []model.ContentItem{
-		{Text: fissionScriptPrompt(job, string(product), analysis, replicaJSON)},
+		{Text: fissionScriptPrompt(job, replicaJSON)},
 	})
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("fission script generation failed: %w", err)

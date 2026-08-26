@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -33,6 +34,45 @@ func TestChatPromptIncludesSummary(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "TikTok") {
 		t.Fatal("expected summary content")
+	}
+}
+
+func TestMessagesAfterSummaryKeepsOnlyUnsummarizedHistory(t *testing.T) {
+	messages := []jobs.ChatMessage{
+		{ID: "m1", Role: "user", Content: "old"},
+		{ID: "m2", Role: "assistant", Content: "summary cutoff"},
+		{ID: "m3", Role: "user", Content: "pending one"},
+		{ID: "m4", Role: "assistant", Content: "pending two"},
+	}
+	recent := messagesAfterSummary(messages, "m2")
+	if len(recent) != 2 || recent[0].ID != "m3" || recent[1].ID != "m4" {
+		t.Fatalf("expected only messages after summary cutoff, got %+v", recent)
+	}
+}
+
+func TestReactContextDoesNotContainCurrentGoal(t *testing.T) {
+	messages := []jobs.ChatMessage{
+		{ID: "m1", Role: "user", Content: "earlier question"},
+		{ID: "m2", Role: "assistant", Content: "earlier answer"},
+		{ID: "m3", Role: "user", Content: "CURRENT UNIQUE GOAL"},
+	}
+	prompt := reactChatContextPrompt(messages[:len(messages)-1], "", "")
+	if strings.Contains(prompt, "CURRENT UNIQUE GOAL") {
+		t.Fatal("current goal must only be passed through RunInput.Goal")
+	}
+	if !strings.Contains(prompt, "earlier question") {
+		t.Fatal("expected earlier history to remain")
+	}
+}
+
+func TestReactContextKeepsPendingBatchMessages(t *testing.T) {
+	messages := make([]jobs.ChatMessage, 0, recentChatMessageLimit+summaryBatchMessageCount-1)
+	for index := 0; index < cap(messages); index++ {
+		messages = append(messages, jobs.ChatMessage{Role: "user", Content: fmt.Sprintf("pending-%02d", index)})
+	}
+	prompt := reactChatContextPrompt(messages, "existing summary", "")
+	if !strings.Contains(prompt, "pending-00") || !strings.Contains(prompt, "pending-18") {
+		t.Fatal("messages waiting for the next summary batch must remain in context")
 	}
 }
 

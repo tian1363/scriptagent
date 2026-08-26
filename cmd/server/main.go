@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/telemetry"
 	webserver "github.com/tian1363/scriptagent/internal/web"
 )
 
@@ -31,6 +33,23 @@ func main() {
 	}
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		log.Fatalf("create upload dir: %v", err)
+	}
+	shutdownTelemetry, telemetryEnabled, err := telemetry.InitLangfuse(context.Background(), telemetry.Config{
+		PublicKey: os.Getenv("LANGFUSE_PUBLIC_KEY"), SecretKey: os.Getenv("LANGFUSE_SECRET_KEY"),
+		BaseURL: env("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"), Environment: env("LANGFUSE_ENVIRONMENT", "development"),
+		Release: os.Getenv("LANGFUSE_RELEASE"), CaptureContent: envBool("LANGFUSE_CAPTURE_CONTENT", false),
+	})
+	if err != nil {
+		log.Printf("Langfuse tracing disabled: %v", err)
+	} else if telemetryEnabled {
+		log.Printf("Langfuse tracing enabled")
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdownTelemetry(ctx); err != nil {
+				log.Printf("flush Langfuse traces: %v", err)
+			}
+		}()
 	}
 
 	store, err := jobs.OpenStore(filepath.Join(cfg.DataDir, "scriptagent.db"))
@@ -100,6 +119,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

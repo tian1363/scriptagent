@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/tian1363/scriptagent/internal/telemetry"
 )
 
 const (
@@ -93,8 +95,22 @@ func (c *DashScopeClient) Generate(ctx context.Context, content []ContentItem) (
 	return result.Text, nil
 }
 
-func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (Generation, error) {
+func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (generation Generation, callErr error) {
 	runtime := c.runtimeConfig()
+	traceInput, _ := json.Marshal(telemetryContent(content))
+	ctx, span := telemetry.StartGeneration(ctx, telemetry.GenerationAttributes{
+		Name:      callCtx.Step,
+		TraceName: callCtx.TraceName,
+		RunID:     callCtx.RunID,
+		SpaceID:   callCtx.SpaceID,
+		RefID:     callCtx.RefID,
+		SessionID: callCtx.SessionID,
+		Model:     runtime.Model,
+		Input:     string(traceInput),
+	})
+	defer func() {
+		telemetry.EndGeneration(span, generation.Text, generation.PromptTokens, generation.OutputTokens, generation.TotalTokens, callErr)
+	}()
 	if runtime.APIKey == "" {
 		return Generation{}, errors.New("DASHSCOPE_API_KEY is not configured")
 	}
@@ -178,6 +194,22 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	return Generation{}, err
 }
 
+func telemetryContent(content []ContentItem) []map[string]any {
+	result := make([]map[string]any, 0, len(content))
+	for _, item := range content {
+		value := map[string]any{}
+		if item.Text != "" {
+			value["text"] = item.Text
+		}
+		if item.Video != "" {
+			value["video"] = "[video data omitted]"
+			value["fps"] = item.FPS
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
 func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 	runtime := RuntimeConfig{
 		APIKey:   c.apiKey,
@@ -198,8 +230,14 @@ func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 	return runtime
 }
 
-func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext, texts []string, textType string) (EmbeddingGeneration, error) {
+func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext, texts []string, textType string) (generation EmbeddingGeneration, callErr error) {
 	runtime := c.runtimeConfig()
+	traceInput, _ := json.Marshal(texts)
+	ctx, span := telemetry.StartEmbedding(ctx, telemetry.EmbeddingAttributes{
+		Name: callCtx.Step, TraceName: callCtx.TraceName, RunID: callCtx.RunID, SpaceID: callCtx.SpaceID,
+		RefID: callCtx.RefID, SessionID: callCtx.SessionID, Model: c.embeddingModel, Input: string(traceInput),
+	})
+	defer func() { telemetry.EndEmbedding(span, len(generation.Vectors), generation.TotalTokens, callErr) }()
 	if runtime.APIKey == "" {
 		return EmbeddingGeneration{}, errors.New("DASHSCOPE_API_KEY is not configured")
 	}
@@ -275,14 +313,19 @@ func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext
 
 type ContentItem struct {
 	Text  string `json:"text,omitempty"`
+	Image string `json:"image,omitempty"`
 	Video string `json:"video,omitempty"`
 	FPS   int    `json:"fps,omitempty"`
 }
 
 type CallContext struct {
-	Scope string
-	RefID string
-	Step  string
+	Scope     string
+	RefID     string
+	SpaceID   string
+	RunID     string
+	SessionID string
+	TraceName string
+	Step      string
 }
 
 type Generation struct {
@@ -311,6 +354,8 @@ type EmbeddingGeneration struct {
 type CallRecord struct {
 	Scope        string
 	RefID        string
+	SpaceID      string
+	RunID        string
 	Step         string
 	Model        string
 	InputJSON    string
@@ -418,6 +463,9 @@ func sanitizedRequestBody(body requestBody) requestBody {
 		next := msg
 		next.Content = make([]ContentItem, 0, len(msg.Content))
 		for _, item := range msg.Content {
+			if item.Image != "" {
+				item.Image = "[image omitted from log]"
+			}
 			if item.Video != "" {
 				item.Video = "[video omitted from log]"
 			}
@@ -465,6 +513,8 @@ func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, model
 	record := CallRecord{
 		Scope:        callCtx.Scope,
 		RefID:        callCtx.RefID,
+		SpaceID:      callCtx.SpaceID,
+		RunID:        callCtx.RunID,
 		Step:         callCtx.Step,
 		Model:        modelName,
 		InputJSON:    string(req),
@@ -495,6 +545,8 @@ func (c *DashScopeClient) recordEmbedding(ctx context.Context, callCtx CallConte
 	record := CallRecord{
 		Scope:        callCtx.Scope,
 		RefID:        callCtx.RefID,
+		SpaceID:      callCtx.SpaceID,
+		RunID:        callCtx.RunID,
 		Step:         callCtx.Step,
 		Model:        result.Model,
 		InputJSON:    string(reqJSON),

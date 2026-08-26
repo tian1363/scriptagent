@@ -199,6 +199,13 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
   FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
+CREATE TABLE IF NOT EXISTS agent_steps (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_key TEXT NOT NULL,
+  kind TEXT NOT NULL, status TEXT NOT NULL, input_summary TEXT, output_summary TEXT,
+  error_message TEXT, started_at TEXT NOT NULL, finished_at TEXT,
+  FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+  UNIQUE(run_id, step_index)
+);
 CREATE TABLE IF NOT EXISTS memory_events (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
   payload_json TEXT, created_at TEXT NOT NULL,
@@ -213,6 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_space ON agent_runs(space_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_memory_events_space_run ON memory_events(space_id, run_id, created_at);
 `)
 	if err != nil {
@@ -421,7 +429,7 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: productID, AgentBrief: strings.TrimSpace(input.AgentBrief), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,?,?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,NULLIF(?,''),?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +437,7 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 }
 
 func (s *Store) ListSpaces() ([]Space, error) {
-	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),product_id,COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +459,7 @@ func (s *Store) ListSpaces() ([]Space, error) {
 func (s *Store) GetSpace(id string) (*Space, error) {
 	var space Space
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id,title,COALESCE(summary,''),product_id,COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
+	err := s.db.QueryRow(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -995,11 +1003,32 @@ func (s *Store) StartAgentRun(job Job) (*AgentRun, error) {
 	run := &AgentRun{ID: newID(), SpaceID: job.SpaceID, JobID: job.ID, Status: "running", StartedAt: now}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_, err := s.db.Exec(`INSERT INTO agent_runs (id,space_id,job_id,status,started_at) VALUES (?,?,?,?,?)`, run.ID, run.SpaceID, run.JobID, run.Status, now.Format(time.RFC3339))
+	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+	var active int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE job_id=? AND status='running'`, job.ID).Scan(&active); err != nil {
+		return nil, err
+	}
+	if active > 0 {
+		return nil, errors.New("agent run is already active for job")
+	}
+	if _, err := tx.Exec(`INSERT INTO agent_runs (id,space_id,job_id,status,started_at) VALUES (?,?,?,?,?)`, run.ID, run.SpaceID, run.JobID, run.Status, now.Format(time.RFC3339)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return run, nil
+}
+
+func (s *Store) FailActiveAgentRuns(jobID, reason string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`UPDATE agent_runs SET status='failed', finished_at=?, error_message=? WHERE job_id=? AND status='running'`, time.Now().UTC().Format(time.RFC3339), strings.TrimSpace(reason), jobID)
+	return err
 }
 
 func (s *Store) FinishAgentRun(runID, status, errorMessage string) error {
@@ -1008,6 +1037,80 @@ func (s *Store) FinishAgentRun(runID, status, errorMessage string) error {
 	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`UPDATE agent_runs SET status=?, finished_at=?, error_message=NULLIF(?,'') WHERE id=?`, status, now.Format(time.RFC3339), errorMessage, runID)
 	return err
+}
+
+func (s *Store) StartAgentStep(runID string, index int, key, kind, inputSummary string) (*AgentRunStep, error) {
+	if strings.TrimSpace(runID) == "" || index <= 0 || strings.TrimSpace(key) == "" {
+		return nil, errors.New("agent step requires run, positive index, and key")
+	}
+	if strings.TrimSpace(kind) == "" {
+		kind = "workflow"
+	}
+	now := time.Now().UTC()
+	step := &AgentRunStep{ID: newID(), RunID: runID, Index: index, Key: strings.TrimSpace(key), Kind: strings.TrimSpace(kind), Status: "running", InputSummary: strings.TrimSpace(inputSummary), StartedAt: now}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO agent_steps (id,run_id,step_index,step_key,kind,status,input_summary,started_at) VALUES (?,?,?,?,?,?,NULLIF(?,''),?)`, step.ID, step.RunID, step.Index, step.Key, step.Kind, step.Status, step.InputSummary, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return step, nil
+}
+
+func (s *Store) FinishAgentStep(stepID, status, outputSummary, errorMessage string) error {
+	if strings.TrimSpace(status) == "" {
+		status = "completed"
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	res, err := s.db.Exec(`UPDATE agent_steps SET status=?, output_summary=NULLIF(?,''), error_message=NULLIF(?,''), finished_at=? WHERE id=? AND status='running'`, status, strings.TrimSpace(outputSummary), strings.TrimSpace(errorMessage), time.Now().UTC().Format(time.RFC3339), stepID)
+	if err != nil {
+		return err
+	}
+	return requireOne(res)
+}
+
+func (s *Store) ListAgentRunSteps(spaceID, runID string, limit int) ([]AgentRunStep, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	query := `SELECT s.id,s.run_id,s.step_index,s.step_key,s.kind,s.status,COALESCE(s.input_summary,''),COALESCE(s.output_summary,''),COALESCE(s.error_message,''),s.started_at,s.finished_at FROM agent_steps s JOIN agent_runs r ON r.id=s.run_id`
+	conditions := []string{}
+	args := []any{}
+	if strings.TrimSpace(spaceID) != "" {
+		conditions = append(conditions, "r.space_id=?")
+		args = append(args, spaceID)
+	}
+	if strings.TrimSpace(runID) != "" {
+		conditions = append(conditions, "s.run_id=?")
+		args = append(args, runID)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY s.started_at DESC, s.step_index DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []AgentRunStep{}
+	for rows.Next() {
+		var step AgentRunStep
+		var started string
+		var finished sql.NullString
+		if err := rows.Scan(&step.ID, &step.RunID, &step.Index, &step.Key, &step.Kind, &step.Status, &step.InputSummary, &step.OutputSummary, &step.Error, &started, &finished); err != nil {
+			return nil, err
+		}
+		step.StartedAt = parseTime(started)
+		if finished.Valid {
+			value := parseTime(finished.String)
+			step.FinishedAt = &value
+		}
+		result = append(result, step)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListAgentRuns(spaceID string, limit int) ([]AgentRun, error) {
@@ -1089,7 +1192,11 @@ func (s *Store) GetSpaceObservability(spaceID string, limit int) (*SpaceObservab
 	if err != nil {
 		return nil, err
 	}
-	return &SpaceObservability{Runs: runs, ModelCalls: calls, MemoryEvents: events}, nil
+	steps, err := s.ListAgentRunSteps(spaceID, "", limit)
+	if err != nil {
+		return nil, err
+	}
+	return &SpaceObservability{Runs: runs, Steps: steps, ModelCalls: calls, MemoryEvents: events}, nil
 }
 
 type scanner interface {

@@ -877,6 +877,8 @@ Go 后端 + React 前端 + CreatiBI Design System
 
 - `docs/requirements.md` 是需求基线文档，功能范围、用户流程、字段、验收标准变化时必须同步更新。
 - `docs/technical-design.md` 是技术设计基线文档，架构、技术栈、接口、数据结构、模型接入、CreatiBI 集成变化时必须同步更新。
+- `docs/agent-runtime-harness.md` 定义 Agent Runtime、Harness、Tool、Context、Memory、预算、恢复和观测的目标边界；相关底层改造必须遵循其分阶段方案。
+- `docs/token-optimization.md` 记录当前已实施的 token 控制规则；修改上下文或 Prompt 时必须同步更新。
 - 每次代码变更前必须查看 Git 工作区状态。
 - 每组相关代码变更完成后必须提交 Git commit。
 - 不允许把无关改动混入同一次提交。
@@ -1147,3 +1149,13 @@ type AdPlatformAdapter interface {
 5. 增加结构化脚本版本和合规检查。
 6. 增加实验、数据导入、生命周期诊断和洞察转任务。
 7. 单独立项接入聚光平台数据。
+
+## 21. Langfuse 外部可观测性
+
+- Langfuse 作为可选外部 Trace 与分析平台，本地 SQLite 仍是运行记录事实来源。
+- Go 服务使用 OpenTelemetry OTLP/HTTP 对接 Langfuse v4 摄取端点。
+- Workflow Job 和 Chat Agent Loop 建立 `agent` 根 observation，模型与 Embedding 调用建立子 observation。
+- Trace 使用 Run ID、Space ID、Ref ID 和 Session ID 关联本地运行数据。
+- 默认禁止采集 Prompt 和模型输出正文；显式设置 `LANGFUSE_CAPTURE_CONTENT=true` 后才允许发送。
+- Langfuse 未配置、初始化失败或上报失败不得阻断本地任务。
+- 具体配置、属性映射与验证流程见 `docs/langfuse-observability.md`。

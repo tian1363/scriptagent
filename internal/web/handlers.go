@@ -37,6 +37,7 @@ type Publisher interface {
 
 type ChatResponder interface {
 	Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error)
+	SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []chatpkg.AttachmentInput) (*jobs.ChatThread, error)
 }
 
 func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner *jobs.Runner, publisher Publisher, chat ChatResponder, creativeReports *creative.Service) *Handler {
@@ -539,15 +540,12 @@ func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
 		return
 	}
-	var input struct {
-		Content   string `json:"content"`
-		ProductID string `json:"product_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	input, attachments, err := h.parseChatMessageInput(r)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.Send(r.Context(), chi.URLParam(r, "id"), input.Content, input.ProductID)
+	thread, err := h.chat.SendWithAttachments(r.Context(), chi.URLParam(r, "id"), input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -560,20 +558,63 @@ func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("chat is not configured"))
 		return
 	}
-	var input struct {
-		Content   string `json:"content"`
-		ProductID string `json:"product_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	input, attachments, err := h.parseChatMessageInput(r)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	thread, err := h.chat.Send(r.Context(), "", input.Content, input.ProductID)
+	thread, err := h.chat.SendWithAttachments(r.Context(), "", input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, thread)
+}
+
+type chatMessageInput struct {
+	Content   string
+	ProductID string
+}
+
+func (h *Handler) parseChatMessageInput(r *http.Request) (chatMessageInput, []chatpkg.AttachmentInput, error) {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(storage.MaxChatAttachmentBytes + 1024*1024); err != nil {
+			return chatMessageInput{}, nil, err
+		}
+		input := chatMessageInput{Content: r.FormValue("content"), ProductID: r.FormValue("product_id")}
+		file, header, err := r.FormFile("attachment")
+		if errors.Is(err, http.ErrMissingFile) {
+			return input, nil, nil
+		}
+		if err != nil {
+			return chatMessageInput{}, nil, err
+		}
+		defer file.Close()
+		path, err := h.files.SaveUpload(file, header, "chat")
+		if err != nil {
+			return chatMessageInput{}, nil, err
+		}
+		return input, []chatpkg.AttachmentInput{{Path: path, Name: header.Filename, Kind: chatAttachmentKind(header.Filename), Size: header.Size}}, nil
+	}
+	var input struct {
+		Content   string `json:"content"`
+		ProductID string `json:"product_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		return chatMessageInput{}, nil, err
+	}
+	return chatMessageInput{Content: input.Content, ProductID: input.ProductID}, nil, nil
+}
+
+func chatAttachmentKind(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif":
+		return "图片"
+	case ".mp4", ".mov", ".webm":
+		return "视频"
+	default:
+		return "素材"
+	}
 }
 
 func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
@@ -583,9 +624,24 @@ func (h *Handler) listModelCalls(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	result, err := h.store.ListModelCalls(r.URL.Query().Get("ref_id"), limit)
+	result, err := h.store.ListModelCalls(r.URL.Query().Get("ref_id"), r.URL.Query().Get("space_id"), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) getSpaceObservability(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	result, err := h.store.GetSpaceObservability(chi.URLParam(r, "id"), limit)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

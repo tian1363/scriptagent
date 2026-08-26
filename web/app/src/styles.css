@@ -1876,7 +1876,7 @@ textarea:focus {
 
 .chat-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--cbi-space-1);
   align-items: end;
   padding: var(--cbi-space-2);
@@ -1886,6 +1886,42 @@ textarea:focus {
 .chat-form .error-banner {
   grid-column: 1 / -1;
 }
+
+.attachment-chip {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cbi-space-1);
+  padding: var(--cbi-space-1);
+  border: 1px solid rgba(139, 78, 239, 0.16);
+  border-radius: var(--cbi-radius-sm);
+  background: rgba(246, 240, 250, 0.5);
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+}
+
+.attachment-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip button { border: 0; background: transparent; color: var(--cbi-primary-dark); cursor: pointer; font-size: var(--cbi-fs-sm); }
+
+.chat-attachment-button {
+  min-height: var(--cbi-h-large);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--cbi-space-1-5);
+  border: 1px solid var(--cbi-border-default);
+  border-radius: var(--cbi-radius-sm);
+  background: var(--cbi-bg-1);
+  color: var(--cbi-fg-2);
+  cursor: pointer;
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.chat-attachment-button input { display: none; }
 
 .chat-form textarea {
   min-height: 72px;

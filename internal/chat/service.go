@@ -2,11 +2,14 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"mime"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -14,14 +17,17 @@ import (
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/reactagent"
+	"github.com/tian1363/scriptagent/internal/telemetry"
 )
 
 const (
 	recentChatMessageLimit       = 12
 	summaryTriggerMessageCount   = 16
-	summaryTailMessageCount      = 8
+	summaryTailMessageCount      = recentChatMessageLimit
+	summaryBatchMessageCount     = 8
 	maxProductContextChars       = 6000
 	maxProductSectionPreviewChar = 1800
+	maxChatAttachmentDataURI     = 20 * 1024 * 1024
 )
 
 type Service struct {
@@ -39,13 +45,24 @@ type BuiltInSkillInfo struct {
 	Content          string `json:"-"`
 }
 
+type AttachmentInput struct {
+	Path string
+	Name string
+	Kind string
+	Size int64
+}
+
 func NewService(store *jobs.Store, client *model.DashScopeClient) *Service {
-	return &Service{store: store, client: client, reactRunner: reactagent.New(client, 6)}
+	return &Service{store: store, client: client, reactRunner: reactagent.New(client, 0)}
 }
 
 func (s *Service) Send(ctx context.Context, conversationID, content, productID string) (*jobs.ChatThread, error) {
+	return s.SendWithAttachments(ctx, conversationID, content, productID, nil)
+}
+
+func (s *Service) SendWithAttachments(ctx context.Context, conversationID, content, productID string, attachments []AttachmentInput) (threadResult *jobs.ChatThread, sendErr error) {
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && len(attachments) == 0 {
 		return nil, errors.New("message content is required")
 	}
 	if s.client == nil {
@@ -56,7 +73,11 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	var messages []jobs.ChatMessage
 	var err error
 	if conversationID == "" {
-		conversation, err = s.store.CreateChatConversation(content)
+		title := content
+		if title == "" && len(attachments) > 0 {
+			title = "素材分析"
+		}
+		conversation, err = s.store.CreateChatConversation(title)
 		if err != nil {
 			return nil, err
 		}
@@ -70,24 +91,47 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 		messages = thread.Messages
 	}
 
-	userMessage, err := s.store.AddChatMessage(conversationID, "user", content)
+	displayContent := content
+	if displayContent == "" {
+		displayContent = "请分析我上传的素材。"
+	}
+	if len(attachments) > 0 {
+		displayContent += "\n\n附件：" + attachmentSummary(attachments)
+	}
+	modelAttachments, err := contentItemsForAttachments(attachments)
+	if err != nil {
+		return nil, err
+	}
+	userMessage, err := s.store.AddChatMessage(conversationID, "user", displayContent)
 	if err != nil {
 		return nil, err
 	}
 	messages = append(messages, *userMessage)
+	ctx, traceSpan := telemetry.StartAgentRun(ctx, telemetry.RunAttributes{
+		Name: "chat-agent-loop", RunID: userMessage.ID, JobID: conversationID,
+		SessionID: conversationID, Input: content,
+	})
+	traceOutput := ""
+	defer func() { telemetry.EndAgentRun(traceSpan, traceOutput, sendErr) }()
 
-	summary := s.refreshSummary(ctx, conversationID, conversation, messages)
+	summary := s.refreshSummary(ctx, conversationID, userMessage.ID, conversation, messages)
+	contextMessages := messagesAfterSummary(messages[:len(messages)-1], conversation.SummaryMessageID)
 	citations := []jobs.ProductCitation{}
 	reactResult, err := s.reactRunner.Run(ctx, reactagent.RunInput{
 		Scope:         "chat",
 		RefID:         conversationID,
-		Goal:          content,
-		ContextPrompt: reactChatContextPrompt(messages, summary, productID),
-		Tools:         s.reactTools(conversationID, productID, content, &citations),
+		RunID:         userMessage.ID,
+		SessionID:     conversationID,
+		TraceName:     "chat-agent-loop",
+		Goal:          displayContent,
+		ContextPrompt: reactChatContextPrompt(contextMessages, summary, productID),
+		Tools:         s.reactTools(conversationID, userMessage.ID, productID, content, &citations),
+		Attachments:   modelAttachments,
 	})
 	if err != nil {
 		return nil, err
 	}
+	traceOutput = reactResult.Answer
 	if _, err := s.store.AddChatMessage(conversationID, "assistant", reactResult.Answer); err != nil {
 		return nil, err
 	}
@@ -103,7 +147,7 @@ func (s *Service) Send(ctx context.Context, conversationID, content, productID s
 	return thread, nil
 }
 
-func (s *Service) refreshSummary(ctx context.Context, conversationID string, conversation *jobs.ChatConversation, messages []jobs.ChatMessage) string {
+func (s *Service) refreshSummary(ctx context.Context, conversationID, runID string, conversation *jobs.ChatConversation, messages []jobs.ChatMessage) string {
 	if conversation == nil || len(messages) <= summaryTriggerMessageCount {
 		if conversation == nil {
 			return ""
@@ -130,11 +174,13 @@ func (s *Service) refreshSummary(ctx context.Context, conversationID string, con
 	if len(messagesToSummarize) == 0 {
 		return conversation.Summary
 	}
+	if conversation.SummaryMessageID != "" && len(messagesToSummarize) < summaryBatchMessageCount {
+		return conversation.Summary
+	}
 
 	result, err := s.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "chat",
-		RefID: conversationID,
-		Step:  "chat_summary",
+		Scope: "chat", RefID: conversationID, RunID: runID, SessionID: conversationID,
+		TraceName: "chat-agent-loop", Step: "chat_summary",
 	}, []model.ContentItem{{Text: summaryPrompt(conversation.Summary, messagesToSummarize)}})
 	if err != nil {
 		return conversation.Summary
@@ -151,7 +197,81 @@ func (s *Service) refreshSummary(ctx context.Context, conversationID string, con
 	return summary
 }
 
-func (s *Service) productContext(ctx context.Context, conversationID, productID, query string) (string, []jobs.ProductCitation, error) {
+func messagesAfterSummary(messages []jobs.ChatMessage, summaryMessageID string) []jobs.ChatMessage {
+	if summaryMessageID != "" {
+		for index, message := range messages {
+			if message.ID == summaryMessageID {
+				return messages[index+1:]
+			}
+		}
+	}
+	return messages
+}
+
+func contentItemsForAttachments(attachments []AttachmentInput) ([]model.ContentItem, error) {
+	items := make([]model.ContentItem, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			continue
+		}
+		dataURL, mimeType, err := attachmentDataURL(attachment.Path)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case strings.HasPrefix(mimeType, "image/"):
+			items = append(items, model.ContentItem{Image: dataURL})
+		case strings.HasPrefix(mimeType, "video/"):
+			items = append(items, model.ContentItem{Video: dataURL, FPS: 2})
+		default:
+			return nil, fmt.Errorf("unsupported attachment MIME type %s", mimeType)
+		}
+	}
+	return items, nil
+}
+
+func attachmentDataURL(path string) (string, string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", "", err
+	}
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if mimeType == "" {
+		return "", "", errors.New("cannot determine attachment MIME type")
+	}
+	if dataURLByteLen(info.Size(), mimeType) > maxChatAttachmentDataURI {
+		return "", "", fmt.Errorf("attachment data-uri would be %.1fMB, exceeds %.1fMB limit", mb(dataURLByteLen(info.Size(), mimeType)), mb(maxChatAttachmentDataURI))
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), mimeType, nil
+}
+
+func dataURLByteLen(rawBytes int64, mimeType string) int64 {
+	return int64(len("data:"+mimeType+";base64,")) + int64(base64.StdEncoding.EncodedLen(int(rawBytes)))
+}
+
+func mb(bytes int64) float64 { return float64(bytes) / 1024 / 1024 }
+
+func attachmentSummary(attachments []AttachmentInput) string {
+	rows := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		name := strings.TrimSpace(attachment.Name)
+		if name == "" {
+			name = filepath.Base(attachment.Path)
+		}
+		kind := strings.TrimSpace(attachment.Kind)
+		if kind == "" {
+			kind = "素材"
+		}
+		rows = append(rows, fmt.Sprintf("%s（%s，%.1fMB）", name, kind, mb(attachment.Size)))
+	}
+	return strings.Join(rows, "、")
+}
+
+func (s *Service) productContext(ctx context.Context, conversationID, runID, productID, query string) (string, []jobs.ProductCitation, error) {
 	productID = strings.TrimSpace(productID)
 	if productID == "" {
 		return "", nil, nil
@@ -176,14 +296,14 @@ func (s *Service) productContext(ctx context.Context, conversationID, productID,
 		}
 		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, markdown), []jobs.ProductCitation{citation}, nil
 	}
-	if semantic, semanticCitations, err := s.semanticProductContext(ctx, conversationID, *product, markdown, query); err == nil && strings.TrimSpace(semantic) != "" {
+	if semantic, semanticCitations, err := s.semanticProductContext(ctx, conversationID, runID, *product, markdown, query); err == nil && strings.TrimSpace(semantic) != "" {
 		return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, semantic), semanticCitations, nil
 	}
 	selected, fallbackCitations := selectProductMarkdownContext(markdown, query, *product)
 	return fmt.Sprintf("产品名称：%s\nMarkdown 文件：%s\n\n%s", product.Title, product.MDName, selected), fallbackCitations, nil
 }
 
-func (s *Service) reactTools(conversationID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
+func (s *Service) reactTools(conversationID, runID, selectedProductID, userQuery string, citations *[]jobs.ProductCitation) []reactagent.Tool {
 	return []reactagent.Tool{
 		{
 			Name:        "list_products",
@@ -231,7 +351,7 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 				if query == "" {
 					query = userQuery
 				}
-				contextText, foundCitations, err := s.productContext(ctx, conversationID, productID, query)
+				contextText, foundCitations, err := s.productContext(ctx, conversationID, runID, productID, query)
 				if err != nil {
 					return "", err
 				}
@@ -288,8 +408,8 @@ func (s *Service) reactTools(conversationID, selectedProductID, userQuery string
 	}
 }
 
-func (s *Service) semanticProductContext(ctx context.Context, conversationID string, product jobs.Product, markdown, query string) (string, []jobs.ProductCitation, error) {
-	chunks, err := s.ensureProductEmbeddings(ctx, product, markdown)
+func (s *Service) semanticProductContext(ctx context.Context, conversationID, runID string, product jobs.Product, markdown, query string) (string, []jobs.ProductCitation, error) {
+	chunks, err := s.ensureProductEmbeddings(ctx, conversationID, runID, product, markdown)
 	if err != nil {
 		return "", nil, err
 	}
@@ -297,9 +417,8 @@ func (s *Service) semanticProductContext(ctx context.Context, conversationID str
 		return "", nil, errors.New("product has no embedded chunks")
 	}
 	queryEmbedding, err := s.client.EmbedDetailed(ctx, model.CallContext{
-		Scope: "chat",
-		RefID: conversationID,
-		Step:  "product_embed_query",
+		Scope: "chat", RefID: conversationID, RunID: runID, SessionID: conversationID,
+		TraceName: "chat-agent-loop", Step: "product_embed_query",
 	}, []string{query}, "query")
 	if err != nil {
 		return "", nil, err
@@ -349,7 +468,7 @@ func (s *Service) semanticProductContext(ctx context.Context, conversationID str
 	return strings.TrimSpace(strings.Join(lines, "\n")), citations, nil
 }
 
-func (s *Service) ensureProductEmbeddings(ctx context.Context, product jobs.Product, markdown string) ([]jobs.ProductChunk, error) {
+func (s *Service) ensureProductEmbeddings(ctx context.Context, conversationID, runID string, product jobs.Product, markdown string) ([]jobs.ProductChunk, error) {
 	existing, err := s.store.ListProductChunks(product.ID)
 	if err != nil {
 		return nil, err
@@ -369,9 +488,8 @@ func (s *Service) ensureProductEmbeddings(ctx context.Context, product jobs.Prod
 			texts = append(texts, section.Content)
 		}
 		result, err := s.client.EmbedDetailed(ctx, model.CallContext{
-			Scope: "product",
-			RefID: product.ID,
-			Step:  "product_embed_index",
+			Scope: "product", RefID: product.ID, RunID: runID, SessionID: conversationID,
+			TraceName: "chat-agent-loop", Step: "product_embed_index",
 		}, texts, "document")
 		if err != nil {
 			return nil, err
@@ -442,10 +560,6 @@ func chatPrompt(messages []jobs.ChatMessage, summary, productContext string) str
 }
 
 func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProductID string) string {
-	recent := messages
-	if len(recent) > recentChatMessageLimit {
-		recent = recent[len(recent)-recentChatMessageLimit:]
-	}
 	lines := []string{
 		"你是 ScriptAgent 的通用创作与脚本策略助手。",
 		"当前后端已启用 ReAct：你可以先调用工具/skill，再给最终答案。",
@@ -462,7 +576,7 @@ func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProduc
 		lines = append(lines, "长期会话摘要：", summary, "")
 	}
 	lines = append(lines, "最近对话：")
-	for _, message := range recent {
+	for _, message := range messages {
 		role := "用户"
 		if message.Role == "assistant" {
 			role = "助手"

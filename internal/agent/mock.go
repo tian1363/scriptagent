@@ -19,7 +19,7 @@ func NewMockScriptAgent() *MockScriptAgent {
 	return &MockScriptAgent{}
 }
 
-func (a *MockScriptAgent) Run(ctx context.Context, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
+func (a *MockScriptAgent) Run(ctx context.Context, _ jobs.RunContext, job jobs.Job, progress jobs.Progress) (jobs.ScriptResult, error) {
 	progress(jobs.StatusAnalyzingVideo, "mock 模式：生成视频理解占位结果。")
 	product, err := os.ReadFile(job.ProductMDPath)
 	if err != nil {

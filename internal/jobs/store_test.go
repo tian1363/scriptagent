@@ -1,8 +1,11 @@
 package jobs
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/tian1363/scriptagent/internal/model"
 )
 
 func TestStoreProducts(t *testing.T) {
@@ -35,6 +38,98 @@ func TestStoreProducts(t *testing.T) {
 	}
 	if len(products) != 1 {
 		t.Fatalf("expected 1 product, got %d", len(products))
+	}
+}
+
+func TestStoreModelCallRunAssociation(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	space, err := store.CreateSpace(CreateSpaceInput{Title: "Observed space"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(CreateJobInput{Title: "Observed job", Industry: "game", FissionCount: 1, SpaceID: space.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.StartAgentRun(*job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordModelCall(context.Background(), model.CallRecord{
+		Scope: "job", RefID: job.ID, SpaceID: space.ID, RunID: run.ID, Step: "video_analysis", Model: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls, err := store.ListModelCalls(job.ID, space.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0].RunID != run.ID || calls[0].SpaceID != space.ID {
+		t.Fatalf("unexpected model call association: %+v", calls)
+	}
+	step, err := store.StartAgentStep(run.ID, 1, "video_analysis", "workflow", "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishAgentStep(step.ID, "completed", "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	observability, err := store.GetSpaceObservability(space.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observability.Steps) != 1 || observability.Steps[0].RunID != run.ID || observability.Steps[0].OutputSummary != "done" {
+		t.Fatalf("unexpected observable steps: %+v", observability.Steps)
+	}
+}
+
+func TestStorePreventsConcurrentRunsAndAllowsRecovery(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	space, err := store.CreateSpace(CreateSpaceInput{Title: "Runtime space"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(CreateJobInput{Title: "Runtime job", Industry: "game", FissionCount: 1, SpaceID: space.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.StartAgentRun(*job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartAgentRun(*job); err == nil {
+		t.Fatal("expected concurrent run to be rejected")
+	}
+	if err := store.FailActiveAgentRuns(job.ID, "restart recovery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartAgentRun(*job); err != nil {
+		t.Fatalf("expected a new run after recovery, got %v", err)
+	}
+	runs, err := store.ListAgentRuns(space.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("unexpected recovered runs: %+v", runs)
+	}
+	var recovered *AgentRun
+	for index := range runs {
+		if runs[index].ID == first.ID {
+			recovered = &runs[index]
+			break
+		}
+	}
+	if recovered == nil || recovered.Status != "failed" || recovered.Error != "restart recovery" {
+		t.Fatalf("unexpected recovered runs: %+v", runs)
 	}
 }
 

@@ -209,6 +209,7 @@ export function App() {
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatDraft, setChatDraft] = useState("");
+  const [chatAttachment, setChatAttachment] = useState(null);
   const [chatProductId, setChatProductId] = useState("");
   const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
   const [typingMessage, setTypingMessage] = useState(null);
@@ -458,6 +459,7 @@ export function App() {
     setChatCitations([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
+    setChatAttachment(null);
     setSelectedChat(await getChat(id));
   }
 
@@ -469,31 +471,34 @@ export function App() {
     setChatCitations([]);
     setChatAgentSteps([]);
     setIsChatThinking(false);
+    setChatAttachment(null);
   }
 
-  async function handleSendChat(event) {
-    event.preventDefault();
-    const content = chatDraft.trim();
-    if (!content) return;
+  async function sendChatToAgent(content, productID, conversationID = "", attachment = null) {
+    content = content.trim();
+    if (!content && !attachment) return;
     setError("");
     setIsSending(true);
     setIsChatThinking(true);
     setTypingMessage(null);
     setChatCitations([]);
     setChatAgentSteps([]);
+    const displayContent = [content || "请分析我上传的素材。", attachment ? `附件：${attachment.name}` : ""].filter(Boolean).join("\n\n");
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
       role: "user",
-      content,
+      content: displayContent,
       created_at: new Date().toISOString(),
     };
-    const baseMessages = selectedChat?.messages || [];
+    const continuingCurrentChat = Boolean(conversationID && selectedChat?.conversation?.id === conversationID);
+    const baseMessages = continuingCurrentChat ? selectedChat?.messages || [] : [];
     setOptimisticChatMessages([...baseMessages, tempUserMessage]);
     setChatDraft("");
+    setChatAttachment(null);
     try {
-      const thread = selectedChat?.conversation?.id
-        ? await sendChatMessage(selectedChat.conversation.id, content, chatProductId)
-        : await sendNewChatMessage(content, chatProductId);
+      const thread = conversationID
+        ? await sendChatMessage(conversationID, content, productID, attachment)
+        : await sendNewChatMessage(content, productID, attachment);
       const assistantMessage = lastAssistantMessage(thread.messages);
       setSelectedChat(thread);
       setChatCitations(thread.citations || []);
@@ -510,6 +515,7 @@ export function App() {
       }
     } catch (err) {
       setError(err.message);
+      setChatAttachment(attachment);
       setTypingMessage(null);
       setOptimisticChatMessages((current) => [
         ...(current || [tempUserMessage]),
@@ -524,6 +530,29 @@ export function App() {
       setIsChatThinking(false);
       setIsSending(false);
     }
+  }
+
+  async function handleSendChat(event) {
+    event.preventDefault();
+    await sendChatToAgent(chatDraft, chatProductId, selectedChat?.conversation?.id || "", chatAttachment);
+  }
+
+  async function handleStartAgentChat(productID, goal) {
+    setView("chat");
+    setSelectedChat(null);
+    setChatProductId(productID || "");
+    await sendChatToAgent(goal, productID || "");
+  }
+
+  async function handleStartSpaceAgent(space) {
+    if (!space) return;
+    const spaceContext = [
+      `继续推进创作空间「${space.title}」。`,
+      space.summary ? `空间目标：${space.summary}` : "",
+      space.agent_brief ? `长期要求：${space.agent_brief}` : "",
+      "请结合这些长期上下文判断当前最合适的下一步；需要资料时主动读取，需要补充信息时直接提问。不要自动启动固定工作流。",
+    ].filter(Boolean).join("\n");
+    await handleStartAgentChat(space.product_id || "", spaceContext);
   }
 
   async function handleCreateProduct(eventOrForm) {
@@ -649,9 +678,9 @@ export function App() {
         {view === "settings" ? <SettingsSidebar modelSettings={modelSettings} /> : null}
 
         <section className={`main-pane ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}>
-          {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} onProduct={handleStartProductJob} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
+          {view === "home" ? <AgentStart products={products} jobs={jobs} spaces={spaces} isSending={isSending} onSend={handleStartAgentChat} onSpaces={() => setView("spaces")} onHistory={() => setView("history")} /> : null}
           {view === "history" ? <HistoryWorkspace jobs={jobs} chats={chats} products={products} onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))} onChat={(id) => handleSelectChat(id).then(() => setView("chat"))} /> : null}
-          {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} error={error} onCreate={handleCreateSpace} onStart={(productID, spaceID) => handleStartProductJob(productID, "", spaceID)} /> : null}
+          {view === "spaces" ? <SpacesWorkspace spaces={spaces} products={products} jobs={jobs} isCreating={isCreatingSpace} isSending={isSending} error={error} onCreate={handleCreateSpace} onStart={handleStartSpaceAgent} /> : null}
           {view === "jobs" ? (
             <JobsWorkspace
               selectedJob={selectedJob}
@@ -707,7 +736,9 @@ export function App() {
               selectedProductId={chatProductId}
               isSending={isSending}
               error={error}
+              attachment={chatAttachment}
               onDraft={setChatDraft}
+              onAttachment={setChatAttachment}
               onProduct={setChatProductId}
               onSend={handleSendChat}
             />
@@ -998,7 +1029,7 @@ function JobsWorkspace(props) {
   );
 }
 
-function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, onDraft, onProduct, onSend }) {
+function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, attachment, onDraft, onAttachment, onProduct, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
@@ -1071,8 +1102,14 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
-        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：帮我设计 3 个视听层裂变方向。" />
-        <button className="primary-button" type="submit" disabled={isSending || !draft.trim()}>
+        {attachment ? <div className="attachment-chip"><span>{attachment.name}</span><button type="button" onClick={() => onAttachment(null)}>移除</button></div> : null}
+        <label className="chat-attachment-button" title="添加图片或视频素材">
+          <Upload size={15} />
+          <span>素材</span>
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(event) => onAttachment(event.target.files?.[0] || null)} />
+        </label>
+        <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="4" placeholder="输入你的问题，例如：分析这个素材的前三秒钩子。" />
+        <button className="primary-button" type="submit" disabled={isSending || (!draft.trim() && !attachment)}>
           {isSending ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
           <span>{isSending ? "发送中" : "发送"}</span>
         </button>
@@ -1247,7 +1284,7 @@ function FissionDirectionPicker({ count }) {
   );
 }
 
-function AgentStart({ products, jobs, spaces, onProduct, onSpaces, onHistory }) {
+function AgentStart({ products, jobs, spaces, isSending, onSend, onSpaces, onHistory }) {
   const [goal, setGoal] = useState("");
   const [productID, setProductID] = useState(products[0]?.id || "");
   const safeJobs = Array.isArray(jobs) ? jobs : [];
@@ -1255,7 +1292,7 @@ function AgentStart({ products, jobs, spaces, onProduct, onSpaces, onHistory }) 
   const active = safeJobs.filter((job) => runningStatuses.has(job.status));
   return <section className="agent-start">
     <div className="agent-intro"><span className="eyebrow">ScriptAgent</span><h1>今天想完成什么？</h1><p>说出目标，助手会读取资料、规划步骤并执行。</p></div>
-    <div className="agent-goal-card"><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子" /><div><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><button className="primary-button" type="button" disabled={!goal.trim()} onClick={() => onProduct(productID, goal)}><Play size={15}/>{productID ? "开始执行" : "继续设置"}</button></div></div>
+    <div className="agent-goal-card"><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子" /><div><select value={productID} onChange={(event) => setProductID(event.target.value)}><option value="">暂不选择资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><button className="primary-button" type="button" disabled={!goal.trim() || isSending} onClick={() => onSend(productID, goal)}><Play size={15}/>{isSending ? "Agent 思考中" : "发送给 Agent"}</button></div></div>
     <div className="agent-start-grid"><section><h2>正在进行</h2>{active.length ? active.map((job)=><button className="agent-list-row" key={job.id} onClick={onHistory}><span className="task-state-dot running"/><strong>{job.title}</strong><small>{statusLabel(job.status)}</small></button>) : <p>当前没有执行中的任务。</p>}</section><section><div className="section-heading"><span>最近空间</span><button className="mini-button" type="button" onClick={onSpaces}>查看全部</button></div>{safeSpaces.length ? safeSpaces.slice(0,3).map((space)=><button className="agent-list-row" key={space.id} onClick={onSpaces}><FolderKanban size={16}/><strong>{space.title}</strong><small>{space.summary || "继续创作"}</small></button>) : <button className="agent-list-row" onClick={onSpaces}><FolderKanban size={16}/><strong>创建第一个空间</strong><small>把目标和历史放在一起</small></button>}</section></div>
   </section>;
 }
@@ -1267,8 +1304,8 @@ function HistoryWorkspace({ jobs, chats, products, onJob, onChat }) {
   return <section className="history-workspace"><span className="eyebrow">过去的工作都在这里</span><h1>继续，不必重新开始</h1><p>对话和执行任务放在一起；创作空间中的版本仍会保留在项目里。</p><div className="history-tools"><label><Search size={15}/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索标题或产品"/></label><div>{[["all","全部"],["job","执行任务"],["chat","对话"]].map(([key,label])=><button key={key} className={kind===key?"active":""} onClick={()=>setKind(key)}>{label}</button>)}</div></div>{items.length?<div className="history-list">{items.map((item)=><button key={`${item.kind}-${item.id}`} onClick={()=>item.kind==="job"?onJob(item.id):onChat(item.id)}><span>{item.kind==="job"?<Bot size={16}/>:<MessageSquare size={16}/>}</span><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{formatTime(item.at)}</time><ChevronRight size={16}/></button>)}</div>:<EmptyState text="还没有历史记录"/>}</section>;
 }
 
-function SpacesWorkspace({ spaces, products, jobs, isCreating, error, onCreate, onStart }) {
-  return <section className="spaces-workspace"><div className="spaces-head"><div><span className="eyebrow">长期创作</span><h1>创作空间</h1><p>先定义目标和长期要求；产品资料可以现在选择，也可以稍后添加。</p></div></div><div className="spaces-grid"><section className="spaces-list">{spaces.length?spaces.map((space)=>{const count=jobs.filter((job)=>job.space_id===space.id).length;const product=products.find((item)=>item.id===space.product_id);return <article key={space.id}><FolderKanban size={18}/><div><strong>{space.title}</strong><p>{space.summary||"继续上次的创作"}</p><small>{product?.title||"暂未关联资料"} · {count} 次执行</small></div><button className="secondary-button" type="button" onClick={()=>onStart(space.product_id,space.id)}>继续创作</button></article>}):<EmptyState text="还没有空间，创建一个长期创作项目。"/>}</section><aside className="space-create"><span className="eyebrow">新空间</span><h2>开始一个长期创作</h2><form onSubmit={onCreate}><input name="title" placeholder="例如：夏季活动脚本" required/><select name="product_id" defaultValue=""><option value="">暂不选择产品资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><textarea name="summary" placeholder="这次想完成什么？" required/><textarea name="agent_brief" placeholder="长期要求：风格、受众、不能说什么（可选）"/><button className="primary-button" disabled={isCreating}>{isCreating?"创建中":"创建空间"}</button></form>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
+function SpacesWorkspace({ spaces, products, jobs, isCreating, isSending, error, onCreate, onStart }) {
+  return <section className="spaces-workspace"><div className="spaces-head"><div><span className="eyebrow">长期创作</span><h1>创作空间</h1><p>空间保存目标、长期要求和产品上下文；Agent 会先理解任务，再决定下一步。</p></div></div><div className="spaces-grid"><section className="spaces-list">{spaces.length?spaces.map((space)=>{const count=jobs.filter((job)=>job.space_id===space.id).length;const product=products.find((item)=>item.id===space.product_id);return <article key={space.id}><FolderKanban size={18}/><div><strong>{space.title}</strong><p>{space.summary||"继续上次的创作"}</p><small>{product?.title||"暂未关联资料"} · {count} 次执行</small></div><button className="secondary-button" type="button" disabled={isSending} onClick={()=>onStart(space)}>{isSending?"Agent 思考中":"和 Agent 继续"}</button></article>}):<EmptyState text="还没有空间，创建一个长期创作项目。"/>}</section><aside className="space-create"><span className="eyebrow">新空间</span><h2>开始一个长期创作</h2><p>先保存稳定目标，之后通过 Agent 对话逐步推进，不会自动套用固定工作流。</p><form onSubmit={onCreate}><input name="title" placeholder="例如：夏季活动脚本" required/><select name="product_id" defaultValue=""><option value="">暂不选择产品资料</option>{products.map((product)=><option key={product.id} value={product.id}>{product.title}</option>)}</select><textarea name="summary" placeholder="长期目标：最终希望达成什么？" required/><textarea name="agent_brief" placeholder="长期要求：风格、受众、边界和偏好（可选）"/><button className="primary-button" disabled={isCreating}>{isCreating?"创建中":"创建空间"}</button></form>{error?<div className="error-banner">{error}</div>:null}</aside></div></section>;
 }
 
 function ProductKnowledgeWorkspace({ products, selectedProductId, productPreview, isLoadingProductPreview, isCreatingProduct, isSavingProduct, error, onSelect, onStartJob, onCreate, onUpdate }) {
@@ -1696,12 +1733,13 @@ function OwnerDashboard({ overview, isLoading, error, onRefresh, onLogout }) {
 function ModelCallsWorkspace({ spaces = [], error }) {
   const [expandedCallId, setExpandedCallId] = useState("");
   const [selectedSpaceId, setSelectedSpaceId] = useState(() => spaces[0]?.id || "");
-  const [observability, setObservability] = useState({ runs: [], model_calls: [], memory_events: [] });
+  const [observability, setObservability] = useState({ runs: [], steps: [], model_calls: [], memory_events: [] });
   const [isLoadingObservability, setIsLoadingObservability] = useState(false);
   const [observabilityError, setObservabilityError] = useState("");
   const activeSpaceId = spaces.some((space) => space.id === selectedSpaceId) ? selectedSpaceId : spaces[0]?.id || "";
   const visibleCalls = observability.model_calls || [];
   const runs = observability.runs || [];
+  const runSteps = observability.steps || [];
   const memoryEvents = observability.memory_events || [];
   const totalInput = visibleCalls.reduce((total, call) => total + Number(call.prompt_tokens || 0), 0);
   const totalOutput = visibleCalls.reduce((total, call) => total + Number(call.output_tokens || 0), 0);
@@ -1710,7 +1748,7 @@ function ModelCallsWorkspace({ spaces = [], error }) {
 
   useEffect(() => {
     if (!activeSpaceId) {
-      setObservability({ runs: [], model_calls: [], memory_events: [] });
+      setObservability({ runs: [], steps: [], model_calls: [], memory_events: [] });
       return undefined;
     }
     let cancelled = false;
@@ -1786,6 +1824,11 @@ function ModelCallsWorkspace({ spaces = [], error }) {
               </article>;
             }) : <div className="debug-empty compact"><CircleHelp size={24}/><strong>暂无模型调用记录</strong><p>运行 Agent 后，请求详情会实时显示在这里。</p></div>}
           </div>
+        </section>
+
+        <section className="debug-section memory-section">
+          <div className="debug-section-head"><h2>运行步骤</h2><span>{runSteps.length} 条</span></div>
+          {runSteps.length ? <div className="debug-memory-list">{runSteps.map((step) => <article key={step.id}><strong>{step.index}. {step.key}</strong><span>{step.output_summary || step.input_summary || "-"}</span><time>{step.status} · {formatTime(step.started_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>暂无运行步骤</strong><p>任务开始后会按 Run 记录工作流步骤。</p></div>}
         </section>
 
         <section className="debug-section memory-section">

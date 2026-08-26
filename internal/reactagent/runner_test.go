@@ -32,3 +32,17 @@ func TestNormalizeRawJSON(t *testing.T) {
 		t.Fatalf("unexpected empty json: %s", empty)
 	}
 }
+
+func TestDefaultMaxStepsIsFour(t *testing.T) {
+	if defaultMaxSteps != 4 {
+		t.Fatalf("expected default max steps 4, got %d", defaultMaxSteps)
+	}
+}
+
+func TestToolCallKeyNormalizesEquivalentJSON(t *testing.T) {
+	first := toolCallKey("retrieve", []byte(`{"b":2,"a":1}`))
+	second := toolCallKey(" retrieve ", []byte(`{"a":1,"b":2}`))
+	if first != second {
+		t.Fatalf("expected equivalent calls to share a key: %q != %q", first, second)
+	}
+}

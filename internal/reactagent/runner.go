@@ -10,7 +10,7 @@ import (
 	"github.com/tian1363/scriptagent/internal/model"
 )
 
-const defaultMaxSteps = 6
+const defaultMaxSteps = 4
 
 type Tool struct {
 	Name        string
@@ -42,9 +42,14 @@ type Runner struct {
 type RunInput struct {
 	Scope         string
 	RefID         string
+	RunID         string
+	SpaceID       string
+	SessionID     string
+	TraceName     string
 	Goal          string
 	ContextPrompt string
 	Tools         []Tool
+	Attachments   []model.ContentItem
 }
 
 type actionEnvelope struct {
@@ -76,13 +81,14 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 	}
 
 	steps := []Step{}
+	toolResults := map[string]Step{}
 	for index := 0; index < r.maxSteps; index++ {
 		prompt := reactPrompt(input.Goal, input.ContextPrompt, input.Tools, steps)
 		result, err := r.client.GenerateDetailed(ctx, model.CallContext{
-			Scope: valueOr(input.Scope, "react"),
-			RefID: input.RefID,
-			Step:  fmt.Sprintf("react_step_%02d", index+1),
-		}, []model.ContentItem{{Text: prompt}})
+			Scope: valueOr(input.Scope, "react"), RefID: input.RefID, RunID: input.RunID,
+			SpaceID: input.SpaceID, SessionID: input.SessionID, TraceName: input.TraceName,
+			Step: fmt.Sprintf("react_step_%02d", index+1),
+		}, append([]model.ContentItem{{Text: prompt}}, input.Attachments...))
 		if err != nil {
 			return Result{Steps: steps}, err
 		}
@@ -105,16 +111,24 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			return Result{Answer: strings.TrimSpace(action.Answer), Steps: steps}, nil
 		case "tool":
 			tool, ok := tools[action.Tool]
+			normalizedInput := normalizeRawJSON(action.Input)
 			step := Step{
 				Index:  index + 1,
 				Kind:   "tool",
 				Reason: strings.TrimSpace(action.Reason),
 				Tool:   strings.TrimSpace(action.Tool),
-				Input:  normalizeRawJSON(action.Input),
+				Input:  normalizedInput,
 			}
 			if !ok {
 				step.Error = "unknown tool"
 				step.Observation = "工具不存在，请选择可用工具。"
+				steps = append(steps, step)
+				continue
+			}
+			callKey := toolCallKey(action.Tool, normalizedInput)
+			if previous, duplicate := toolResults[callKey]; duplicate {
+				step.Observation = "相同工具和参数已调用，复用 Step " + fmt.Sprint(previous.Index) + " 的结果：\n" + previous.Observation
+				step.Error = previous.Error
 				steps = append(steps, step)
 				continue
 			}
@@ -126,6 +140,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 				step.Observation = truncateRunes(observation, 5000)
 			}
 			steps = append(steps, step)
+			toolResults[callKey] = step
 		default:
 			steps = append(steps, Step{
 				Index:       index + 1,
@@ -140,6 +155,10 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 		Answer: "我已经完成多轮工具检查，但还没有得到足够稳定的最终答案。请缩小问题范围，或指定要使用的产品/skill。",
 		Steps:  steps,
 	}, nil
+}
+
+func toolCallKey(tool string, input json.RawMessage) string {
+	return strings.TrimSpace(tool) + "\x00" + string(normalizeRawJSON(input))
 }
 
 func reactPrompt(goal, contextPrompt string, tools []Tool, steps []Step) string {

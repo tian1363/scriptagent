@@ -185,6 +185,15 @@ type ScriptResult struct {
 	FissionScriptsJSON string
 }
 
+// RunContext carries stable observability identifiers through one execution.
+type RunContext struct {
+	RunID   string
+	Scope   string
+	RefID   string
+	SpaceID string
+	JobID   string
+}
+
 type ChatConversation struct {
 	ID               string    `json:"id"`
 	Title            string    `json:"title"`
@@ -219,10 +228,56 @@ type AgentStep struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// AgentRun represents one task execution inside a creative space.
+type AgentRun struct {
+	ID         string     `json:"id"`
+	SpaceID    string     `json:"space_id"`
+	JobID      string     `json:"job_id,omitempty"`
+	Status     string     `json:"status"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Error      string     `json:"error,omitempty"`
+}
+
+// AgentRunStep is a persisted workflow or harness step within an AgentRun.
+type AgentRunStep struct {
+	ID            string     `json:"id"`
+	RunID         string     `json:"run_id"`
+	Index         int        `json:"index"`
+	Key           string     `json:"key"`
+	Kind          string     `json:"kind"`
+	Status        string     `json:"status"`
+	InputSummary  string     `json:"input_summary,omitempty"`
+	OutputSummary string     `json:"output_summary,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	StartedAt     time.Time  `json:"started_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+}
+
+// MemoryEvent is an observable memory lifecycle event associated with an agent run.
+type MemoryEvent struct {
+	ID        string    `json:"id"`
+	SpaceID   string    `json:"space_id"`
+	RunID     string    `json:"run_id"`
+	Kind      string    `json:"kind"`
+	Payload   string    `json:"payload,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// SpaceObservability groups the execution history shown by the space debugger.
+type SpaceObservability struct {
+	Runs         []AgentRun     `json:"runs"`
+	Steps        []AgentRunStep `json:"steps"`
+	ModelCalls   []ModelCall    `json:"model_calls"`
+	MemoryEvents []MemoryEvent  `json:"memory_events"`
+}
+
 type ModelCall struct {
 	ID           string    `json:"id"`
 	Scope        string    `json:"scope"`
 	RefID        string    `json:"ref_id"`
+	SpaceID      string    `json:"space_id,omitempty"`
+	RunID        string    `json:"run_id,omitempty"`
 	Step         string    `json:"step"`
 	Model        string    `json:"model"`
 	InputJSON    string    `json:"input_json"`

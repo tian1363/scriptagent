@@ -1,6 +1,29 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/tian1363/scriptagent/internal/jobs"
+)
+
+func TestFissionPromptOmitsUpstreamBulkContextAndUnusedRules(t *testing.T) {
+	job := jobs.Job{
+		FissionCount:      1,
+		FissionDirections: "结构层-换CTA",
+		Requirement:       "保留品牌语气",
+	}
+	prompt := fissionScriptPrompt(job, `{"replica_script":{"title":"base"}}`)
+	if strings.Contains(prompt, "产品 Markdown") || strings.Contains(prompt, "视频理解结果") {
+		t.Fatal("fission prompt should not repeat full product or analysis context")
+	}
+	if !strings.Contains(prompt, "结构层-换CTA") || !strings.Contains(prompt, "重点改写最后 1-2 个分镜") {
+		t.Fatal("expected selected dimension and its rule")
+	}
+	if strings.Contains(prompt, "视听层-换BGM：") {
+		t.Fatal("unselected dimension rules should not be injected")
+	}
+}
 
 func TestValidateFissionDimensionsAllowsSingleSelectedElement(t *testing.T) {
 	scripts := []scriptPayload{

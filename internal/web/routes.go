@@ -37,6 +37,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Post("/products/{id}/creative-reports", h.createCreativeReport)
 		api.Get("/spaces", h.listSpaces)
 		api.Post("/spaces", h.createSpace)
+		api.Get("/spaces/{id}/observability", h.getSpaceObservability)
 		api.Get("/jobs", h.listJobs)
 		api.Post("/jobs", h.createJob)
 		api.Get("/jobs/{id}", h.getJob)

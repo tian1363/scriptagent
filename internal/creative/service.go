@@ -58,9 +58,8 @@ func (s *Service) GenerateReport(ctx context.Context, productID string, config D
 		return nil, err
 	}
 	result, err := s.client.GenerateDetailed(ctx, model.CallContext{
-		Scope: "creative_report",
-		RefID: product.ID,
-		Step:  "generate_strategy_report",
+		Scope: "creative_report", RefID: product.ID, SessionID: product.ID,
+		TraceName: "creative-strategy-report", Step: "generate_strategy_report",
 	}, []model.ContentItem{{Text: reportPrompt(*product, string(markdownBytes), string(configJSON))}})
 	if err != nil {
 		return nil, err

@@ -175,16 +175,10 @@ JSON Schema：
 }`, productMD, job.Requirement, analysisMarkdown)
 }
 
-func fissionScriptPrompt(job jobs.Job, productMD, analysisMarkdown, replicaScriptJSON string) string {
+func fissionScriptPrompt(job jobs.Job, replicaScriptJSON string) string {
 	return fmt.Sprintf(`你是 CreatiBI 裂变分镜脚本生成 Agent。请基于“复刻脚本”生成 %d 条裂变脚本。
 
-产品 Markdown：
-%s
-
 用户补充要求：
-%s
-
-视频理解结果：
 %s
 
 复刻脚本 JSON：
@@ -211,29 +205,8 @@ func fissionScriptPrompt(job jobs.Job, productMD, analysisMarkdown, replicaScrip
 - fission_scripts 数量必须严格等于 %d。
 - 输出必须是严格 JSON，不要 Markdown，不要代码块，不要解释。
 
-允许裂变维度：
-
-1. 视听层
-   - 换BGM：保留画面结构，替换音乐风格、情绪走向或卡点方式，写入 audio。
-   - 换音效：保留镜头和台词，替换关键动作、UI、转场、点击、爆点音效，写入 audio。
-   - 换色调/滤镜：保留主体与动作，改变 visual 中的色彩、光影、滤镜、氛围描述。
-   - 换字幕&花字：保留旁白核心，改写 subtitle 的花字风格、强调词、屏幕文字层级。
-   - 换画幅：保留内容结构，改写 visual 中的构图、主体位置、留白、贴片适配方式。
-   - 换配音(语速/声线)：保留语义，改写 voiceover 的语速、声线、情绪、口吻。
-
-2. 结构层
-   - 换开头钩子：重点改写前 1-2 个分镜的 visual/action/voiceover/subtitle，但保留后续链路。
-   - 换CTA：重点改写最后 1-2 个分镜的 voiceover/subtitle/action，强化不同转化动作。
-   - 时长压缩/拉伸：调整 time_range 和 duration_seconds，压缩或拉伸节奏，同时保留分镜顺序。
-   - 变速·节奏调整：保留时长大体不变，改变 action 和 camera_intent 中的速度、卡点、停顿。
-   - 换首帧/封面：重点改写第 1 个分镜的 visual、action、subtitle，让首帧更强。
-   - 同素材高光重剪：不换主体素材，重排高光重点和镜头强调，改写 camera_intent/action。
-
-3. 元素层
-   - 换局部角色/群演：保留场景与叙事，替换 visual/action 中的局部角色、群演或人物关系。
-   - 换局部场景贴片：保留主体动作，替换 visual/props_scene 中的局部背景、贴片、环境元素。
-   - 换局部道具/UI：保留镜头结构，替换 props_scene/visual 中的局部道具、UI 元素、按钮、弹窗。
-   - 字幕语言本地化：保留语义，按目标地区改写 subtitle 和必要的 voiceover 表达。
+本次可用裂变维度规则：
+%s
 
 JSON Schema：
 
@@ -268,7 +241,47 @@ JSON Schema：
       }
     }
   ]
-}`, job.FissionCount, productMD, job.Requirement, analysisMarkdown, replicaScriptJSON, selectedFissionDirections(job.FissionDirections), job.FissionCount)
+}`, job.FissionCount, job.Requirement, replicaScriptJSON, selectedFissionDirections(job.FissionDirections), job.FissionCount, fissionDimensionRules(job.FissionDirections))
+}
+
+var fissionDimensionRuleCatalog = map[string]string{
+	"视听层-换BGM":       "保留画面结构，替换音乐风格、情绪走向或卡点方式，写入 audio。",
+	"视听层-换音效":        "保留镜头和台词，替换关键动作、UI、转场、点击、爆点音效，写入 audio。",
+	"视听层-换色调/滤镜":     "保留主体与动作，改变 visual 中的色彩、光影、滤镜、氛围描述。",
+	"视听层-换字幕&花字":     "保留旁白核心，改写 subtitle 的花字风格、强调词、屏幕文字层级。",
+	"视听层-换画幅":        "保留内容结构，改写 visual 中的构图、主体位置、留白、贴片适配方式。",
+	"视听层-换配音(语速/声线)": "保留语义，改写 voiceover 的语速、声线、情绪、口吻。",
+	"结构层-换开头钩子":      "重点改写前 1-2 个分镜的 visual/action/voiceover/subtitle，但保留后续链路。",
+	"结构层-换CTA":       "重点改写最后 1-2 个分镜的 voiceover/subtitle/action，强化不同转化动作。",
+	"结构层-时长压缩/拉伸":    "调整 time_range 和 duration_seconds，压缩或拉伸节奏，同时保留分镜顺序。",
+	"结构层-变速·节奏调整":    "保留时长大体不变，改变 action 和 camera_intent 中的速度、卡点、停顿。",
+	"结构层-换首帧/封面":     "重点改写第 1 个分镜的 visual、action、subtitle，让首帧更强。",
+	"结构层-同素材高光重剪":    "不换主体素材，重排高光重点和镜头强调，改写 camera_intent/action。",
+	"元素层-换局部角色/群演":   "保留场景与叙事，替换 visual/action 中的局部角色、群演或人物关系。",
+	"元素层-换局部场景贴片":    "保留主体动作，替换 visual/props_scene 中的局部背景、贴片、环境元素。",
+	"元素层-换局部道具/UI":   "保留镜头结构，替换 props_scene/visual 中的局部道具、UI 元素、按钮、弹窗。",
+	"元素层-字幕语言本地化":    "保留语义，按目标地区改写 subtitle 和必要的 voiceover 表达。",
+}
+
+func fissionDimensionRules(raw string) string {
+	directions := selectedFissionDirectionList(raw)
+	if len(directions) == 0 {
+		directions = allFissionDirections()
+	}
+	lines := make([]string, 0, len(directions))
+	seen := map[string]bool{}
+	for _, direction := range directions {
+		if seen[direction] {
+			continue
+		}
+		seen[direction] = true
+		rule, ok := fissionDimensionRuleCatalog[direction]
+		if !ok {
+			rule = "严格只修改该维度对应内容，其他结构和元素保持不变。"
+		}
+		lines = append(lines, "- "+direction+"："+rule)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func selectedFissionDirections(raw string) string {

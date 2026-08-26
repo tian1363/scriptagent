@@ -64,6 +64,27 @@ export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
 
 Product Markdown retrieval uses embeddings for long documents. ScriptAgent stores product chunks in SQLite and uses DashScope embeddings for semantic Top-K retrieval; if embedding fails, it falls back to local keyword section matching.
 
+## Configure Langfuse
+
+ScriptAgent can optionally export Agent runs and model generations to Langfuse through OpenTelemetry. Local SQLite observability remains enabled and is not replaced by Langfuse.
+
+```bash
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_BASE_URL="https://cloud.langfuse.com"
+export LANGFUSE_ENVIRONMENT="development"
+go run ./cmd/server
+```
+
+For other Langfuse Cloud regions or a self-hosted deployment, set `LANGFUSE_BASE_URL` to that instance's base URL. Prompt and completion content is redacted by default. Only enable content capture after reviewing data-security requirements:
+
+```bash
+export LANGFUSE_CAPTURE_CONTENT="true"
+export LANGFUSE_RELEASE="local-dev"
+```
+
+If the keys are absent or trace export fails, normal task execution and local model-call recording continue unaffected.
+
 ## 工作方式
 
 - **开始创作**：描述目标、选择资料，进入脚本执行流程。
@@ -84,3 +105,6 @@ Closing and reopening the program keeps previous jobs and uploaded files as long
 
 - Requirements: `docs/requirements.md`
 - Technical design: `docs/technical-design.md`
+- Token optimization strategy: `docs/token-optimization.md`
+- Agent runtime and harness: `docs/agent-runtime-harness.md`
+- Langfuse observability: `docs/langfuse-observability.md`
