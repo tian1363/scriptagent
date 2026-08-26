@@ -1477,36 +1477,34 @@ textarea:focus {
   border-radius: var(--cbi-radius-lg);
   background: var(--cbi-surface);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .chat-context-bar {
-  display: grid;
-  grid-template-columns: minmax(240px, 420px) minmax(0, 1fr);
-  align-items: end;
-  gap: var(--cbi-space-1-5);
-  padding: var(--cbi-space-1-5) var(--cbi-space-2);
+  display: flex;
+  align-items: center;
+  padding: 10px var(--cbi-space-2);
   border-bottom: 1px solid var(--cbi-divider);
-  background: var(--cbi-bg-2);
+  background: var(--cbi-bg-1);
 }
 
-.context-chip {
-  min-height: var(--cbi-h-medium);
-  display: inline-flex;
+.chat-product-select {
+  display: flex;
   align-items: center;
-  gap: var(--cbi-space-1);
-  padding: 0 var(--cbi-space-1-5);
-  border: 1px solid var(--cbi-divider-subtle);
-  border-radius: var(--cbi-radius-sm);
+  gap: 8px;
   color: var(--cbi-fg-2);
-  background: var(--cbi-bg-1);
   font-size: var(--cbi-fs-sm);
 }
 
-.context-chip.active {
-  border-color: rgba(139, 78, 239, 0.22);
-  color: var(--cbi-primary-dark);
-  background: rgba(246, 240, 250, 0.56);
+.chat-product-select select {
+  min-width: 180px;
+  height: 34px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--cbi-border-default);
+  border-radius: 9px;
+  color: var(--cbi-fg-1);
+  background: var(--cbi-bg-1);
+  font: inherit;
 }
 
 .chat-messages {
@@ -1722,8 +1720,15 @@ textarea:focus {
   background: rgba(246, 240, 250, 0.42);
 }
 
-.citation-panel .section-heading {
-  padding: 0 var(--cbi-space-1);
+.citation-panel > summary {
+  cursor: pointer;
+  color: var(--cbi-fg-2);
+  font-size: var(--cbi-fs-sm);
+  font-weight: var(--cbi-fw-semibold);
+}
+
+.citation-panel[open] > summary {
+  margin-bottom: var(--cbi-space-1);
 }
 
 .citation-list {

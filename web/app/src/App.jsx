@@ -1032,7 +1032,6 @@ function JobsWorkspace(props) {
 
 function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, agentSteps, isThinking, draft, products, skills, selectedProductId, isSending, error, attachment, onDraft, onAttachment, onProduct, onSend }) {
   const messages = optimisticMessages || thread?.messages || [];
-  const selectedProduct = products.find((product) => product.id === selectedProductId);
   const messagesEndRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
 
@@ -1047,21 +1046,12 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
 
   return (
     <section className="chat-pane">
-      <div className="result-header">
-        <div>
-          <h2>{thread?.conversation?.title || "通用对话"}</h2>
-          <p>用于讨论脚本策略、裂变方向、发布问题和一般创作问题，可调用产品库资料。</p>
-        </div>
-        <span className="status-pill neutral">
-          <Bot size={13} />
-          ReAct 工作流
-        </span>
-      </div>
       <div className="chat-context-bar">
-        <label>
-          <span>产品上下文</span>
+        <label className="chat-product-select">
+          <Package size={15} />
+          <span>产品资料</span>
           <select value={selectedProductId} onChange={(event) => onProduct(event.target.value)}>
-            <option value="">不调用产品库</option>
+            <option value="">未选择</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.title}
@@ -1069,15 +1059,10 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
             ))}
           </select>
         </label>
-        <div className={`context-chip ${selectedProduct ? "active" : ""}`}>
-          <Package size={14} />
-          <span>{selectedProduct ? `本轮会引用 ${selectedProduct.md_name}` : "普通对话"}</span>
-        </div>
       </div>
       <div className="chat-messages">
         {messages.length || isThinking || typingMessage ? (
           <>
-            {agentSteps?.length ? <AgentStepsPanel steps={agentSteps} /> : null}
             {citations?.length ? <CitationPanel citations={citations} /> : null}
             {messages.map((message) => (
               <ChatMessageBubble key={message.id} message={message} />
@@ -1207,36 +1192,39 @@ function AgentStepsPanel({ steps }) {
 
 function CitationPanel({ citations }) {
   return (
-    <section className="citation-panel">
-      <div className="section-heading">
-        <span>本轮引用</span>
-        <small>{citations.length} 个产品章节</small>
-      </div>
+    <details className="citation-panel">
+      <summary>参考了 {citations.length} 条产品资料</summary>
       <div className="citation-list">
         {citations.map((citation, index) => (
           <article key={`${citation.chunk_id || citation.chunk_index}-${index}`} className="citation-card">
             <div>
               <strong>{citation.heading || "产品资料"}</strong>
-              <span>{citation.product_name} · {citation.source === "embedding" ? `相似度 ${Number(citation.score || 0).toFixed(3)}` : citation.source}</span>
+              <span>{citation.product_name}</span>
             </div>
-            <p>{citation.snippet}</p>
           </article>
         ))}
       </div>
-    </section>
+    </details>
   );
 }
 
 function ChatMessageBubble({ message, isTyping = false }) {
+  const content = displayChatMessageContent(message);
   return (
     <div className={`chat-message ${message.role} ${isTyping ? "typing" : ""}`}>
       <span>{message.role === "assistant" ? "助手" : "用户"}</span>
       <p>
-        {message.content}
+        {content}
         {isTyping ? <b className="typing-cursor" /> : null}
       </p>
     </div>
   );
+}
+
+function displayChatMessageContent(message) {
+  const content = message?.content || "";
+  if (message?.role !== "user" || !content.startsWith("继续推进创作空间「")) return content;
+  return content.split("\n", 1)[0];
 }
 
 function FissionDirectionPicker({ count }) {
