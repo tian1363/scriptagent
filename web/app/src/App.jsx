@@ -27,7 +27,7 @@ import {
   Upload,
   Video,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   createJob,
   createCreativeReport,
@@ -1058,6 +1058,9 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
   const messages = optimisticMessages || thread?.messages || [];
   const messagesRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
+  let lastAssistantIndex = -1;
+  messages.forEach((message, index) => { if (message.role === "assistant") lastAssistantIndex = index; });
+  const showCompletedTrace = Boolean(agentSteps?.length && !isThinking && !typingMessage);
 
   useEffect(() => {
     const messageList = messagesRef.current;
@@ -1090,12 +1093,13 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
         {messages.length || isThinking || typingMessage ? (
           <>
             {citations?.length ? <CitationPanel citations={citations} /> : null}
-            {messages.map((message) => (
-              <ChatMessageBubble key={message.id} message={message} />
+            {messages.map((message, index) => (
+              <Fragment key={message.id}>
+                {showCompletedTrace && index === lastAssistantIndex ? <AgentExecutionTrace steps={agentSteps} /> : null}
+                <ChatMessageBubble message={message} />
+              </Fragment>
             ))}
-            {isThinking ? (
-              <AgentResponseProgress hasProduct={Boolean(selectedProductId)} hasAttachment={Boolean(attachment)} />
-            ) : null}
+            {isThinking || typingMessage ? <AgentExecutionTrace steps={agentSteps} isRunning={isThinking} hasProduct={Boolean(selectedProductId)} hasAttachment={Boolean(attachment)} /> : null}
             {typingMessage ? <ChatMessageBubble message={{ ...typingMessage, content: typingMessage.visible }} isTyping /> : null}
           </>
         ) : (
@@ -1158,30 +1162,59 @@ function AttachmentPreview({ attachment, onRemove }) {
   );
 }
 
-function AgentResponseProgress({ hasProduct, hasAttachment }) {
+function AgentExecutionTrace({ steps = [], isRunning = false, hasProduct = false, hasAttachment = false }) {
   const [stage, setStage] = useState(0);
-  const actions = [
+  const [expanded, setExpanded] = useState(isRunning);
+  const pendingActions = [
     "理解目标与输出要求",
     hasAttachment ? "读取并分析上传素材" : hasProduct ? "检索相关产品资料" : "整理可用上下文",
     "组织可执行结果",
   ];
+  const completedActions = steps.map((step) => ({
+    label: agentStepLabel(step),
+    detail: step.error ? "执行未完成，已采用可用信息继续处理" : step.kind === "final" ? "结果已经组织完成" : "已获得可用于回答的信息",
+    error: Boolean(step.error),
+  }));
 
   useEffect(() => {
     setStage(0);
+    setExpanded(isRunning);
+    if (!isRunning) return undefined;
     const timers = [setTimeout(() => setStage(1), 900), setTimeout(() => setStage(2), 2400)];
     return () => timers.forEach((timer) => clearTimeout(timer));
-  }, [hasProduct, hasAttachment]);
+  }, [hasProduct, hasAttachment, isRunning]);
+
+  const status = isRunning
+    ? (stage === 0 ? "正在理解你的目标" : stage === 1 ? (hasAttachment ? "正在分析素材" : hasProduct ? "正在读取产品资料" : "正在准备任务上下文") : "正在组织结果")
+    : `已完成${completedActions.length > 1 ? ` · ${completedActions.length} 个步骤` : ""}`;
 
   return (
-    <section className="agent-response-progress" aria-live="polite">
-      <div className="agent-progress-head"><Loader2 className="spin" size={16} /><strong>助手处理中</strong></div>
-      <div className="agent-progress-summary"><span>摘要</span><p>{hasAttachment ? "正在理解你的问题和素材。" : hasProduct ? "正在结合问题与产品资料。" : "正在理解任务并准备回答。"}</p></div>
-      <div className="agent-progress-actions">
-        <span>行动</span>
-        <ol>{actions.map((action, index) => <li className={index < stage ? "done" : index === stage ? "active" : ""} key={action}><i />{action}</li>)}</ol>
-      </div>
+    <section className={`agent-execution-trace ${isRunning ? "running" : "complete"}`} aria-live="polite">
+      <button className="agent-trace-toggle" type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+        <span>{isRunning ? <Loader2 className="spin" size={15} /> : <CheckCircle2 size={15} />}{status}</span>
+        <ChevronDown className={expanded ? "expanded" : ""} size={15} />
+      </button>
+      {expanded ? (
+        <ol className="agent-trace-steps">
+          {(isRunning ? pendingActions : completedActions).map((action, index) => {
+            const item = typeof action === "string" ? { label: action, detail: "" } : action;
+            const state = isRunning ? (index < stage ? "done" : index === stage ? "active" : "pending") : item.error ? "error" : "done";
+            return <li className={state} key={`${item.label}-${index}`}><i /> <div><strong>{item.label}</strong>{item.detail ? <small>{item.detail}</small> : null}</div></li>;
+          })}
+        </ol>
+      ) : null}
     </section>
   );
+}
+
+function agentStepLabel(step) {
+  if (step.kind === "final") return "组织并校验最终结果";
+  return ({
+    list_products: "检查可用产品资料",
+    retrieve_product_sections: "检索相关产品内容",
+    read_product_markdown: "读取产品完整资料",
+    call_skill: "调用专业创作技能",
+  })[step.tool] || "执行 Agent 工具";
 }
 
 function ChatTaskStarter({ onSelect }) {
