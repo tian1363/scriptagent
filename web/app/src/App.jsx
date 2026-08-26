@@ -854,7 +854,7 @@ function ChatSidebar({ chats, selectedChat, collapsed, onSelect, onNew, onToggle
         <div className="chat-history-actions">
           <button className="mini-button" type="button" onClick={onNew}>新对话</button>
           <button className="history-toggle" type="button" onClick={onToggle} title={collapsed ? "展开历史对话" : "收起历史对话"} aria-label={collapsed ? "展开历史对话" : "收起历史对话"}>
-            {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            {collapsed ? <MessageSquare size={17} /> : <ChevronLeft size={17} />}
           </button>
         </div>
       </div>
