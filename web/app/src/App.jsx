@@ -1081,17 +1081,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
               <ChatMessageBubble key={message.id} message={message} />
             ))}
             {isThinking ? (
-              <div className="chat-message assistant thinking">
-                <span>助手</span>
-                <p>
-                  <span className="thinking-dots" aria-label="模型思考中">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                  <span>模型思考中</span>
-                </p>
-              </div>
+              <AgentResponseProgress hasProduct={Boolean(selectedProductId)} hasAttachment={Boolean(attachment)} />
             ) : null}
             {typingMessage ? <ChatMessageBubble message={{ ...typingMessage, content: typingMessage.visible }} isTyping /> : null}
             <div ref={messagesEndRef} />
@@ -1153,6 +1143,32 @@ function AttachmentPreview({ attachment, onRemove }) {
       </div>
       <button type="button" onClick={onRemove}>移除</button>
     </div>
+  );
+}
+
+function AgentResponseProgress({ hasProduct, hasAttachment }) {
+  const [stage, setStage] = useState(0);
+  const actions = [
+    "理解目标与输出要求",
+    hasAttachment ? "读取并分析上传素材" : hasProduct ? "检索相关产品资料" : "整理可用上下文",
+    "组织可执行结果",
+  ];
+
+  useEffect(() => {
+    setStage(0);
+    const timers = [setTimeout(() => setStage(1), 900), setTimeout(() => setStage(2), 2400)];
+    return () => timers.forEach((timer) => clearTimeout(timer));
+  }, [hasProduct, hasAttachment]);
+
+  return (
+    <section className="agent-response-progress" aria-live="polite">
+      <div className="agent-progress-head"><Loader2 className="spin" size={16} /><strong>助手处理中</strong></div>
+      <div className="agent-progress-summary"><span>摘要</span><p>{hasAttachment ? "正在理解你的问题和素材。" : hasProduct ? "正在结合问题与产品资料。" : "正在理解任务并准备回答。"}</p></div>
+      <div className="agent-progress-actions">
+        <span>行动</span>
+        <ol>{actions.map((action, index) => <li className={index < stage ? "done" : index === stage ? "active" : ""} key={action}><i />{action}</li>)}</ol>
+      </div>
+    </section>
   );
 }
 
@@ -1317,7 +1333,10 @@ function ChatMessageBubble({ message, isTyping = false }) {
 }
 
 function displayChatMessageContent(message) {
-  const content = message?.content || "";
+  const content = (message?.content || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/（当前已选产品 ID：[^）]+）/g, "")
+    .trim();
   if (message?.role !== "user" || !content.startsWith("继续推进创作空间「")) return content;
   return content.split("\n", 1)[0];
 }
