@@ -77,7 +77,7 @@ func TestReactContextDoesNotContainCurrentGoal(t *testing.T) {
 		{ID: "m2", Role: "assistant", Content: "earlier answer"},
 		{ID: "m3", Role: "user", Content: "CURRENT UNIQUE GOAL"},
 	}
-	prompt := reactChatContextPrompt(messages[:len(messages)-1], "", "")
+	prompt := reactChatContextPrompt(messages[:len(messages)-1], "", "", "")
 	if strings.Contains(prompt, "CURRENT UNIQUE GOAL") {
 		t.Fatal("current goal must only be passed through RunInput.Goal")
 	}
@@ -91,9 +91,19 @@ func TestReactContextKeepsPendingBatchMessages(t *testing.T) {
 	for index := 0; index < cap(messages); index++ {
 		messages = append(messages, jobs.ChatMessage{Role: "user", Content: fmt.Sprintf("pending-%02d", index)})
 	}
-	prompt := reactChatContextPrompt(messages, "existing summary", "")
+	prompt := reactChatContextPrompt(messages, "existing summary", "", "")
 	if !strings.Contains(prompt, "pending-00") || !strings.Contains(prompt, "pending-18") {
 		t.Fatal("messages waiting for the next summary batch must remain in context")
+	}
+}
+
+func TestReactChatContextIncludesCreativeSpaceWithoutCreatingUserMessage(t *testing.T) {
+	prompt := reactChatContextPrompt(nil, "", "product-1", "创作空间：夏季投放\n长期目标：完成 8 条脚本\n长期要求：节奏快")
+	if !strings.Contains(prompt, "当前创作空间上下文") || !strings.Contains(prompt, "完成 8 条脚本") {
+		t.Fatalf("missing space context: %s", prompt)
+	}
+	if strings.Contains(prompt, "用户：继续推进创作空间") {
+		t.Fatalf("space context should not be a user message: %s", prompt)
 	}
 }
 

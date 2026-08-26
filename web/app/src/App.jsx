@@ -549,7 +549,7 @@ export function App() {
 
   async function handleSendChat(event) {
     event.preventDefault();
-    await sendChatToAgent(chatDraft, chatProductId, selectedChat?.conversation?.id || "", chatAttachment);
+    await sendChatToAgent(chatDraft, chatProductId, selectedChat?.conversation?.id || "", chatAttachment, selectedChat?.conversation?.space_id || "");
   }
 
   async function handleStartAgentChat(productID, goal) {
@@ -561,16 +561,17 @@ export function App() {
 
   async function handleStartSpaceAgent(space) {
     if (!space) return;
-    const spaceContext = [
-      `继续推进创作空间「${space.title}」。`,
-      space.summary ? `空间目标：${space.summary}` : "",
-      space.agent_brief ? `长期要求：${space.agent_brief}` : "",
-      "请结合这些长期上下文判断当前最合适的下一步；需要资料时主动读取，需要补充信息时直接提问。不要自动启动固定工作流。",
-    ].filter(Boolean).join("\n");
+    setError("");
     setView("chat");
     setSelectedChat({ conversation: { space_id: space.id, product_id: space.product_id || "", title: space.title }, messages: [] });
     setChatProductId(space.product_id || "");
-    await sendChatToAgent(spaceContext, space.product_id || "", "", null, space.id);
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setChatCitations([]);
+    setChatAgentSteps([]);
+    setIsChatThinking(false);
+    setChatAttachment(null);
+    setChatDraft("");
   }
 
   async function handleCreateProduct(eventOrForm) {

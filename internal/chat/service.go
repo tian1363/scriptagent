@@ -117,6 +117,12 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 
 	summary := s.refreshSummary(ctx, conversationID, userMessage.ID, conversation, messages)
 	contextMessages := messagesAfterSummary(messages[:len(messages)-1], conversation.SummaryMessageID)
+	spaceContext := ""
+	if conversation != nil && conversation.SpaceID != "" {
+		if space, spaceErr := s.store.GetSpace(conversation.SpaceID); spaceErr == nil {
+			spaceContext = strings.Join([]string{"创作空间：" + space.Title, "长期目标：" + space.Summary, "长期要求：" + space.AgentBrief}, "\n")
+		}
+	}
 	citations := []jobs.ProductCitation{}
 	reactResult, err := s.reactRunner.Run(ctx, reactagent.RunInput{
 		Scope:         "chat",
@@ -125,7 +131,7 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 		SessionID:     conversationID,
 		TraceName:     "chat-agent-loop",
 		Goal:          displayContent,
-		ContextPrompt: reactChatContextPrompt(contextMessages, summary, productID),
+		ContextPrompt: reactChatContextPrompt(contextMessages, summary, productID, spaceContext),
 		Tools:         s.reactTools(conversationID, userMessage.ID, productID, content, &citations),
 		Attachments:   modelAttachments,
 	})
@@ -570,7 +576,7 @@ func chatPrompt(messages []jobs.ChatMessage, summary, productContext string) str
 	return strings.Join(lines, "\n")
 }
 
-func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProductID string) string {
+func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProductID, spaceContext string) string {
 	lines := []string{
 		"你是 ScriptAgent 的通用创作与脚本策略助手。",
 		"当前后端已启用 ReAct：你可以先调用工具/skill，再给最终答案。",
@@ -583,6 +589,9 @@ func reactChatContextPrompt(messages []jobs.ChatMessage, summary, selectedProduc
 		lines = append(lines, "当前用户在前端选择的产品 ID："+selectedProductID, "需要产品事实时优先调用 retrieve_product_sections。", "")
 	} else {
 		lines = append(lines, "当前用户未选择产品；如问题依赖产品事实，可先调用 list_products。", "")
+	}
+	if strings.TrimSpace(spaceContext) != "" {
+		lines = append(lines, "当前创作空间上下文：", spaceContext, "此上下文只用于完成任务，不要向用户复述上下文注入过程。", "")
 	}
 	if strings.TrimSpace(summary) != "" {
 		lines = append(lines, "长期会话摘要：", summary, "")
