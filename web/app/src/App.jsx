@@ -1743,25 +1743,29 @@ function OwnerDashboard({ overview, isLoading, error, onRefresh, onLogout }) {
   </section>;
 }
 
-function ModelCallsWorkspace({ spaces = [], error }) {
+function ModelCallsWorkspace({ calls = [], spaces = [], error }) {
   const [expandedCallId, setExpandedCallId] = useState("");
-  const [selectedSpaceId, setSelectedSpaceId] = useState(() => spaces[0]?.id || "");
+  const [selectedSpaceId, setSelectedSpaceId] = useState("");
   const [observability, setObservability] = useState({ runs: [], steps: [], model_calls: [], memory_events: [] });
   const [isLoadingObservability, setIsLoadingObservability] = useState(false);
   const [observabilityError, setObservabilityError] = useState("");
-  const activeSpaceId = spaces.some((space) => space.id === selectedSpaceId) ? selectedSpaceId : spaces[0]?.id || "";
-  const visibleCalls = observability.model_calls || [];
+  const activeSpaceId = spaces.some((space) => space.id === selectedSpaceId) ? selectedSpaceId : "";
+  const visibleCalls = activeSpaceId ? observability.model_calls || [] : calls;
   const runs = observability.runs || [];
   const runSteps = observability.steps || [];
   const memoryEvents = observability.memory_events || [];
   const totalInput = visibleCalls.reduce((total, call) => total + Number(call.prompt_tokens || 0), 0);
   const totalOutput = visibleCalls.reduce((total, call) => total + Number(call.output_tokens || 0), 0);
   const totalLatency = visibleCalls.reduce((total, call) => total + Number(call.latency_ms || 0), 0);
-  const runCount = runs.length;
+  const runCount = activeSpaceId
+    ? runs.length
+    : new Set(visibleCalls.map((call) => call.run_id).filter(Boolean)).size;
 
   useEffect(() => {
     if (!activeSpaceId) {
       setObservability({ runs: [], steps: [], model_calls: [], memory_events: [] });
+      setObservabilityError("");
+      setIsLoadingObservability(false);
       return undefined;
     }
     let cancelled = false;
@@ -1793,11 +1797,12 @@ function ModelCallsWorkspace({ spaces = [], error }) {
       <header className="debug-observer-head">
         <div className="debug-observer-title"><Activity size={20} /><strong>运行调试</strong></div>
         <div className="debug-space-control">
-          <label htmlFor="debug-space">创作空间</label>
+          <label htmlFor="debug-space">运行范围</label>
           <select id="debug-space" value={activeSpaceId} onChange={(event) => { setSelectedSpaceId(event.target.value); setExpandedCallId(""); }}>
-            {spaces.length ? spaces.map((space) => <option value={space.id} key={space.id}>{space.title}</option>) : <option value="">暂无空间</option>}
+            <option value="">全部运行（含对话）</option>
+            {spaces.map((space) => <option value={space.id} key={space.id}>{space.title}</option>)}
           </select>
-          <span>{runCount} 次运行</span>
+          <span>{runCount} 次运行 · {visibleCalls.length} 次调用</span>
         </div>
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
@@ -1835,18 +1840,18 @@ function ModelCallsWorkspace({ spaces = [], error }) {
                   <section><h3>原始响应</h3><pre className="result-output json">{pretty(call.response_json)}</pre></section>
                 </div> : null}
               </article>;
-            }) : <div className="debug-empty compact"><CircleHelp size={24}/><strong>暂无模型调用记录</strong><p>运行 Agent 后，请求详情会实时显示在这里。</p></div>}
+            }) : <div className="debug-empty compact"><CircleHelp size={24}/><strong>暂无模型调用记录</strong><p>{activeSpaceId ? "这个创作空间还没有运行记录。" : "运行 Agent 后，请求详情会实时显示在这里。"}</p></div>}
           </div>
         </section>
 
         <section className="debug-section memory-section">
           <div className="debug-section-head"><h2>运行步骤</h2><span>{runSteps.length} 条</span></div>
-          {runSteps.length ? <div className="debug-memory-list">{runSteps.map((step) => <article key={step.id}><strong>{step.index}. {step.key}</strong><span>{step.output_summary || step.input_summary || "-"}</span><time>{step.status} · {formatTime(step.started_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>暂无运行步骤</strong><p>任务开始后会按 Run 记录工作流步骤。</p></div>}
+          {runSteps.length ? <div className="debug-memory-list">{runSteps.map((step) => <article key={step.id}><strong>{step.index}. {step.key}</strong><span>{step.output_summary || step.input_summary || "-"}</span><time>{step.status} · {formatTime(step.started_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>暂无运行步骤</strong><p>{activeSpaceId ? "任务开始后会按 Run 记录工作流步骤。" : "选择创作空间后，可查看该空间的工作流步骤。"}</p></div>}
         </section>
 
         <section className="debug-section memory-section">
           <div className="debug-section-head"><h2>Memory 行为</h2><span>{memoryEvents.length} 条</span></div>
-          {memoryEvents.length ? <div className="debug-memory-list">{memoryEvents.map((event) => <article key={event.id}><strong>{event.kind}</strong><span>{event.payload || "-"}</span><time>{formatTime(event.created_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>本次运行没有 Memory 事件</strong><p>挂载、提取、Dream、同步和冲突会在这里实时显示。</p></div>}
+          {memoryEvents.length ? <div className="debug-memory-list">{memoryEvents.map((event) => <article key={event.id}><strong>{event.kind}</strong><span>{event.payload || "-"}</span><time>{formatTime(event.created_at)}</time></article>)}</div> : <div className="debug-empty"><CircleHelp size={28}/><strong>本次运行没有 Memory 事件</strong><p>{activeSpaceId ? "挂载、提取、Dream、同步和冲突会在这里实时显示。" : "选择创作空间后，可查看该空间的 Memory 行为。"}</p></div>}
         </section>
       </div>
     </section>
