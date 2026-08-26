@@ -1090,7 +1090,7 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
         {showSkillMenu && skills?.length ? <SkillCommandMenu skills={skills} onSelect={handleSkill} onClose={() => setShowSkillMenu(false)} /> : null}
-        {attachment ? <div className="attachment-chip"><span>{attachment.name}</span><button type="button" onClick={() => onAttachment(null)}>移除</button></div> : null}
+        {attachment ? <AttachmentPreview attachment={attachment} onRemove={() => onAttachment(null)} /> : null}
         <textarea value={draft} onChange={(event) => onDraft(event.target.value)} rows="3" placeholder="发消息或创建任务… / 使用技能，添加素材" />
         <div className="chat-composer-toolbar">
           <div className="composer-tools">
@@ -1112,6 +1112,34 @@ function ChatWorkspace({ thread, optimisticMessages, typingMessage, citations, a
         </div>
       </form>
     </section>
+  );
+}
+
+function AttachmentPreview({ attachment, onRemove }) {
+  const [previewURL, setPreviewURL] = useState("");
+  const isVideo = attachment?.type?.startsWith("video/");
+
+  useEffect(() => {
+    if (!attachment) return undefined;
+    const url = URL.createObjectURL(attachment);
+    setPreviewURL(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment]);
+
+  return (
+    <div className="attachment-preview">
+      <div className="attachment-cover">
+        {previewURL ? (isVideo
+          ? <video src={previewURL} muted playsInline preload="metadata" aria-label={attachment.name} />
+          : <img src={previewURL} alt={attachment.name} />) : null}
+        {isVideo ? <span className="attachment-video-badge"><Video size={13} />视频</span> : null}
+      </div>
+      <div className="attachment-meta">
+        <strong>{attachment.name}</strong>
+        <small>{isVideo ? "视频素材" : "图片素材"}</small>
+      </div>
+      <button type="button" onClick={onRemove}>移除</button>
+    </div>
   );
 }
 
