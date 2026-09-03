@@ -8,6 +8,7 @@
 *.sqlite3
 *.log
 /tmp/
+/backups/
 
 # Local configuration and secrets
 .env
@@ -25,7 +26,7 @@
 /scriptagent
 
 # Frontend
-/web/app/node_modules/
+**/node_modules/
 /web/app/dist/
 /web/app/.vite/
 

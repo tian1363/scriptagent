@@ -1,12 +1,49 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tian1363/scriptagent/internal/model"
+	"github.com/tian1363/scriptagent/internal/userctx"
 )
+
+func TestSessionTokenIsHashedAtRest(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	user, err := store.CreateUser(CreateUserInput{Email: "session@example.com", Role: "member", Status: "active", PasswordHash: "unused"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const token = "raw-browser-session-token"
+	if _, err := store.CreateSession(CreateSessionInput{Token: token, UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := store.db.QueryRow(`SELECT token FROM sessions WHERE user_id=?`, user.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == token || !strings.HasPrefix(stored, "sha256:") {
+		t.Fatalf("session token was not hashed at rest: %q", stored)
+	}
+	if _, err := store.GetSession(token); err != nil {
+		t.Fatalf("raw browser token no longer authenticates: %v", err)
+	}
+	if err := store.DeleteSession(token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetSession(token); err == nil {
+		t.Fatal("deleted session still authenticates")
+	}
+}
 
 func TestStoreProducts(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
@@ -220,6 +257,9 @@ func TestStoreModelRuntimeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if err := store.ConfigureSecretEncryption(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := store.SaveModelSettings(ModelSettings{
 		APIKey:   "sk-test",
@@ -397,5 +437,51 @@ func TestVideoGenerationKeepsReferenceAssetOrder(t *testing.T) {
 	}
 	if len(got.SourceAssetIDs) != 2 || got.SourceAssetIDs[0] != "asset-2" || got.SourceAssetIDs[1] != "asset-1" {
 		t.Fatalf("reference order was not preserved: %+v", got.SourceAssetIDs)
+	}
+}
+
+func TestUserAPIKeyIsEncryptedAtRest(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "secrets.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	if err := store.ConfigureSecretEncryption(key); err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.CreateUser(CreateUserInput{Email: "secret@example.com", PasswordHash: "hash", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveUserModelSettings(user.ID, ModelSettings{Capability: "text", Mode: "byok", APIKey: "sk-private-value"}); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := store.db.QueryRow(`SELECT api_key FROM user_model_capability_settings WHERE user_id=? AND capability='text'`, user.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == "sk-private-value" || !strings.HasPrefix(stored, encryptedSecretPrefix) {
+		t.Fatalf("API key was not encrypted at rest: %q", stored)
+	}
+	settings, err := store.GetUserModelSettingsForCapability(user.ID, "text")
+	if err != nil || settings.APIKey != "sk-private-value" {
+		t.Fatalf("API key did not decrypt correctly: settings=%+v err=%v", settings, err)
+	}
+}
+
+func TestUserWithoutSettingsDoesNotFallBackToManagedKey(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "byok.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := userctx.WithUser(context.Background(), userctx.User{ID: "invited-user"})
+	runtime, err := store.GetModelRuntimeConfig(ctx, "text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Source != "byok" || runtime.APIKey != "" {
+		t.Fatalf("user unexpectedly inherited a managed credential: %+v", runtime)
 	}
 }

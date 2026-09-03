@@ -14,20 +14,20 @@ func TestSingleAccountRegistrationAndSession(t *testing.T) {
 	}
 	defer store.Close()
 
-	service := NewService(store)
+	service := NewService(store, Config{RegistrationMode: "open"})
 	available, err := service.RegistrationAvailable()
 	if err != nil || !available {
 		t.Fatalf("expected registration to be available: available=%v err=%v", available, err)
 	}
 
-	user, session, err := service.Register("Admin@Example.com", "safe-password", "管理员")
+	user, session, err := service.Register("Admin@Example.com", "safe-password", "管理员", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if user.Email != "admin@example.com" || user.PasswordHash == "" {
 		t.Fatalf("unexpected public user: %+v", user)
 	}
-	second, _, err := service.Register("other@example.com", "safe-password", "Other")
+	second, _, err := service.Register("other@example.com", "safe-password", "Other", "")
 	if err != nil || second.ID == user.ID {
 		t.Fatalf("expected a distinct second account: user=%+v err=%v", second, err)
 	}
@@ -44,5 +44,24 @@ func TestSingleAccountRegistrationAndSession(t *testing.T) {
 	}
 	if _, err := service.Authenticate(session.Token); err == nil {
 		t.Fatal("expected logged-out session to be rejected")
+	}
+}
+
+func TestInviteRegistrationIsOneTimeAfterBootstrap(t *testing.T) {
+	store, err := jobs.OpenStore(filepath.Join(t.TempDir(), "auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	service := NewService(store, Config{RegistrationMode: "invite", InviteCodes: []string{"invite-once"}})
+	if _, _, err := service.Register("owner@example.com", "safe-password", "Owner", ""); err != nil {
+		t.Fatalf("bootstrap registration failed: %v", err)
+	}
+	if _, _, err := service.Register("invited@example.com", "safe-password", "Invited", "invite-once"); err != nil {
+		t.Fatalf("invited registration failed: %v", err)
+	}
+	if _, _, err := service.Register("reused@example.com", "safe-password", "Reused", "invite-once"); err == nil {
+		t.Fatal("expected a consumed invite to be rejected")
 	}
 }

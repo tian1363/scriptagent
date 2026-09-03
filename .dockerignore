@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+data
+uploads
+web/app/node_modules
+web/app/dist
+web/website
+*.db
+*.log

@@ -1524,6 +1524,7 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
       name: String(form.get("name") || ""),
       email: String(form.get("email") || ""),
       password: String(form.get("password") || ""),
+	  invite_code: String(form.get("invite_code") || ""),
     });
     setIsSubmitting(false);
   }
@@ -1540,14 +1541,14 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
         </div>
         <div className="auth-heading">
           <span className="eyebrow">
-            {mode === "register" ? "首次设置" : "欢迎回来"}
+            {mode === "register" ? "受邀加入" : "欢迎回来"}
           </span>
           <h1 id="auth-title">
-            {mode === "register" ? "创建管理员账号" : "登录工作台"}
+            {mode === "register" ? "创建账号" : "登录工作台"}
           </h1>
           <p>
             {mode === "register"
-              ? "创建首个账号，保护当前工作区与模型配置。"
+              ? "首个管理员可直接创建；其他用户需要邀请码。"
               : "登录后继续使用你的创意空间和产品资料。"}
           </p>
         </div>
@@ -1605,6 +1606,15 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
               />
             </div>
           </label>
+		  {mode === "register" ? (
+			<label>
+			  <span>邀请码</span>
+			  <div className="auth-input">
+				<ShieldCheck size={18} />
+				<input name="invite_code" autoComplete="off" placeholder="首个管理员可留空" />
+			  </div>
+			</label>
+		  ) : null}
           {error ? (
             <div className="auth-error" role="alert">
               {error}

@@ -10,10 +10,14 @@ import (
 )
 
 type Config struct {
-	Port      string
-	DataDir   string
-	UploadDir string
-	StaticDir string
+	Port             string
+	DataDir          string
+	UploadDir        string
+	StaticDir        string
+	SecureCookies    bool
+	AllowManagedMode bool
+	RegistrationMode string
+	InviteCodes      []string
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -22,6 +26,8 @@ func (h *Handler) Routes() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
+	r.Use(sameOriginWrites)
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", h.health)

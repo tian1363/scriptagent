@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Test backend
+        run: go test ./...
+      - name: Check Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Install frontend dependencies
+        run: npm --prefix web/app ci
+      - name: Audit frontend dependencies
+        run: npm --prefix web/app audit --audit-level=moderate
+      - name: Build frontend
+        run: npm --prefix web/app run build

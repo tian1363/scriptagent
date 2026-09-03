@@ -1,0 +1,25 @@
+services:
+  scriptagent:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    environment:
+      SCRIPT_AGENT_REGISTRATION_MODE: ${SCRIPT_AGENT_REGISTRATION_MODE:-invite}
+      SCRIPT_AGENT_INVITE_CODES: ${SCRIPT_AGENT_INVITE_CODES:-}
+      SCRIPT_AGENT_ENCRYPTION_KEY: ${SCRIPT_AGENT_ENCRYPTION_KEY:?set SCRIPT_AGENT_ENCRYPTION_KEY}
+      SCRIPT_AGENT_SECURE_COOKIES: ${SCRIPT_AGENT_SECURE_COOKIES:-false}
+      SCRIPT_AGENT_ALLOW_MANAGED_MODE: ${SCRIPT_AGENT_ALLOW_MANAGED_MODE:-false}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      SCRIPT_AGENT_MODEL: ${SCRIPT_AGENT_MODEL:-qwen3.8-flash}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
+      LANGFUSE_CAPTURE_CONTENT: ${LANGFUSE_CAPTURE_CONTENT:-false}
+    volumes:
+      - scriptagent-data:/app/data
+      - scriptagent-uploads:/app/uploads
+
+volumes:
+  scriptagent-data:
+  scriptagent-uploads:

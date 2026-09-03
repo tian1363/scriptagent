@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -21,20 +22,60 @@ const (
 	passwordKeyLen    = 32
 )
 
-type Service struct{ store *jobs.Store }
-
-func NewService(store *jobs.Store) *Service { return &Service{store: store} }
-func CookieName() string                    { return sessionCookieName }
-
-func (s *Service) RegistrationAvailable() (bool, error) {
-	count, err := s.store.CountUsers()
-	return count == 0, err
+type Config struct {
+	RegistrationMode string
+	InviteCodes      []string
 }
 
-func (s *Service) Register(email, password, name string) (*jobs.User, *jobs.Session, error) {
+type Service struct {
+	store            *jobs.Store
+	registrationMode string
+	initErr          error
+}
+
+func NewService(store *jobs.Store, cfg Config) *Service {
+	mode := strings.ToLower(strings.TrimSpace(cfg.RegistrationMode))
+	if mode != "open" && mode != "closed" {
+		mode = "invite"
+	}
+	s := &Service{store: store, registrationMode: mode}
+	for _, code := range cfg.InviteCodes {
+		code = strings.TrimSpace(code)
+		if code != "" {
+			if err := store.AddRegistrationInvite(inviteHash(code), 1); err != nil {
+				s.initErr = err
+			}
+		}
+	}
+	return s
+}
+func CookieName() string { return sessionCookieName }
+
+func (s *Service) RegistrationAvailable() (bool, error) {
+	if s.initErr != nil {
+		return false, s.initErr
+	}
+	count, err := s.store.CountUsers()
+	if err != nil || count == 0 {
+		return count == 0, err
+	}
+	if s.registrationMode == "open" {
+		return true, nil
+	}
+	if s.registrationMode == "invite" {
+		return s.store.HasAvailableRegistrationInvite()
+	}
+	return false, nil
+}
+
+func (s *Service) Register(email, password, name, inviteCode string) (*jobs.User, *jobs.Session, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return nil, nil, errors.New("请输入邮箱")
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || !strings.EqualFold(address.Address, email) || len(email) > 254 {
+		return nil, nil, errors.New("请输入有效邮箱")
 	}
 	if len(password) < 8 {
 		return nil, nil, errors.New("密码至少需要 8 位")
@@ -43,11 +84,30 @@ func (s *Service) Register(email, password, name string) (*jobs.User, *jobs.Sess
 	if err != nil {
 		return nil, nil, err
 	}
+	useInvite := false
+	if existingCount > 0 {
+		switch s.registrationMode {
+		case "closed":
+			return nil, nil, errors.New("当前实例未开放注册")
+		case "invite":
+			useInvite = true
+		}
+	}
 	hash, err := hashPassword(password)
 	if err != nil {
 		return nil, nil, err
 	}
-	user, err := s.store.CreateUser(jobs.CreateUserInput{Email: email, Name: strings.TrimSpace(name), Role: "admin", Status: "active", PasswordHash: hash})
+	role := "member"
+	if existingCount == 0 {
+		role = "admin"
+	}
+	userInput := jobs.CreateUserInput{Email: email, Name: strings.TrimSpace(name), Role: role, Status: "active", PasswordHash: hash}
+	var user *jobs.User
+	if useInvite {
+		user, err = s.store.CreateUserWithInvite(userInput, inviteHash(strings.TrimSpace(inviteCode)))
+	} else {
+		user, err = s.store.CreateUser(userInput)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -58,6 +118,11 @@ func (s *Service) Register(email, password, name string) (*jobs.User, *jobs.Sess
 	}
 	session, err := s.createSession(user.ID)
 	return user, session, err
+}
+
+func inviteHash(code string) string {
+	sum := sha256.Sum256([]byte(code))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func (s *Service) Login(email, password string) (*jobs.User, *jobs.Session, error) {

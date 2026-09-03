@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tian1363/scriptagent/internal/agent"
@@ -22,10 +26,14 @@ import (
 
 func main() {
 	cfg := webserver.Config{
-		Port:      env("APP_PORT", "8080"),
-		DataDir:   env("DATA_DIR", "./data"),
-		UploadDir: env("UPLOAD_DIR", "./uploads"),
-		StaticDir: env("STATIC_DIR", "./web/app/dist"),
+		Port:             env("APP_PORT", "8080"),
+		DataDir:          env("DATA_DIR", "./data"),
+		UploadDir:        env("UPLOAD_DIR", "./uploads"),
+		StaticDir:        env("STATIC_DIR", "./web/app/dist"),
+		SecureCookies:    envBool("SCRIPT_AGENT_SECURE_COOKIES", false),
+		AllowManagedMode: envBool("SCRIPT_AGENT_ALLOW_MANAGED_MODE", false),
+		RegistrationMode: env("SCRIPT_AGENT_REGISTRATION_MODE", "invite"),
+		InviteCodes:      splitCSV(os.Getenv("SCRIPT_AGENT_INVITE_CODES")),
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
@@ -57,6 +65,9 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
+	if err := store.ConfigureSecretEncryption(os.Getenv("SCRIPT_AGENT_ENCRYPTION_KEY")); err != nil {
+		log.Fatalf("configure API key encryption: %v", err)
+	}
 
 	fileStore := storage.NewLocalStore(cfg.UploadDir)
 	modelClient := buildModelClient(store)
@@ -65,10 +76,38 @@ func main() {
 	runner.ResumeUnfinished()
 	handler.ResumeVideos()
 
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           handler.Routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+	}
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("graceful shutdown failed: %v", err)
+		}
+	}()
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+func splitCSV(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func buildPublisher() webserver.Publisher {

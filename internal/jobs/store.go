@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 type Store struct {
 	db      *sql.DB
 	writeMu sync.Mutex
+	secrets *secretCipher
 }
 
 func OpenStore(path string) (*Store, error) {
@@ -217,6 +220,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS registration_invites (
+  code_hash TEXT PRIMARY KEY, max_uses INTEGER NOT NULL DEFAULT 1,
+  uses INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS resource_owners (
   resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, user_id TEXT NOT NULL,
   created_at TEXT NOT NULL, PRIMARY KEY(resource_type, resource_id),
@@ -799,6 +806,10 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 	if apiKey == "" && existing != nil {
 		apiKey = existing.APIKey
 	}
+	storedKey, err := s.encryptSecret(apiKey)
+	if err != nil {
+		return nil, err
+	}
 	provider := strings.TrimSpace(settings.Provider)
 	if provider == "" {
 		provider = "dashscope"
@@ -816,10 +827,10 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 	if mode == "" {
 		mode = "byok"
 	}
-	_, err := s.db.Exec(`INSERT INTO model_capability_settings (capability, mode, api_key, endpoint, model, provider, updated_at)
+	_, err = s.db.Exec(`INSERT INTO model_capability_settings (capability, mode, api_key, endpoint, model, provider, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(capability) DO UPDATE SET mode=excluded.mode, api_key=excluded.api_key, endpoint=excluded.endpoint, model=excluded.model, provider=excluded.provider, updated_at=excluded.updated_at`,
-		capability, mode, apiKey, endpoint, modelName, provider, now.Format(time.RFC3339))
+		capability, mode, storedKey, endpoint, modelName, provider, now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -835,7 +846,7 @@ ON CONFLICT(id) DO UPDATE SET
   model = excluded.model,
   provider = excluded.provider,
   updated_at = excluded.updated_at`,
-		apiKey, endpoint, modelName, provider, now.Format(time.RFC3339),
+		storedKey, endpoint, modelName, provider, now.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -856,7 +867,10 @@ FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &se
 	if err != nil {
 		return nil, err
 	}
-	settings.APIKey = apiKey.String
+	settings.APIKey, err = s.decryptSecret(apiKey.String)
+	if err != nil {
+		return nil, err
+	}
 	settings.UpdatedAt = parseTime(updatedAt)
 	return settings, nil
 }
@@ -870,7 +884,11 @@ func (s *Store) GetModelSettingsForCapability(capability string) (*ModelSettings
 	if err != nil {
 		return nil, err
 	}
-	settings.APIKey, settings.UpdatedAt = apiKey.String, parseTime(updatedAt)
+	settings.APIKey, err = s.decryptSecret(apiKey.String)
+	if err != nil {
+		return nil, err
+	}
+	settings.UpdatedAt = parseTime(updatedAt)
 	return settings, nil
 }
 
@@ -888,7 +906,11 @@ func (s *Store) ListModelSettings() ([]ModelSettings, error) {
 		if err := rows.Scan(&item.Capability, &item.Mode, &key, &item.Endpoint, &item.Model, &item.Provider, &updated); err != nil {
 			return nil, err
 		}
-		item.APIKey, item.UpdatedAt = key.String, parseTime(updated)
+		item.APIKey, err = s.decryptSecret(key.String)
+		if err != nil {
+			return nil, err
+		}
+		item.UpdatedAt = parseTime(updated)
 		result = append(result, item)
 	}
 	return result, rows.Err()
@@ -908,6 +930,14 @@ func (s *Store) GetModelRuntimeConfig(ctx context.Context, capability string) (m
 		}
 	}
 	if err != nil {
+		if userID != "" && errors.Is(err, sql.ErrNoRows) {
+			return model.RuntimeConfig{
+				Provider: "dashscope",
+				Endpoint: "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+				Model:    "qwen3.8-flash",
+				Source:   "byok",
+			}, nil
+		}
 		return model.RuntimeConfig{}, err
 	}
 	return model.RuntimeConfig{
@@ -1787,6 +1817,33 @@ func (s *Store) CreateUser(input CreateUserInput) (*User, error) {
 	return user, err
 }
 
+func (s *Store) CreateUserWithInvite(input CreateUserInput, codeHash string) (*User, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses`, codeHash)
+	if err != nil {
+		return nil, err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return nil, errors.New("邀请码无效或已使用")
+	}
+	now := time.Now().UTC()
+	user := &User{ID: newID(), Email: strings.ToLower(strings.TrimSpace(input.Email)), Name: strings.TrimSpace(input.Name), Role: valueOr(input.Role, "member"), Status: valueOr(input.Status, "active"), PasswordHash: input.PasswordHash, CreatedAt: now, UpdatedAt: now}
+	if _, err := tx.Exec(`INSERT INTO users (id,email,name,role,status,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, user.ID, user.Email, user.Name, user.Role, user.Status, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (s *Store) GetUser(id string) (*User, error) {
 	var user User
 	var createdAt, updatedAt string
@@ -1805,14 +1862,16 @@ func (s *Store) GetUserByEmail(email string) (*User, error) {
 
 func (s *Store) CreateSession(input CreateSessionInput) (*Session, error) {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)`, input.Token, input.UserID, input.ExpiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
+	_, err := s.db.Exec(`INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)`, sessionTokenHash(input.Token), input.UserID, input.ExpiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
 	return &Session{Token: input.Token, UserID: input.UserID, ExpiresAt: input.ExpiresAt, CreatedAt: now}, err
 }
 
 func (s *Store) GetSession(token string) (*Session, error) {
 	var session Session
 	var expiresAt, createdAt string
-	err := s.db.QueryRow(`SELECT token,user_id,expires_at,created_at FROM sessions WHERE token=?`, token).Scan(&session.Token, &session.UserID, &expiresAt, &createdAt)
+	storedToken := ""
+	err := s.db.QueryRow(`SELECT token,user_id,expires_at,created_at FROM sessions WHERE token IN (?,?) LIMIT 1`, sessionTokenHash(token), token).Scan(&storedToken, &session.UserID, &expiresAt, &createdAt)
+	session.Token = token
 	session.ExpiresAt, session.CreatedAt = parseTime(expiresAt), parseTime(createdAt)
 	return &session, err
 }
@@ -1821,8 +1880,47 @@ func (s *Store) DeleteSession(token string) error {
 	if token == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE token=?`, token)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token IN (?,?)`, sessionTokenHash(token), token)
 	return err
+}
+
+func sessionTokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return "sha256:" + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func (s *Store) AddRegistrationInvite(codeHash string, maxUses int) error {
+	if strings.TrimSpace(codeHash) == "" {
+		return errors.New("invite hash is required")
+	}
+	if maxUses < 1 {
+		maxUses = 1
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO registration_invites(code_hash,max_uses,uses,created_at) VALUES(?,?,0,?)`, codeHash, maxUses, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *Store) ConsumeRegistrationInvite(codeHash string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	result, err := s.db.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses`, codeHash)
+	if err != nil {
+		return err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return errors.New("邀请码无效或已使用")
+	}
+	return nil
+}
+
+func (s *Store) HasAvailableRegistrationInvite() (bool, error) {
+	var one int
+	err := s.db.QueryRow(`SELECT 1 FROM registration_invites WHERE uses<max_uses LIMIT 1`).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (s *Store) ClaimResource(userID, resourceType, resourceID string) error {
@@ -1850,12 +1948,16 @@ func (s *Store) SaveUserModelSettings(userID string, settings ModelSettings) (*M
 	if key == "" && existing != nil {
 		key = existing.APIKey
 	}
+	storedKey, err := s.encryptSecret(key)
+	if err != nil {
+		return nil, err
+	}
 	mode := valueOr(strings.TrimSpace(settings.Mode), "byok")
 	provider := valueOr(strings.TrimSpace(settings.Provider), "dashscope")
 	endpoint := valueOr(strings.TrimSpace(settings.Endpoint), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation")
 	modelName := valueOr(strings.TrimSpace(settings.Model), "qwen3.8-flash")
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO user_model_capability_settings(user_id,capability,mode,api_key,endpoint,model,provider,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,capability) DO UPDATE SET mode=excluded.mode,api_key=excluded.api_key,endpoint=excluded.endpoint,model=excluded.model,provider=excluded.provider,updated_at=excluded.updated_at`, userID, capability, mode, key, endpoint, modelName, provider, now.Format(time.RFC3339))
+	_, err = s.db.Exec(`INSERT INTO user_model_capability_settings(user_id,capability,mode,api_key,endpoint,model,provider,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,capability) DO UPDATE SET mode=excluded.mode,api_key=excluded.api_key,endpoint=excluded.endpoint,model=excluded.model,provider=excluded.provider,updated_at=excluded.updated_at`, userID, capability, mode, storedKey, endpoint, modelName, provider, now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -1866,7 +1968,10 @@ func (s *Store) GetUserModelSettingsForCapability(userID, capability string) (*M
 	var key sql.NullString
 	var updated string
 	err := s.db.QueryRow(`SELECT capability,mode,api_key,endpoint,model,provider,updated_at FROM user_model_capability_settings WHERE user_id=? AND capability=?`, userID, capability).Scan(&x.Capability, &x.Mode, &key, &x.Endpoint, &x.Model, &x.Provider, &updated)
-	x.APIKey = key.String
+	x.APIKey, err = s.decryptSecret(key.String)
+	if err != nil {
+		return nil, err
+	}
 	x.UpdatedAt = parseTime(updated)
 	return &x, err
 }
@@ -1884,7 +1989,10 @@ func (s *Store) ListUserModelSettings(userID string) ([]ModelSettings, error) {
 		if err := rows.Scan(&x.Capability, &x.Mode, &key, &x.Endpoint, &x.Model, &x.Provider, &updated); err != nil {
 			return nil, err
 		}
-		x.APIKey = key.String
+		x.APIKey, err = s.decryptSecret(key.String)
+		if err != nil {
+			return nil, err
+		}
 		x.UpdatedAt = parseTime(updated)
 		out = append(out, x)
 	}

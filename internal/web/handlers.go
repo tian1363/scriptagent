@@ -38,6 +38,7 @@ type Handler struct {
 	creative  *creative.Service
 	auth      *auth.Service
 	video     *videogen.Client
+	authLimit *requestLimiter
 }
 
 type Publisher interface {
@@ -63,7 +64,8 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		publisher: publisher,
 		chat:      chat,
 		creative:  creativeReports,
-		auth:      auth.NewService(store),
+		auth:      auth.NewService(store, auth.Config{RegistrationMode: cfg.RegistrationMode, InviteCodes: cfg.InviteCodes}),
+		authLimit: newRequestLimiter(),
 		video:     videogen.New(store),
 	}
 }
@@ -394,16 +396,29 @@ func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) authStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"registration_available": true})
+	available, err := h.auth.RegistrationAvailable()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"registration_available": available})
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	var input struct{ Email, Password, Name string }
+	if !h.allowAuthRequest(w, r, "register", 3, time.Hour) {
+		return
+	}
+	var input struct {
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		Name       string `json:"name"`
+		InviteCode string `json:"invite_code"`
+	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	user, session, err := h.auth.Register(input.Email, input.Password, input.Name)
+	user, session, err := h.auth.Register(input.Email, input.Password, input.Name, input.InviteCode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -413,6 +428,9 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	if !h.allowAuthRequest(w, r, "login", 10, 15*time.Minute) {
+		return
+	}
 	var input struct{ Email, Password string }
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -456,7 +474,7 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
-		ctx := userctx.WithUser(r.Context(), userctx.User{ID: user.ID, Email: user.Email, Name: user.Name})
+		ctx := userctx.WithUser(r.Context(), userctx.User{ID: user.ID, Email: user.Email, Name: user.Name, Role: user.Role})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -464,7 +482,7 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 func userIDFromRequest(r *http.Request) string { return userctx.UserID(r.Context()) }
 
 func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{Name: auth.CookieName(), Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode, Expires: expires, MaxAge: func() int {
+	http.SetCookie(w, &http.Cookie{Name: auth.CookieName(), Value: token, Path: "/", HttpOnly: true, Secure: h.cfg.SecureCookies || r.TLS != nil, SameSite: http.SameSiteLaxMode, Expires: expires, MaxAge: func() int {
 		if token == "" {
 			return -1
 		}
@@ -1521,6 +1539,13 @@ func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("model mode must be managed or byok"))
 			return
 		}
+		if profile.Mode == "managed" {
+			current, _ := userctx.FromContext(r.Context())
+			if !h.cfg.AllowManagedMode || current.Role != "admin" {
+				writeError(w, http.StatusForbidden, errors.New("当前账号仅允许使用自己的 API Key"))
+				return
+			}
+		}
 		if _, err := h.store.SaveUserModelSettings(userIDFromRequest(r), jobs.ModelSettings{Capability: profile.Capability, Mode: profile.Mode, APIKey: profile.APIKey,
 			Provider: profile.Provider, Endpoint: profile.Endpoint, Model: profile.Model}); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
@@ -1549,8 +1574,8 @@ func (h *Handler) publicModelSettings(userID string) jobs.PublicModelConfigurati
 			Endpoint: settings.Endpoint, Model: settings.Model, UpdatedAt: settings.UpdatedAt})
 	}
 	if len(profiles) == 0 {
-		profiles = append(profiles, jobs.PublicModelSettings{Capability: "text", Mode: "managed", Configured: strings.TrimSpace(apiKey) != "", Source: "managed",
-			APIKeyMask: maskAPIKey(apiKey), Provider: "dashscope", Endpoint: valueOr(os.Getenv("DASHSCOPE_ENDPOINT"), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"), Model: valueOr(os.Getenv("SCRIPT_AGENT_MODEL"), "qwen3.6-plus")})
+		profiles = append(profiles, jobs.PublicModelSettings{Capability: "text", Mode: "byok", Configured: false, Source: "byok",
+			Provider: "dashscope", Endpoint: valueOr(os.Getenv("DASHSCOPE_ENDPOINT"), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"), Model: valueOr(os.Getenv("SCRIPT_AGENT_MODEL"), "qwen3.8-flash")})
 	}
 	configured := false
 	for _, profile := range profiles {

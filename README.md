@@ -46,6 +46,8 @@ flowchart LR
 
 当前版本支持多账号注册与登录。产品资料、创作空间、对话、任务、自定义 Skill、模型配置和调试记录均按账号隔离。正式运营后台尚未上线。
 
+> 当前发布阶段：自托管 Beta，可用于小范围邀请测试。公网部署前请遵循[邀请测试部署指南](docs/invite-deployment.md)，不要在未配置额度和安全策略时开放自由注册。
+
 ## 快速启动
 
 ### 环境要求
@@ -120,6 +122,8 @@ export SCRIPT_AGENT_EMBEDDING_DIMENSIONS="1024"
 
 用户保存的能力配置优先于环境变量，并按账号隔离。API Key 只由后端保存，前端接口仅返回掩码。
 
+邀请测试默认关闭平台托管额度。用户保存 API Key 前必须配置 `SCRIPT_AGENT_ENCRYPTION_KEY`，完整环境变量见 [.env.example](.env.example)。
+
 ## Langfuse
 
 ```bash
@@ -164,6 +168,9 @@ go test ./internal/jobs ./internal/chat ./internal/web ./internal/agent
 - [模型能力与 BYOK](docs/model-capabilities.md)
 - [Token 优化策略](docs/token-optimization.md)
 - [Langfuse 可观测性](docs/langfuse-observability.md)
+- [邀请测试部署指南](docs/invite-deployment.md)
+- [隐私与可接受使用说明](docs/privacy-and-acceptable-use.md)
+- [安全策略](SECURITY.md)
 - [品牌规范](brand-spec.md)
 - [设计验证记录](design-qa.md)
 

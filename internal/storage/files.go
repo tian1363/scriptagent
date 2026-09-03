@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -70,6 +71,15 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 	if header.Size > limit {
 		return "", errors.New("file is too large")
 	}
+	prefix := make([]byte, 512)
+	n, readErr := io.ReadFull(file, prefix)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF {
+		return "", errors.New("cannot read upload")
+	}
+	prefix = prefix[:n]
+	if (kind == "asset" || kind == "chat" || kind == "video") && !matchesMediaSignature(ext, prefix) {
+		return "", errors.New("file content does not match its extension")
+	}
 
 	name := randomName() + ext
 	dir := filepath.Join(s.root, kind)
@@ -83,10 +93,35 @@ func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeade
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, io.LimitReader(file, limit+1)); err != nil {
+	written, err := io.Copy(out, io.LimitReader(io.MultiReader(bytes.NewReader(prefix), file), limit+1))
+	if err != nil {
+		_ = os.Remove(path)
 		return "", err
 	}
+	if written > limit {
+		_ = os.Remove(path)
+		return "", errors.New("file is too large")
+	}
 	return path, nil
+}
+
+func matchesMediaSignature(ext string, content []byte) bool {
+	switch ext {
+	case ".png":
+		return len(content) >= 8 && bytes.Equal(content[:8], []byte("\x89PNG\r\n\x1a\n"))
+	case ".jpg", ".jpeg":
+		return len(content) >= 3 && bytes.Equal(content[:3], []byte("\xff\xd8\xff"))
+	case ".gif":
+		return len(content) >= 6 && (bytes.Equal(content[:6], []byte("GIF87a")) || bytes.Equal(content[:6], []byte("GIF89a")))
+	case ".webp":
+		return len(content) >= 12 && bytes.Equal(content[:4], []byte("RIFF")) && bytes.Equal(content[8:12], []byte("WEBP"))
+	case ".mp4", ".mov":
+		return len(content) >= 12 && bytes.Equal(content[4:8], []byte("ftyp"))
+	case ".webm":
+		return len(content) >= 4 && bytes.Equal(content[:4], []byte("\x1a\x45\xdf\xa3"))
+	default:
+		return false
+	}
 }
 
 func isChatAttachmentExt(ext string) bool {
