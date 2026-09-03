@@ -1,15 +1,36 @@
 # Runtime data
 /data/
 /uploads/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+/tmp/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Go
 /bin/
 *.test
+/scriptagent
 
 # Frontend
 /web/app/node_modules/
 /web/app/dist/
+/web/app/.vite/
 
 # OS/editor
 .DS_Store
 *.swp
+.idea/
+.vscode/
