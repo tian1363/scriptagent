@@ -1,13 +1,91 @@
 package chat
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/reactagent"
 )
+
+func TestAgentProgressUsesRealRuntimeSteps(t *testing.T) {
+	service := NewService(nil, nil)
+	service.resetProgress("chat-1")
+	service.appendProgress("chat-1", reactagent.Step{
+		Index:  1,
+		Kind:   "model",
+		Status: "running",
+		Reason: "正在判断下一步",
+	})
+	service.appendProgress("chat-1", reactagent.Step{
+		Index:  1,
+		Kind:   "tool",
+		Status: "completed",
+		Tool:   "retrieve_product_sections",
+		Reason: "查找与当前任务相关的产品卖点",
+	})
+
+	steps := service.Progress("chat-1")
+	if len(steps) != 1 || steps[0].Tool != "retrieve_product_sections" {
+		t.Fatalf("unexpected progress: %+v", steps)
+	}
+	if steps[0].Status != "completed" {
+		t.Fatalf("progress should replace the running state: %+v", steps)
+	}
+	steps[0].Tool = "mutated"
+	if service.Progress("chat-1")[0].Tool != "retrieve_product_sections" {
+		t.Fatal("Progress must return a defensive copy")
+	}
+}
+
+func TestIntelligenceToolsAreRegisteredAndDraftIsReadOnly(t *testing.T) {
+	store, err := jobs.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	user, err := store.CreateUser(jobs.CreateUserInput{Email: "intel@example.com", Name: "Intel", Role: "admin", Status: "active", PasswordHash: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, err := store.CreateSpace(jobs.CreateSpaceInput{Title: "竞品实验"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ClaimResource(user.ID, "space", space.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SeedIntelligenceDemo(user.ID, space.ID); err != nil {
+		t.Fatal(err)
+	}
+	dashboard, err := store.IntelligenceDashboard(user.ID, space.ID)
+	if err != nil || len(dashboard.Signals) == 0 {
+		t.Fatalf("dashboard=%+v err=%v", dashboard, err)
+	}
+	service := NewService(store, nil)
+	tools := service.reactTools(user.ID, "conversation", "run", "", "", nil)
+	byName := map[string]reactagent.Tool{}
+	for _, tool := range tools {
+		byName[tool.Name] = tool
+	}
+	for _, name := range []string{"list_intelligence_connections", "list_creative_signals", "get_intelligence_evidence", "create_experiment_draft"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing tool %s", name)
+		}
+	}
+	input, _ := json.Marshal(map[string]string{"space_id": space.ID, "signal_id": dashboard.Signals[0].ID, "variable": "首帧"})
+	result, err := byName["create_experiment_draft"].Handler(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "single_variable") || !strings.Contains(result, "首帧") {
+		t.Fatalf("unexpected draft: %s", result)
+	}
+}
 
 func TestCustomSkillCanBeResolvedByAgentTool(t *testing.T) {
 	store, err := jobs.OpenStore(filepath.Join(t.TempDir(), "test.db"))
@@ -15,12 +93,19 @@ func TestCustomSkillCanBeResolvedByAgentTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	_, err = store.CreateCustomSkill(jobs.CreateCustomSkillInput{Name: "review-hooks", Title: "钩子检查", Description: "检查钩子", Category: "自定义", InvocationPrompt: "调用 review-hooks", Content: "# 钩子检查\n\n检查前三秒。"})
+	user, err := store.CreateUser(jobs.CreateUserInput{Email: "test@example.com", Name: "Test", Role: "admin", Status: "active", PasswordHash: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	skill, err := store.CreateCustomSkill(jobs.CreateCustomSkillInput{Name: "review-hooks", Title: "钩子检查", Description: "检查钩子", Category: "自定义", InvocationPrompt: "调用 review-hooks", Content: "# 钩子检查\n\n检查前三秒。"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClaimResource(user.ID, "skill", skill.ID); err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(store, nil)
-	content, err := service.skillContent("review-hooks")
+	content, err := service.skillContent(user.ID, "review-hooks")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,12 +183,24 @@ func TestReactContextKeepsPendingBatchMessages(t *testing.T) {
 }
 
 func TestReactChatContextIncludesCreativeSpaceWithoutCreatingUserMessage(t *testing.T) {
-	prompt := reactChatContextPrompt(nil, "", "product-1", "创作空间：夏季投放\n长期目标：完成 8 条脚本\n长期要求：节奏快")
+	prompt := reactChatContextPrompt(nil, "", "product-1", "创作空间：夏季投放\n广告创作目标：商品转化\n营销阶段：行动\n长期目标：完成 8 条脚本\n长期要求：节奏快")
 	if !strings.Contains(prompt, "当前创作空间上下文") || !strings.Contains(prompt, "完成 8 条脚本") {
 		t.Fatalf("missing space context: %s", prompt)
 	}
+	if !strings.Contains(prompt, "商品转化") || !strings.Contains(prompt, "营销阶段：行动") {
+		t.Fatalf("missing marketing goal: %s", prompt)
+	}
 	if strings.Contains(prompt, "用户：继续推进创作空间") {
 		t.Fatalf("space context should not be a user message: %s", prompt)
+	}
+}
+
+func TestMarketingGoalLabelsArePromptReady(t *testing.T) {
+	if got := marketingGoalLabel("conversion"); !strings.Contains(got, "商品转化") || !strings.Contains(got, "下单") {
+		t.Fatalf("unexpected marketing goal label: %s", got)
+	}
+	if got := marketingStageLabel("action"); !strings.Contains(got, "行动") || !strings.Contains(got, "转化") {
+		t.Fatalf("unexpected marketing stage label: %s", got)
 	}
 }
 

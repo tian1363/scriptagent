@@ -1,5 +1,15 @@
 # Design QA: persistent chat composer
 
+> Updated: 2026-08-28 · This is a regression record, not the complete product specification.
+
+Additional verified baselines after the original composer fix:
+
+- Main navigation defaults to a 68 px icon rail and expands to 224 px.
+- Collapsed chat history uses an inline 36 px control in the context bar; it does not overlap the message viewport.
+- Chat composer uses the coral brand family for background, border, focus ring and send action.
+- Product knowledge and other top-level workspaces align their page header at 48 px from the viewport top.
+- Only the conversation message region scrolls; global navigation and composer remain fixed in the app frame.
+
 - Source visual truth: `/var/folders/y9/8873k5w913b1ty4k529xrsw40000gn/T/TemporaryItems/NSIRD_screencaptureui_zQ72IH/截屏2026-08-26 22.01.39.png`
 - Implementation capture: in-app Browser tab 14, viewport capture after commit working tree changes
 - Viewport: 1536 × 900 CSS px, device scale factor 1
@@ -9,11 +19,11 @@
 
 ## Full-view comparison evidence
 
-The source shows the long response expanding the main grid beyond the viewport, with the composer entirely below the fold. In the revised implementation the app frame ends at 900 px, the workspace occupies 832 px below the 68 px top bar, the chat pane occupies 784 px, and the composer remains visible from y=705 to y=858. Only the message list scrolls (`clientHeight: 543`, `scrollHeight: 1784`).
+The source shows the long response expanding the main grid beyond the viewport, with the composer entirely below the fold. The original fix constrained the app frame and kept the composer visible; the current shell has no redundant global top bar and uses the full viewport. Only the message list scrolls.
 
 ## Focused region evidence
 
-The lower chat region was inspected at normal zoom. The composer textarea, skill action, asset action, add button, and send button are all visible. A separate focused crop was unnecessary because these controls are legible in the full viewport capture and their bounding boxes were measured directly.
+The lower chat region was inspected at normal zoom. The composer textarea, skill action, single asset-upload action, and send button are visible. The redundant plus action has since been removed.
 
 ## Required fidelity surfaces
 

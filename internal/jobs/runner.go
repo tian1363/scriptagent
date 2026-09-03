@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/tian1363/scriptagent/internal/telemetry"
+	"github.com/tian1363/scriptagent/internal/userctx"
 )
 
 type Agent interface {
@@ -44,12 +45,12 @@ func (r *Runner) ResumeUnfinished() {
 }
 
 func (r *Runner) run(jobID string) {
-	ctx := context.Background()
 	job, err := r.store.GetJob(jobID)
 	if err != nil {
 		log.Printf("load job %s: %v", jobID, err)
 		return
 	}
+	ctx := userctx.WithUser(context.Background(), userctx.User{ID: r.store.ResourceOwner("job", job.ID)})
 	runContext := RunContext{Scope: "job", RefID: job.ID, SpaceID: job.SpaceID, JobID: job.ID}
 	var agentRun *AgentRun
 	if job.SpaceID != "" {

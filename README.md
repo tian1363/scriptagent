@@ -1,72 +1,69 @@
 # ScriptAgent
 
-ScriptAgent 是一个可执行创作任务的工作台。用户把产品资料、长期目标和参考素材放进来，Agent 会生成并持续推进脚本任务。
+> 文档基线：2026-08-28 · 当前分支：`main`
 
-## Current Status
+ScriptAgent 是面向广告内容生产的 Agent 工作台。用户维护产品资料与图片/视频素材，在创作空间中定义广告目标和营销阶段，再通过对话让 Agent 完成素材分析、策略、脚本与分镜提示词等任务。
 
-This repository currently contains the first application scaffold:
+## 当前产品
 
-- Go API server.
-- SQLite-backed job history.
-- Local upload storage.
-- React + Vite frontend.
-- Agent 首页、全局历史、创作空间与可编辑的产品资料库。
-- Qwen mode with model settings configurable from the UI or environment variables.
-- 产品资料可通过上传 Markdown、粘贴文字或直接编辑建立；创作空间会保留目标、产品和任务关系。
+- **开始**：直接向 Agent 描述任务，可选择产品资料。
+- **历史**：统一检索对话与脚本执行记录。
+- **创作空间**：管理长期目标、产品资料、广告目标和营销阶段；空间设置只影响后续对话。
+- **产品资料**：编辑 Markdown，上传图片和视频；素材会参与多模态解析并以 CID 方式进入脚本与分镜上下文。
+- **对话**：ReAct Agent 按需使用产品检索、Skill 和素材；只展示摘要、行动与结果。
+- **Skill**：预置 Skill 只读；用户可用一句话生成自己的 Skill，之后可预览和编辑。
+- **设置**：按文本、多模态、图片、视频和向量能力配置模型；支持托管与 BYOK。
+- **开发者模式**：查看模型调用、Token、耗时、输入输出和 Agent 步骤。
+- **Langfuse**：可选外部观测层；本地 SQLite 始终保留运行记录。
 
-## Run Locally
+当前版本支持多账号注册、登录和 HttpOnly Session 保护。产品资料、创作空间、对话、任务、自定义 Skill、模型配置和调试记录按账号隔离；升级前的历史数据自动归属最早创建的账号。正式运营后台尚未上线。
 
-Install frontend dependencies:
+## 快速启动
 
 ```bash
 cd web/app
 npm install
-```
-
-Run the frontend dev server:
-
-```bash
-npm run dev
-```
-
-Run the Go API server from the repository root:
-
-```bash
+npm run build
+cd ../..
 go run ./cmd/server
 ```
 
-The frontend dev server runs at `http://127.0.0.1:5173`. The API server runs at `http://localhost:8080`.
+打开：<http://127.0.0.1:8080/>
 
-## Configure Qwen
+未登录时可选择登录或注册。创建成功后，产品资料、创作空间、对话和设置 API 都需要登录才能访问。
 
-You can configure Qwen from the app UI at `配置 -> 模型配置`. For server-level defaults, set your DashScope API key before starting the Go server:
+开发前端时可另开终端：
+
+```bash
+cd web/app
+npm run dev
+```
+
+前端开发地址为 <http://127.0.0.1:5173/>；它仍调用 `8080` 上的 Go API。完整地址见 [产品地址清单](docs/product-addresses.md)。
+
+## 模型配置
+
+推荐在产品的“设置”中按能力配置模型。服务端托管模式至少需要：
 
 ```bash
 export DASHSCOPE_API_KEY="sk-your-key"
 export SCRIPT_AGENT_MODEL="qwen3.6-plus"
-export SCRIPT_AGENT_VIDEO_FPS="2"
-export SCRIPT_AGENT_EMBEDDING_MODEL="text-embedding-v4"
-export SCRIPT_AGENT_EMBEDDING_DIMENSIONS="1024"
 go run ./cmd/server
 ```
 
-User-saved model settings take precedence over environment variables. To force mock mode:
+常用可选配置：
 
 ```bash
-export SCRIPT_AGENT_MODE="mock"
-```
-
-The Qwen implementation sends local videos as Base64 data URLs. If a video would exceed the DashScope data-uri limit, ScriptAgent automatically creates a temporary compressed MP4 with `ffmpeg` and sends that instead. You can tune the data-uri ceiling:
-
-```bash
+export SCRIPT_AGENT_MODE="mock"                    # 不调用真实模型
+export SCRIPT_AGENT_VIDEO_FPS="2"
 export SCRIPT_AGENT_MAX_DATA_URI_MB="20"
+export SCRIPT_AGENT_EMBEDDING_MODEL="text-embedding-v4"
+export SCRIPT_AGENT_EMBEDDING_DIMENSIONS="1024"
 ```
 
-Product Markdown retrieval uses embeddings for long documents. ScriptAgent stores product chunks in SQLite and uses DashScope embeddings for semantic Top-K retrieval; if embedding fails, it falls back to local keyword section matching.
+用户保存的能力配置优先于环境变量，并按账号隔离。API Key 只由后端保存，前端接口仅返回掩码。
 
-## Configure Langfuse
-
-ScriptAgent can optionally export Agent runs and model generations to Langfuse through OpenTelemetry. Local SQLite observability remains enabled and is not replaced by Langfuse.
+## Langfuse
 
 ```bash
 export LANGFUSE_PUBLIC_KEY="pk-lf-..."
@@ -76,35 +73,44 @@ export LANGFUSE_ENVIRONMENT="development"
 go run ./cmd/server
 ```
 
-For other Langfuse Cloud regions or a self-hosted deployment, set `LANGFUSE_BASE_URL` to that instance's base URL. Prompt and completion content is redacted by default. Only enable content capture after reviewing data-security requirements:
+默认不上传 Prompt 和模型输出正文。只有经过数据安全确认后才开启：
 
 ```bash
 export LANGFUSE_CAPTURE_CONTENT="true"
 export LANGFUSE_RELEASE="local-dev"
 ```
 
-If the keys are absent or trace export fails, normal task execution and local model-call recording continue unaffected.
+## 数据与安全
 
-## 工作方式
+- SQLite：`data/scriptagent.db`
+- 上传文件：`uploads/`
+- 前端构建产物：`web/app/dist/`
+- 默认监听端口：`8080`
+- 健康检查：`GET /api/health`
 
-- **开始创作**：描述目标、选择资料，进入脚本执行流程。
-- **历史**：统一查看过去的任务和对话，从原位置继续。
-- **创作空间**：为长期项目保存目标、要求、产品资料和执行记录。
-- **产品资料**：资料会在任务中复用，可随时修改；右侧检查提示还缺哪些关键信息。
+删除 `data/` 或 `uploads/` 会造成不可恢复的数据丢失。公网部署必须启用 HTTPS；面向多个组织开放前还需要补齐租户隔离、密钥加密、细粒度权限和备份策略。
 
-## Persistence
+## 验证
 
-Runtime data is persisted locally:
+```bash
+npm --prefix web/app run build
+go test ./internal/jobs ./internal/chat ./internal/web ./internal/agent
+```
 
-- SQLite database: `data/scriptagent.db`
-- Uploaded files: `uploads/`
+## 文档导航
 
-Closing and reopening the program keeps previous jobs and uploaded files as long as these directories are not deleted.
+- [文档中心](docs/README.md)
+- [产品地址清单](docs/product-addresses.md)
+- [需求基线](docs/requirements.md)
+- [技术设计](docs/technical-design.md)
+- [Agent Runtime 与 Harness](docs/agent-runtime-harness.md)
+- [模型能力与 BYOK](docs/model-capabilities.md)
+- [Token 优化策略](docs/token-optimization.md)
+- [Langfuse 可观测性](docs/langfuse-observability.md)
+- [品牌规范](brand-spec.md)
+- [设计验证记录](design-qa.md)
 
-## Documentation
+## 仓库
 
-- Requirements: `docs/requirements.md`
-- Technical design: `docs/technical-design.md`
-- Token optimization strategy: `docs/token-optimization.md`
-- Agent runtime and harness: `docs/agent-runtime-harness.md`
-- Langfuse observability: `docs/langfuse-observability.md`
+- GitHub：<https://github.com/tian1363/scriptagent>
+- 当前主分支：`main`

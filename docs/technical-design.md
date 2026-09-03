@@ -1,8 +1,26 @@
 # ScriptAgent 技术设计确认文档
 
+> 最近维护：2026-08-28 · 当前实现基线：`main` · API 以 `internal/web/routes.go` 为准
+
+## 0. 当前架构快照
+
+| 层 | 当前实现 |
+| --- | --- |
+| 前端 | React 19 + Vite 单页应用；生产构建由 Go 在 `8080` 托管 |
+| API | Go + Chi；路由统一位于 `/api` |
+| 数据 | SQLite `data/scriptagent.db` + 本地文件 `uploads/` |
+| Agent | 对话使用 ReAct Agent Loop；确定性脚本任务使用 Workflow |
+| 模型 | DashScope/OpenAI 兼容能力配置；文本推荐 `qwen3.8-flash`，服务端环境变量可显式覆盖 |
+| 检索 | 产品 Markdown 分块、Embedding Top-K，失败时本地关键词回退 |
+| 素材 | 产品图片/视频与对话附件进入多模态模型；产品资产使用 CID 参与结果引用 |
+| 观测 | SQLite ModelCall/AgentRun/AgentStep + 可选 Langfuse OTLP |
+| 身份 | 多账号注册登录 + HttpOnly Session；业务 API 默认鉴权；核心资源通过用户归属表隔离 |
+
+运行地址、API 分组和外部平台见 [product-addresses.md](product-addresses.md)。本文件后续章节保留早期 Workflow 设计及增量演进记录；若与本节冲突，以本节和当前代码为准。
+
 ## 1. 项目目标
 
-ScriptAgent 是一个用于生成 CreatiBI 分镜脚本的工作台型应用。用户通过前端上传参考视频和产品信息 Markdown 文件，系统调用多模态模型完成视频理解，生成 1 条复刻脚本和多条裂变脚本，并在用户确认后通过 CreatiBI CLI/API 创建符合分镜格式的脚本至 CreatiBI。
+ScriptAgent 是一个用于广告策略、素材分析、脚本与分镜生产的 Agent 工作台。CreatiBI 发布是可选的下游动作，而不是产品唯一入口。
 
 本项目第一版定位为内部生产工具，重点是稳定、可追踪、可复查，而不是开放式聊天产品。
 
@@ -195,7 +213,7 @@ Top NavBar
 
 默认打开产品库。产品库作为首页使用全宽资产看板，不显示左侧产品列表栏；产品以大卡片展示视觉封面占位、产品名称、Markdown 文件名、已生成脚本数量、历史任务数量和最近生成时间。用户可以从产品卡片直接进入创建脚本任务，前端自动预选该产品。
 
-模型调用属于开发者调试台，默认不与普通功能并列展示。用户需要在配置页的开发者选项中开启后，前端才显示“调试台”入口。
+模型调用属于开发者模式，默认不与普通功能并列展示。用户需要在设置页的开发者选项中开启后，前端才显示“开发者模式”入口。
 
 脚本任务工作区包含：
 
@@ -214,7 +232,7 @@ Top NavBar
   - CreatiBI 写入
 
 创建任务区按产品资产、参考视频、生成设置、补充要求和裂变方向分组。裂变方向不使用裸下拉框，而以视听层、结构层、元素层按钮卡片展示，表单提交时通过隐藏字段按顺序提交 `fission_directions`。结果区按内容类型展示：运行日志渲染为步骤时间线，视频分析 Markdown 渲染标题和表格，JSON 结果展示脚本摘要卡片并保留原始 JSON。
-产品资料库用于保存产品名称和产品 Markdown 文件，并支持在产品详情中读取和预览 Markdown 内容。通用对话空状态展示任务式快捷入口，引导用户从生成裂变方向、编写产品 Markdown、优化脚本等具体任务开始。模型配置页用于保存用户自己的 DashScope API Key、Endpoint 和模型名；用户配置优先于环境变量，并前置展示 API Key 本地保存和数据库文件安全提示。配置页开发者选项控制调试台是否显示。
+产品资料库用于保存产品名称、Markdown、图片与视频资产，并支持预览和编辑。对话通过 Skill 和素材入口承接策略、脚本与分镜任务。模型设置页按能力保存托管/BYOK、Endpoint 和模型名；保存配置优先于环境变量，并展示数据库安全提示。开发者选项控制开发者模式是否显示。
 
 历史记录包含：
 
@@ -590,7 +608,7 @@ POST /api/products/{id}/creative-reports
 
 - 第一版生成报告时读取产品 Markdown 与 DataEye 来源配置，调用当前模型生成创意策略报告。
 - 在真实 DataEye 白名单拉取任务接入前，报告必须标注为策略预案，不得编造素材指标。
-- 模型调用 scope 为 `creative_report`，ref_id 为产品 ID，方便调试台追踪 token 与输入输出。
+- 模型调用 scope 为 `creative_report`，ref_id 为产品 ID，方便开发者模式追踪 Token 与输入输出。
 - 报告保存到 `creative_reports` 表，产品详情读取历史报告并默认选中最新报告。
 - 前端“转裂变任务”只做工作流跳转：进入脚本任务页，自动选中产品，并把 `report_summary` 填入补充要求；创建任务仍需要用户上传参考视频。
 
@@ -698,10 +716,10 @@ failed
 ## 12. 配置项
 
 ```env
-APP_ENV=development
 APP_PORT=8080
 DATA_DIR=./data
 UPLOAD_DIR=./uploads
+STATIC_DIR=./web/app/dist
 
 DASHSCOPE_API_KEY=
 DASHSCOPE_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
@@ -713,17 +731,25 @@ SCRIPT_AGENT_EMBEDDING_MODEL=text-embedding-v4
 SCRIPT_AGENT_EMBEDDING_DIMENSIONS=1024
 DASHSCOPE_EMBEDDING_ENDPOINT=https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
 
-CREATIBI_PUBLISH_MODE=cli
 CREATIBI_CLI_BIN=cbi
 CREATIBI_PROJECT_ID=
 CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
+
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_ENVIRONMENT=development
+LANGFUSE_RELEASE=
+LANGFUSE_CAPTURE_CONTENT=false
 ```
+
+以上仅列出 `cmd/server/main.go` 当前实际读取的配置。模型能力还可以通过设置页写入 SQLite，并覆盖相应服务端默认值。
 
 ## 13. 模型输入输出约束
 
 ### 13.1 视频输入
 
-模型侧不应直接使用本地文件路径。后端需要提供模型可访问的视频 URL，或使用平台支持的文件上传方式。
+模型侧不直接使用本地文件路径。当前实现读取本地附件并编码为 Data URL；视频过大时通过 `ffmpeg` 生成临时压缩 MP4，再按 `SCRIPT_AGENT_MAX_DATA_URI_MB` 限制编码体积。产品资料中的图片和视频也会以多模态 ContentItem 传给模型，并在文本上下文中获得 CID。
 
 当前实现路线：
 
@@ -840,7 +866,7 @@ CREATIBI_PUBLISH_TIMEOUT_SECONDS=120
 ### M6 体验完善
 
 - 通用对话入口。
-- 开发者调试台：默认隐藏，开启后查看模型调用输入、输出、token、耗时和错误。
+- 开发者模式：默认隐藏，开启后查看模型调用输入、输出、Token、耗时和错误。
 - 历史记录搜索。
 - 结果 Tabs。
 - 加载状态。
@@ -1149,6 +1175,50 @@ type AdPlatformAdapter interface {
 5. 增加结构化脚本版本和合规检查。
 6. 增加实验、数据导入、生命周期诊断和洞察转任务。
 7. 单独立项接入聚光平台数据。
+
+### 20.10 创意情报连接、上下文与记忆
+
+外部能力统一通过 `IntelligenceAdapter` 接入，而不是把第三方 SDK 或任意 HTTP 调用暴露给 Agent：
+
+```go
+type IntelligenceAdapter interface {
+    Capabilities() []string
+    ListAccounts(ctx context.Context) ([]ExternalAccount, error)
+    PullMarketMaterials(ctx context.Context, req MarketQuery) ([]MarketMaterial, error)
+    PullCompetitorContent(ctx context.Context, req CompetitorQuery) ([]CompetitorContent, error)
+    PullCreativePerformance(ctx context.Context, req PerformanceQuery) ([]PerformanceSnapshot, error)
+    PullAudienceVoice(ctx context.Context, req VoiceQuery) ([]AudienceVoice, error)
+}
+```
+
+连接方式：DataEye 使用后端白名单任务与既有合法登录态；巨量/千川/聚光使用官方 OAuth 和 Marketing API；CSV/XLSX 使用 `PerformanceImporter`；`demo` Adapter 生成固定、可重复、明确标记 synthetic 的样本。
+
+数据分四层保存：
+
+1. 原始层：对象存储或 `raw_payload`，用于追溯，不进入 Prompt。
+2. 标准层：市场素材、竞品内容、创意版本、表现快照和用户声音。
+3. 证据层：规则服务计算的信号，包含来源、窗口、样本、干扰项与置信度。
+4. 记忆层：用户确认后的 `creative_memories`，是唯一可进入长期空间上下文的外部结论。
+
+当前纵向 Demo 使用 `intelligence_connections`、`intelligence_signals` 和 `creative_memories`。聊天装配空间上下文时最多读取 6 条活跃记忆，包含置信度和最后验证日期。模型不得直接读取令牌、第三方原始响应或全部历史快照。实时问题后续通过只读 Tool 查询证据层，长期稳定结论才进入记忆层。
+
+MCP 是外部交互协议而非平台连接本身。未来只读工具建议为 `list_intelligence_connections`、`search_market_materials`、`compare_competitor_content`、`get_creative_performance`、`list_creative_signals`；写操作仅允许 `create_experiment_draft`，不得由模型直接修改预算、出价或投放状态。
+
+当前已注册给 ReAct Agent 的情报工具为：
+
+- `list_intelligence_connections`：查看数据连接状态。
+- `list_creative_signals`：按空间、类型和数量读取创意信号。
+- `get_intelligence_evidence`：读取单条信号完整证据。
+- `create_experiment_draft`：基于信号生成单变量实验草稿，不写入投放平台。
+
+竞品监控使用 `competitor_monitors` 保存名称、平台、账号 URL、关键词、数据源、执行频率和最近扫描时间。扫描器输出标准信号，不直接写入 Prompt。数据源优先级：
+
+1. 官方广告库或官方 Marketing API：结构稳定、来源清晰，优先使用。
+2. 经授权的第三方创意情报服务（如 DataEye 类产品）：用于补齐国内平台竞品素材、榜单和投放线索，通过 Adapter 隔离字段与授权方式。
+3. Web Search Provider：使用可配置的搜索 API 发现公开页面；仅保存 URL、标题、摘要、发布时间和抓取时间，不声称获得曝光、CTR、消耗或转化。
+4. CSV/XLSX/JSON 导入：用于用户已有的数据采购结果或运营导出。
+
+生产环境不得由 Agent 直接浏览任意 URL。所有搜索请求进入 allowlist `CompetitorSearchAdapter`，限制域名、结果数、超时和响应体大小，并保存来源链接与抓取时间。页面抓取、视频下载及登录态复用必须单独获得数据源授权并遵守平台条款。
 
 ## 21. Langfuse 外部可观测性
 

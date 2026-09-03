@@ -22,6 +22,7 @@ type Tool struct {
 type Step struct {
 	Index       int             `json:"index"`
 	Kind        string          `json:"kind"`
+	Status      string          `json:"status,omitempty"`
 	Reason      string          `json:"reason,omitempty"`
 	Tool        string          `json:"tool,omitempty"`
 	Input       json.RawMessage `json:"input,omitempty"`
@@ -50,6 +51,8 @@ type RunInput struct {
 	ContextPrompt string
 	Tools         []Tool
 	Attachments   []model.ContentItem
+	OnProgress    func(Step)
+	OnStep        func(Step)
 }
 
 type actionEnvelope struct {
@@ -81,8 +84,27 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 	}
 
 	steps := []Step{}
+	appendStep := func(step Step) {
+		if step.Status == "" {
+			step.Status = "completed"
+		}
+		steps = append(steps, step)
+		if input.OnStep != nil {
+			input.OnStep(step)
+		}
+	}
+	emitProgress := func(step Step) {
+		if input.OnProgress != nil {
+			input.OnProgress(step)
+		}
+	}
 	toolResults := map[string]Step{}
 	for index := 0; index < r.maxSteps; index++ {
+		modelReason := "正在理解任务并判断下一步"
+		if index > 0 {
+			modelReason = "正在结合已有信息继续判断"
+		}
+		emitProgress(Step{Index: index + 1, Kind: "model", Status: "running", Reason: modelReason})
 		prompt := reactPrompt(input.Goal, input.ContextPrompt, input.Tools, steps)
 		result, err := r.client.GenerateDetailed(ctx, model.CallContext{
 			Scope: valueOr(input.Scope, "react"), RefID: input.RefID, RunID: input.RunID,
@@ -90,11 +112,12 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			Step: fmt.Sprintf("react_step_%02d", index+1),
 		}, append([]model.ContentItem{{Text: prompt}}, input.Attachments...))
 		if err != nil {
+			emitProgress(Step{Index: index + 1, Kind: "model", Status: "error", Reason: "模型请求未完成", Error: err.Error()})
 			return Result{Steps: steps}, err
 		}
 		action, err := parseAction(result.Text)
 		if err != nil {
-			steps = append(steps, Step{
+			appendStep(Step{
 				Index:  index + 1,
 				Kind:   "final",
 				Reason: "模型未返回工具动作 JSON，按普通回复处理。",
@@ -103,7 +126,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 		}
 		switch strings.ToLower(strings.TrimSpace(action.Type)) {
 		case "final":
-			steps = append(steps, Step{
+			appendStep(Step{
 				Index:  index + 1,
 				Kind:   "final",
 				Reason: strings.TrimSpace(action.Reason),
@@ -115,34 +138,40 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			step := Step{
 				Index:  index + 1,
 				Kind:   "tool",
+				Status: "running",
 				Reason: strings.TrimSpace(action.Reason),
 				Tool:   strings.TrimSpace(action.Tool),
 				Input:  normalizedInput,
 			}
+			emitProgress(step)
 			if !ok {
+				step.Status = "error"
 				step.Error = "unknown tool"
 				step.Observation = "工具不存在，请选择可用工具。"
-				steps = append(steps, step)
+				appendStep(step)
 				continue
 			}
 			callKey := toolCallKey(action.Tool, normalizedInput)
 			if previous, duplicate := toolResults[callKey]; duplicate {
+				step.Status = "completed"
 				step.Observation = "相同工具和参数已调用，复用 Step " + fmt.Sprint(previous.Index) + " 的结果：\n" + previous.Observation
 				step.Error = previous.Error
-				steps = append(steps, step)
+				appendStep(step)
 				continue
 			}
 			observation, err := tool.Handler(ctx, action.Input)
 			if err != nil {
+				step.Status = "error"
 				step.Error = err.Error()
 				step.Observation = truncateRunes(err.Error(), 1600)
 			} else {
+				step.Status = "completed"
 				step.Observation = truncateRunes(observation, 5000)
 			}
-			steps = append(steps, step)
+			appendStep(step)
 			toolResults[callKey] = step
 		default:
-			steps = append(steps, Step{
+			appendStep(Step{
 				Index:       index + 1,
 				Kind:        "final",
 				Reason:      "模型返回了未知动作类型，按最终回复处理。",

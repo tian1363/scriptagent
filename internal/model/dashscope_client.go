@@ -50,7 +50,7 @@ type RuntimeConfig struct {
 }
 
 type ConfigProvider interface {
-	GetModelRuntimeConfig() (RuntimeConfig, error)
+	GetModelRuntimeConfig(ctx context.Context, capability string) (RuntimeConfig, error)
 }
 
 func NewDashScopeClient(cfg DashScopeConfig) *DashScopeClient {
@@ -96,7 +96,7 @@ func (c *DashScopeClient) Generate(ctx context.Context, content []ContentItem) (
 }
 
 func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (generation Generation, callErr error) {
-	runtime := c.runtimeConfig()
+	runtime := c.runtimeConfig(ctx, capabilityForContent(content))
 	traceInput, _ := json.Marshal(telemetryContent(content))
 	ctx, span := telemetry.StartGeneration(ctx, telemetry.GenerationAttributes{
 		Name:      callCtx.Step,
@@ -112,7 +112,7 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 		telemetry.EndGeneration(span, generation.Text, generation.PromptTokens, generation.OutputTokens, generation.TotalTokens, callErr)
 	}()
 	if runtime.APIKey == "" {
-		return Generation{}, errors.New("DASHSCOPE_API_KEY is not configured")
+		return Generation{}, errors.New("当前没有可用的模型额度，请前往设置连接 API Key")
 	}
 	if runtime.Provider == "openai" {
 		return c.generateOpenAICompatible(ctx, callCtx, runtime, content)
@@ -157,9 +157,9 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	}
 	logBody := sanitizedResponseJSON(body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		err := fmt.Errorf("dashscope request failed with status %d: %s", res.StatusCode, string(body))
-		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
-		return Generation{}, err
+		rawErr := fmt.Errorf("dashscope request failed with status %d: %s", res.StatusCode, string(body))
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, rawErr)
+		return Generation{}, friendlyDashScopeError(res.StatusCode, body)
 	}
 
 	var parsed responseBody
@@ -194,6 +194,27 @@ func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallCont
 	return Generation{}, err
 }
 
+func friendlyDashScopeError(status int, body []byte) error {
+	var response struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &response)
+	switch response.Code {
+	case "Arrearage":
+		return errors.New("模型账户余额或可用额度不足，请充值或确认免费额度已生效后重试")
+	case "InvalidApiKey", "InvalidAccessKey":
+		return errors.New("模型 API Key 无效，请在设置中重新配置")
+	case "AccessDenied":
+		return errors.New("当前模型账户没有调用权限，请检查模型开通状态")
+	case "Throttling", "Throttling.RateQuota":
+		return errors.New("模型请求过于频繁，请稍后重试")
+	}
+	if status >= http.StatusInternalServerError {
+		return errors.New("模型服务暂时不可用，请稍后重试")
+	}
+	return errors.New("模型请求失败，请检查模型配置后重试")
+}
+
 func telemetryContent(content []ContentItem) []map[string]any {
 	result := make([]map[string]any, 0, len(content))
 	for _, item := range content {
@@ -210,7 +231,7 @@ func telemetryContent(content []ContentItem) []map[string]any {
 	return result
 }
 
-func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
+func (c *DashScopeClient) runtimeConfig(ctx context.Context, capability string) RuntimeConfig {
 	runtime := RuntimeConfig{
 		APIKey:   c.apiKey,
 		Provider: "dashscope",
@@ -219,19 +240,32 @@ func (c *DashScopeClient) runtimeConfig() RuntimeConfig {
 		Source:   "env",
 	}
 	if c.provider != nil {
-		if provided, err := c.provider.GetModelRuntimeConfig(); err == nil && provided.APIKey != "" {
-			runtime.APIKey = provided.APIKey
+		if provided, err := c.provider.GetModelRuntimeConfig(ctx, capability); err == nil {
+			if provided.Source == "byok" {
+				runtime.APIKey = provided.APIKey
+			} else if provided.APIKey != "" {
+				runtime.APIKey = provided.APIKey
+			}
 			runtime.Endpoint = valueOr(provided.Endpoint, runtime.Endpoint)
 			runtime.Model = valueOr(provided.Model, runtime.Model)
 			runtime.Provider = valueOr(provided.Provider, runtime.Provider)
-			runtime.Source = valueOr(provided.Source, "user")
+			runtime.Source = valueOr(provided.Source, "byok")
 		}
 	}
 	return runtime
 }
 
+func capabilityForContent(content []ContentItem) string {
+	for _, item := range content {
+		if item.Image != "" || item.Video != "" {
+			return "multimodal"
+		}
+	}
+	return "text"
+}
+
 func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext, texts []string, textType string) (generation EmbeddingGeneration, callErr error) {
-	runtime := c.runtimeConfig()
+	runtime := c.runtimeConfig(ctx, "embedding")
 	traceInput, _ := json.Marshal(texts)
 	ctx, span := telemetry.StartEmbedding(ctx, telemetry.EmbeddingAttributes{
 		Name: callCtx.Step, TraceName: callCtx.TraceName, RunID: callCtx.RunID, SpaceID: callCtx.SpaceID,
@@ -239,7 +273,7 @@ func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext
 	})
 	defer func() { telemetry.EndEmbedding(span, len(generation.Vectors), generation.TotalTokens, callErr) }()
 	if runtime.APIKey == "" {
-		return EmbeddingGeneration{}, errors.New("DASHSCOPE_API_KEY is not configured")
+		return EmbeddingGeneration{}, errors.New("当前没有可用的模型额度，请前往设置连接 API Key")
 	}
 	if len(texts) == 0 {
 		return EmbeddingGeneration{}, errors.New("embedding texts are required")

@@ -1,5 +1,9 @@
 # Langfuse 可观测性接入
 
+> 最近维护：2026-08-28 · 状态：可选接入 · 界面地址默认为 <https://cloud.langfuse.com/>
+
+本地开发者模式位于 ScriptAgent 前台左侧菜单；它读取 SQLite，是排障事实来源。Langfuse 用于跨运行趋势、Trace 和生成分析，项目详情地址取决于 Langfuse 账号与项目，仓库无法写死。
+
 ## Langfuse 是什么
 
 Langfuse 是面向 LLM 和 Agent 应用的开源可观测平台。它可以把一次用户请求中的 Agent、模型生成、Embedding 和工具步骤组织为 Trace，并提供 Token、延迟、错误、模型版本、会话和运行维度的查询与分析。

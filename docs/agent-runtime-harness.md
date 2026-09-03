@@ -1,5 +1,9 @@
 # Agent Runtime 与 Harness 设计
 
+> 最近维护：2026-08-28 · 状态：核心 Runtime、ReAct Loop、运行记录和上下文控制已落地；Checkpoint、通用取消与完整 Tool Registry 仍按本文分阶段演进。
+
+当前产品映射：普通对话直接进入 Agent Loop；固定脚本生成继续使用 Workflow；创作空间的广告目标、营销阶段和产品资料作为后续运行上下文，不额外制造用户消息。开发者模式读取本地运行记录，Langfuse 是可选外部观测层。
+
 本文档定义 ScriptAgent 的 Agent 执行底座。目标不是把所有业务都改造成自由循环 Agent，而是为固定脚本流水线和交互式 Agent 提供一致、可恢复、可观测、可控制成本的运行环境。
 
 ## 1. 设计结论
@@ -432,7 +436,7 @@ AgentRun
 - [x] 持久化 Workflow Step，并在成功、失败和步骤切换时闭合状态。
 - [x] Space observability API 返回 Run、Step、Model Call 和 Memory Event。
 
-验收：调试台能按 Space -> Run -> Model Call 正确关联一次完整任务。
+验收：开发者模式能按 Space -> Run -> Model Call 正确关联一次完整任务。
 
 ### Phase 2：抽取 Model Gateway 与预算
 
@@ -482,7 +486,7 @@ AgentRun
 
 下一步建议严格按以下顺序执行：
 
-1. 先贯通 `AgentRun -> ModelCall`，让现有调试台数据可信。
+1. 先贯通 `AgentRun -> ModelCall`，让现有开发者模式数据可信。
 2. 再建立统一预算和错误分类。
 3. 然后接入原生 Tool Calling，同时保留兼容适配器。
 4. 最后拆 Workflow Checkpoint 和 Context Builder。

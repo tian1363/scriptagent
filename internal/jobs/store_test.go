@@ -229,11 +229,11 @@ func TestStoreModelRuntimeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runtime, err := store.GetModelRuntimeConfig()
+	runtime, err := store.GetModelRuntimeConfig(context.Background(), "text")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.APIKey != "sk-test" || runtime.Endpoint != "https://example.com/api" || runtime.Model != "qwen-test" || runtime.Source != "user" {
+	if runtime.APIKey != "sk-test" || runtime.Endpoint != "https://example.com/api" || runtime.Model != "qwen-test" || runtime.Source != "byok" {
 		t.Fatalf("unexpected runtime config: %+v", runtime)
 	}
 }
@@ -296,7 +296,7 @@ func TestSpaceChatContextAndProductUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	space, err := store.CreateSpace(CreateSpaceInput{Title: "内容空间", Summary: "长期目标", ProductID: first.ID})
+	space, err := store.CreateSpace(CreateSpaceInput{Title: "内容空间", Summary: "长期目标", ProductID: first.ID, MarketingGoal: "awareness", GoalStage: "reach"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,12 +307,15 @@ func TestSpaceChatContextAndProductUpdate(t *testing.T) {
 	if _, err := store.AddChatMessage(conversation.ID, "user", "历史消息"); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.UpdateSpace(space.ID, UpdateSpaceInput{Title: space.Title, Summary: space.Summary, ProductID: second.ID})
+	updated, err := store.UpdateSpace(space.ID, UpdateSpaceInput{Title: space.Title, Summary: space.Summary, ProductID: second.ID, MarketingGoal: "conversion", GoalStage: "action"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.ProductID != second.ID {
 		t.Fatalf("expected updated product, got %s", updated.ProductID)
+	}
+	if updated.MarketingGoal != "conversion" || updated.GoalStage != "action" {
+		t.Fatalf("expected updated marketing goal, got %+v", updated)
 	}
 	thread, err := store.GetChatThread(conversation.ID)
 	if err != nil {
@@ -323,5 +326,76 @@ func TestSpaceChatContextAndProductUpdate(t *testing.T) {
 	}
 	if len(thread.Messages) != 1 || thread.Messages[0].Content != "历史消息" {
 		t.Fatalf("historical messages changed: %+v", thread.Messages)
+	}
+}
+
+func TestChatAgentStepsPersistPerAssistantMessage(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	conversation, err := store.CreateChatConversation("多轮对话")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := store.AddChatMessage(conversation.ID, "assistant", "第一轮")
+	second, _ := store.AddChatMessage(conversation.ID, "assistant", "第二轮")
+	if err := store.SaveChatAgentSteps(conversation.ID, first.ID, []AgentStep{{Index: 1, Kind: "tool", Tool: "list_products", Reason: "读取产品"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveChatAgentSteps(conversation.ID, second.ID, []AgentStep{{Index: 1, Kind: "final", Reason: "整理结果"}}); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.GetChatThread(conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.AgentTraces[first.ID][0].Tool != "list_products" || thread.AgentTraces[second.ID][0].Kind != "final" {
+		t.Fatalf("unexpected per-message traces: %+v", thread.AgentTraces)
+	}
+}
+
+func TestDeleteSpace(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	space, err := store.CreateSpace(CreateSpaceInput{Title: "待删除空间", Summary: "临时目标"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSpace(space.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetSpace(space.ID); err == nil {
+		t.Fatal("expected deleted space to be missing")
+	}
+}
+
+func TestVideoGenerationKeepsReferenceAssetOrder(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	user, err := store.CreateUser(CreateUserInput{Email: "video@example.com", Name: "Video", PasswordHash: "test", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateVideoGeneration(CreateVideoGenerationInput{
+		UserID: user.ID, SourceAssetIDs: []string{"asset-2", "asset-1"}, Mode: "image", Prompt: "图1与图2",
+		Model: "wan3.0-video-prime", Resolution: "720P", Ratio: "9:16", Duration: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetUserVideoGeneration(user.ID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.SourceAssetIDs) != 2 || got.SourceAssetIDs[0] != "asset-2" || got.SourceAssetIDs[1] != "asset-1" {
+		t.Fatalf("reference order was not preserved: %+v", got.SourceAssetIDs)
 	}
 }

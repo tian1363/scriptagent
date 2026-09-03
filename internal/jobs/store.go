@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tian1363/scriptagent/internal/model"
+	"github.com/tian1363/scriptagent/internal/userctx"
 	_ "modernc.org/sqlite"
 )
 
@@ -122,6 +123,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL,
   FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS chat_agent_steps (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL,
+  step_index INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT, tool TEXT,
+  input TEXT, observation TEXT, error TEXT, created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS model_calls (
   id TEXT PRIMARY KEY,
@@ -141,6 +149,7 @@ CREATE TABLE IF NOT EXISTS model_calls (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_agent_steps_message ON chat_agent_steps(message_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_model_calls_ref ON model_calls(ref_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_model_calls_created ON model_calls(created_at);
 
@@ -185,20 +194,75 @@ CREATE TABLE IF NOT EXISTS model_settings (
   model TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS model_capability_settings (
+  capability TEXT PRIMARY KEY,
+  mode TEXT NOT NULL DEFAULT 'byok',
+  api_key TEXT,
+  endpoint TEXT NOT NULL,
+  model TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'dashscope',
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS custom_skills (
   id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT NOT NULL,
   category TEXT NOT NULL, invocation_prompt TEXT NOT NULL, content TEXT NOT NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, role TEXT NOT NULL,
+  status TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS resource_owners (
+  resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, PRIMARY KEY(resource_type, resource_id),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_resource_owners_user ON resource_owners(user_id, resource_type);
+CREATE TABLE IF NOT EXISTS user_model_capability_settings (
+  user_id TEXT NOT NULL, capability TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'byok',
+  api_key TEXT, endpoint TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'dashscope',
+  updated_at TEXT NOT NULL, PRIMARY KEY(user_id, capability),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS spaces (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT, product_id TEXT,
-  agent_brief TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  agent_brief TEXT, marketing_goal TEXT, goal_stage TEXT, status TEXT NOT NULL, origin_space_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE RESTRICT
 );
 CREATE TABLE IF NOT EXISTS product_assets (
   id TEXT PRIMARY KEY, product_id TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL,
   original_name TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS video_generations (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, product_id TEXT, space_id TEXT, conversation_id TEXT, source_asset_id TEXT,
+  source_asset_ids_json TEXT,
+  mode TEXT NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model TEXT NOT NULL,
+  resolution TEXT NOT NULL, ratio TEXT NOT NULL, duration INTEGER NOT NULL, status TEXT NOT NULL,
+  sound_enabled INTEGER NOT NULL DEFAULT 1,
+  estimated_cost_cny REAL NOT NULL DEFAULT 0,
+  provider_task_id TEXT, video_url TEXT, local_path TEXT, error_message TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE SET NULL,
+  FOREIGN KEY(source_asset_id) REFERENCES product_assets(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS proactive_suggestions (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, space_id TEXT, product_id TEXT,
+  trigger_type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
+  action_type TEXT NOT NULL, action_target_id TEXT, priority INTEGER NOT NULL DEFAULT 50,
+  status TEXT NOT NULL DEFAULT 'pending', dedupe_key TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(user_id, dedupe_key),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE SET NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS agent_runs (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, job_id TEXT, status TEXT NOT NULL,
@@ -219,6 +283,39 @@ CREATE TABLE IF NOT EXISTS memory_events (
   FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
   FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS intelligence_connections (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, space_id TEXT, source_type TEXT NOT NULL,
+  name TEXT NOT NULL, status TEXT NOT NULL, config_json TEXT, last_synced_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS intelligence_signals (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, space_id TEXT, connection_id TEXT,
+  signal_type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
+  evidence_json TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'new', observed_at TEXT NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+  FOREIGN KEY(connection_id) REFERENCES intelligence_connections(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS creative_memories (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, space_id TEXT NOT NULL, signal_id TEXT,
+  title TEXT NOT NULL, finding TEXT NOT NULL, evidence_json TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
+  last_verified_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+  FOREIGN KEY(signal_id) REFERENCES intelligence_signals(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS competitor_monitors (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, space_id TEXT, name TEXT NOT NULL,
+  platform TEXT NOT NULL, account_url TEXT, keywords TEXT, source_type TEXT NOT NULL,
+  schedule TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'active',
+  last_scanned_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
 
 CREATE INDEX IF NOT EXISTS idx_products_updated ON products(updated_at);
 CREATE INDEX IF NOT EXISTS idx_creative_reports_product ON creative_reports(product_id, created_at);
@@ -226,9 +323,15 @@ CREATE INDEX IF NOT EXISTS idx_product_chunks_product ON product_chunks(product_
 CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_space ON jobs(space_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_product_assets_product ON product_assets(product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_generations_user ON video_generations(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proactive_suggestions_user ON proactive_suggestions(user_id, status, priority DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_space ON agent_runs(space_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_memory_events_space_run ON memory_events(space_id, run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_intelligence_connections_user ON intelligence_connections(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_intelligence_signals_user ON intelligence_signals(user_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_creative_memories_space ON creative_memories(user_id, space_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_competitor_monitors_user ON competitor_monitors(user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at DESC);
 `)
 	if err != nil {
@@ -255,6 +358,31 @@ CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at
 	if err := s.ensureColumn("model_calls", "run_id", "TEXT"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("model_calls", "user_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("video_generations", "sound_enabled", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("video_generations", "conversation_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("video_generations", "estimated_cost_cny", "REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("video_generations", "source_asset_ids_json", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE video_generations SET estimated_cost_cny = duration * CASE
+		WHEN model='wan3.0-video-prime' AND resolution='480P' THEN 0.45
+		WHEN model='wan3.0-video-prime' AND resolution='720P' THEN 0.9
+		WHEN model='wan3.0-video-prime' AND resolution='1080P' THEN 1.8
+		WHEN model='wan3.0-video' AND resolution='480P' THEN 0.3
+		WHEN model='wan3.0-video' AND resolution='720P' THEN 0.6
+		WHEN model='wan3.0-video' AND resolution='1080P' THEN 1.2
+		ELSE 0 END WHERE estimated_cost_cny=0 AND status!='failed'`); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`
 CREATE INDEX IF NOT EXISTS idx_model_calls_space ON model_calls(space_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_model_calls_run ON model_calls(run_id, created_at);
@@ -266,10 +394,25 @@ WHERE COALESCE(space_id, '') = '' AND scope = 'job';`); err != nil {
 	if err := s.makeSpaceProductOptional(); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("spaces", "marketing_goal", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("spaces", "goal_stage", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE spaces SET marketing_goal='conversion' WHERE COALESCE(marketing_goal,'')=''; UPDATE spaces SET goal_stage='action' WHERE COALESCE(goal_stage,'')=''`); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_spaces_updated ON spaces(updated_at)`); err != nil {
 		return err
 	}
-	return err
+	var firstUser string
+	if scanErr := s.db.QueryRow(`SELECT id FROM users ORDER BY created_at ASC LIMIT 1`).Scan(&firstUser); scanErr == nil {
+		if err := s.AdoptLegacyData(firstUser); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) makeSpaceProductOptional() error {
@@ -345,6 +488,19 @@ func (s *Store) GetProductAsset(id string) (*ProductAsset, error) {
 	}
 	item.CreatedAt = parseTime(created)
 	return &item, nil
+}
+
+func (s *Store) DeleteProductAsset(id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	result, err := s.db.Exec(`DELETE FROM product_assets WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) CreateProduct(input CreateProductInput) (*Product, error) {
@@ -440,10 +596,10 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 		}
 	}
 	now := time.Now().UTC()
-	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: productID, AgentBrief: strings.TrimSpace(input.AgentBrief), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
+	space := &Space{ID: newID(), Title: normalizeTitle(input.Title), Summary: strings.TrimSpace(input.Summary), ProductID: productID, AgentBrief: strings.TrimSpace(input.AgentBrief), MarketingGoal: strings.TrimSpace(input.MarketingGoal), GoalStage: strings.TrimSpace(input.GoalStage), Status: SpaceStatusActive, OriginSpaceID: strings.TrimSpace(input.OriginSpaceID), CreatedAt: now, UpdatedAt: now}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,NULLIF(?,''),?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	_, err := s.db.Exec(`INSERT INTO spaces (id,title,summary,product_id,agent_brief,marketing_goal,goal_stage,status,origin_space_id,created_at,updated_at) VALUES (?,?,?,NULLIF(?,''),?,?,?,?,NULLIF(?,''),?,?)`, space.ID, space.Title, space.Summary, space.ProductID, space.AgentBrief, space.MarketingGoal, space.GoalStage, space.Status, space.OriginSpaceID, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +607,7 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 }
 
 func (s *Store) ListSpaces() ([]Space, error) {
-	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),COALESCE(marketing_goal,''),COALESCE(goal_stage,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -460,7 +616,7 @@ func (s *Store) ListSpaces() ([]Space, error) {
 	for rows.Next() {
 		var x Space
 		var c, u string
-		if err := rows.Scan(&x.ID, &x.Title, &x.Summary, &x.ProductID, &x.AgentBrief, &x.Status, &x.OriginSpaceID, &c, &u); err != nil {
+		if err := rows.Scan(&x.ID, &x.Title, &x.Summary, &x.ProductID, &x.AgentBrief, &x.MarketingGoal, &x.GoalStage, &x.Status, &x.OriginSpaceID, &c, &u); err != nil {
 			return nil, err
 		}
 		x.CreatedAt = parseTime(c)
@@ -473,7 +629,7 @@ func (s *Store) ListSpaces() ([]Space, error) {
 func (s *Store) GetSpace(id string) (*Space, error) {
 	var space Space
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
+	err := s.db.QueryRow(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),COALESCE(marketing_goal,''),COALESCE(goal_stage,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces WHERE id=?`, id).Scan(&space.ID, &space.Title, &space.Summary, &space.ProductID, &space.AgentBrief, &space.MarketingGoal, &space.GoalStage, &space.Status, &space.OriginSpaceID, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -500,15 +656,25 @@ func (s *Store) UpdateSpace(id string, input UpdateSpaceInput) (*Space, error) {
 	now := time.Now().UTC()
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	res, err := s.db.Exec(`UPDATE spaces SET title=?,summary=?,product_id=NULLIF(?,''),agent_brief=?,updated_at=? WHERE id=?`, title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), now.Format(time.RFC3339), id)
+	res, err := s.db.Exec(`UPDATE spaces SET title=?,summary=?,product_id=NULLIF(?,''),agent_brief=?,marketing_goal=?,goal_stage=?,updated_at=? WHERE id=?`, title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), strings.TrimSpace(input.MarketingGoal), strings.TrimSpace(input.GoalStage), now.Format(time.RFC3339), id)
 	if err != nil {
 		return nil, err
 	}
 	if err := requireOne(res); err != nil {
 		return nil, err
 	}
-	current.Title, current.Summary, current.ProductID, current.AgentBrief, current.UpdatedAt = title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), now
+	current.Title, current.Summary, current.ProductID, current.AgentBrief, current.MarketingGoal, current.GoalStage, current.UpdatedAt = title, strings.TrimSpace(input.Summary), productID, strings.TrimSpace(input.AgentBrief), strings.TrimSpace(input.MarketingGoal), strings.TrimSpace(input.GoalStage), now
 	return current, nil
+}
+
+func (s *Store) DeleteSpace(id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	result, err := s.db.Exec(`DELETE FROM spaces WHERE id=?`, strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	return requireOne(result)
 }
 
 func (s *Store) CreateCreativeReport(input CreateCreativeReportInput) (*CreativeReport, error) {
@@ -624,7 +790,11 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	existing, _ := s.GetModelSettings()
+	capability := strings.TrimSpace(settings.Capability)
+	if capability == "" {
+		capability = "text"
+	}
+	existing, _ := s.GetModelSettingsForCapability(capability)
 	apiKey := strings.TrimSpace(settings.APIKey)
 	if apiKey == "" && existing != nil {
 		apiKey = existing.APIKey
@@ -642,7 +812,21 @@ func (s *Store) SaveModelSettings(settings ModelSettings) (*ModelSettings, error
 		modelName = "qwen3.6-plus"
 	}
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	mode := strings.TrimSpace(settings.Mode)
+	if mode == "" {
+		mode = "byok"
+	}
+	_, err := s.db.Exec(`INSERT INTO model_capability_settings (capability, mode, api_key, endpoint, model, provider, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(capability) DO UPDATE SET mode=excluded.mode, api_key=excluded.api_key, endpoint=excluded.endpoint, model=excluded.model, provider=excluded.provider, updated_at=excluded.updated_at`,
+		capability, mode, apiKey, endpoint, modelName, provider, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	if capability != "text" {
+		return &ModelSettings{Capability: capability, Mode: mode, APIKey: apiKey, Provider: provider, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
+	}
+	_, err = s.db.Exec(`
 INSERT INTO model_settings (id, api_key, endpoint, model, provider, updated_at)
 VALUES ('default', ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
@@ -656,10 +840,13 @@ ON CONFLICT(id) DO UPDATE SET
 	if err != nil {
 		return nil, err
 	}
-	return &ModelSettings{APIKey: apiKey, Provider: provider, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
+	return &ModelSettings{Capability: capability, Mode: mode, APIKey: apiKey, Provider: provider, Endpoint: endpoint, Model: modelName, UpdatedAt: now}, nil
 }
 
 func (s *Store) GetModelSettings() (*ModelSettings, error) {
+	if settings, err := s.GetModelSettingsForCapability("text"); err == nil {
+		return settings, nil
+	}
 	settings := &ModelSettings{}
 	var updatedAt string
 	var apiKey sql.NullString
@@ -674,8 +861,52 @@ FROM model_settings WHERE id = 'default'`).Scan(&apiKey, &settings.Endpoint, &se
 	return settings, nil
 }
 
-func (s *Store) GetModelRuntimeConfig() (model.RuntimeConfig, error) {
-	settings, err := s.GetModelSettings()
+func (s *Store) GetModelSettingsForCapability(capability string) (*ModelSettings, error) {
+	settings := &ModelSettings{Capability: capability}
+	var updatedAt string
+	var apiKey sql.NullString
+	err := s.db.QueryRow(`SELECT mode, api_key, endpoint, model, provider, updated_at FROM model_capability_settings WHERE capability=?`, capability).
+		Scan(&settings.Mode, &apiKey, &settings.Endpoint, &settings.Model, &settings.Provider, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	settings.APIKey, settings.UpdatedAt = apiKey.String, parseTime(updatedAt)
+	return settings, nil
+}
+
+func (s *Store) ListModelSettings() ([]ModelSettings, error) {
+	rows, err := s.db.Query(`SELECT capability, mode, api_key, endpoint, model, provider, updated_at FROM model_capability_settings ORDER BY capability`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ModelSettings{}
+	for rows.Next() {
+		var item ModelSettings
+		var key sql.NullString
+		var updated string
+		if err := rows.Scan(&item.Capability, &item.Mode, &key, &item.Endpoint, &item.Model, &item.Provider, &updated); err != nil {
+			return nil, err
+		}
+		item.APIKey, item.UpdatedAt = key.String, parseTime(updated)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetModelRuntimeConfig(ctx context.Context, capability string) (model.RuntimeConfig, error) {
+	userID := userctx.UserID(ctx)
+	settings, err := s.GetUserModelSettingsForCapability(userID, capability)
+	if userID == "" {
+		settings, err = s.GetModelSettingsForCapability(capability)
+	}
+	if err != nil && capability != "text" {
+		if userID != "" {
+			settings, err = s.GetUserModelSettingsForCapability(userID, "text")
+		} else {
+			settings, err = s.GetModelSettings()
+		}
+	}
 	if err != nil {
 		return model.RuntimeConfig{}, err
 	}
@@ -684,8 +915,15 @@ func (s *Store) GetModelRuntimeConfig() (model.RuntimeConfig, error) {
 		Provider: settings.Provider,
 		Endpoint: settings.Endpoint,
 		Model:    settings.Model,
-		Source:   "user",
+		Source:   valueOrModelMode(settings.Mode),
 	}, nil
+}
+
+func valueOrModelMode(value string) string {
+	if strings.TrimSpace(value) == "managed" {
+		return "managed"
+	}
+	return "byok"
 }
 
 func (s *Store) CreateJob(input CreateJobInput) (*Job, error) {
@@ -911,7 +1149,49 @@ FROM chat_conversations WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
 	}
-	return &ChatThread{Conversation: *conversation, Messages: messages}, nil
+	traces, err := s.ListChatAgentTraces(id)
+	if err != nil {
+		return nil, err
+	}
+	return &ChatThread{Conversation: *conversation, Messages: messages, AgentTraces: traces}, nil
+}
+
+func (s *Store) SaveChatAgentSteps(conversationID, messageID string, steps []AgentStep) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, step := range steps {
+		if _, err = tx.Exec(`INSERT INTO chat_agent_steps(id,conversation_id,message_id,step_index,kind,reason,tool,input,observation,error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, newID(), conversationID, messageID, step.Index, step.Kind, step.Reason, step.Tool, step.Input, step.Observation, step.Error, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListChatAgentTraces(conversationID string) (map[string][]AgentStep, error) {
+	rows, err := s.db.Query(`SELECT message_id,step_index,kind,COALESCE(reason,''),COALESCE(tool,''),COALESCE(input,''),COALESCE(observation,''),COALESCE(error,'') FROM chat_agent_steps WHERE conversation_id=? ORDER BY created_at,step_index`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string][]AgentStep{}
+	for rows.Next() {
+		var messageID string
+		var step AgentStep
+		if err := rows.Scan(&messageID, &step.Index, &step.Kind, &step.Reason, &step.Tool, &step.Input, &step.Observation, &step.Error); err != nil {
+			return nil, err
+		}
+		result[messageID] = append(result[messageID], step)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListChatMessages(conversationID string) ([]ChatMessage, error) {
@@ -980,22 +1260,54 @@ VALUES (?, ?, ?, ?, ?)`,
 	return message, nil
 }
 
-func (s *Store) RecordModelCall(_ context.Context, record model.CallRecord) error {
+func (s *Store) RecordModelCall(ctx context.Context, record model.CallRecord) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 INSERT INTO model_calls (
-  id, scope, ref_id, space_id, run_id, step, model, input_json, output_text, response_json,
+  id, user_id, scope, ref_id, space_id, run_id, step, model, input_json, output_text, response_json,
   prompt_tokens, output_tokens, total_tokens, latency_ms, error_message, created_at
-) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		newID(), valueOr(record.Scope, "unknown"), record.RefID, record.SpaceID, record.RunID, record.Step, record.Model,
+) VALUES (?, NULLIF(?,''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		newID(), userctx.UserID(ctx), valueOr(record.Scope, "unknown"), record.RefID, record.SpaceID, record.RunID, record.Step, record.Model,
 		record.InputJSON, record.OutputText, record.ResponseJSON,
 		record.PromptTokens, record.OutputTokens, record.TotalTokens, record.LatencyMS,
 		record.ErrorMessage, now.Format(time.RFC3339),
 	)
 	return err
+}
+
+func (s *Store) ListUserModelCalls(userID, refID, spaceID string, limit int) ([]ModelCall, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	query := `SELECT id,scope,ref_id,COALESCE(space_id,''),COALESCE(run_id,''),step,model,input_json,output_text,response_json,prompt_tokens,output_tokens,total_tokens,latency_ms,error_message,created_at FROM model_calls WHERE user_id=?`
+	args := []any{userID}
+	if strings.TrimSpace(refID) != "" {
+		query += ` AND ref_id=?`
+		args = append(args, refID)
+	}
+	if strings.TrimSpace(spaceID) != "" {
+		query += ` AND space_id=?`
+		args = append(args, spaceID)
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelCall{}
+	for rows.Next() {
+		x, err := scanModelCall(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *x)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListModelCalls(refID, spaceID string, limit int) ([]ModelCall, error) {
@@ -1440,6 +1752,361 @@ func (s *Store) GetCustomSkillByName(name string) (*CustomSkill, error) {
 	}
 	item.Source, item.CreatedAt, item.UpdatedAt = "custom", parseTime(createdAt), parseTime(updatedAt)
 	return &item, nil
+}
+
+func (s *Store) CountUsers() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) ListUsers() ([]User, error) {
+	rows, err := s.db.Query(`SELECT id,email,name,role,status,password_hash,created_at,updated_at FROM users ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []User
+	for rows.Next() {
+		var x User
+		var name sql.NullString
+		var created, updated string
+		if err := rows.Scan(&x.ID, &x.Email, &name, &x.Role, &x.Status, &x.PasswordHash, &created, &updated); err != nil {
+			return nil, err
+		}
+		x.Name, x.CreatedAt, x.UpdatedAt = name.String, parseTime(created), parseTime(updated)
+		result = append(result, x)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) CreateUser(input CreateUserInput) (*User, error) {
+	now := time.Now().UTC()
+	user := &User{ID: newID(), Email: strings.ToLower(strings.TrimSpace(input.Email)), Name: strings.TrimSpace(input.Name), Role: valueOr(input.Role, "admin"), Status: valueOr(input.Status, "active"), PasswordHash: input.PasswordHash, CreatedAt: now, UpdatedAt: now}
+	_, err := s.db.Exec(`INSERT INTO users (id,email,name,role,status,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, user.ID, user.Email, user.Name, user.Role, user.Status, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	return user, err
+}
+
+func (s *Store) GetUser(id string) (*User, error) {
+	var user User
+	var createdAt, updatedAt string
+	err := s.db.QueryRow(`SELECT id,email,COALESCE(name,''),role,status,password_hash,created_at,updated_at FROM users WHERE id=?`, id).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.Status, &user.PasswordHash, &createdAt, &updatedAt)
+	user.CreatedAt, user.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
+	return &user, err
+}
+
+func (s *Store) GetUserByEmail(email string) (*User, error) {
+	var user User
+	var createdAt, updatedAt string
+	err := s.db.QueryRow(`SELECT id,email,COALESCE(name,''),role,status,password_hash,created_at,updated_at FROM users WHERE email=?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.Status, &user.PasswordHash, &createdAt, &updatedAt)
+	user.CreatedAt, user.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
+	return &user, err
+}
+
+func (s *Store) CreateSession(input CreateSessionInput) (*Session, error) {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)`, input.Token, input.UserID, input.ExpiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
+	return &Session{Token: input.Token, UserID: input.UserID, ExpiresAt: input.ExpiresAt, CreatedAt: now}, err
+}
+
+func (s *Store) GetSession(token string) (*Session, error) {
+	var session Session
+	var expiresAt, createdAt string
+	err := s.db.QueryRow(`SELECT token,user_id,expires_at,created_at FROM sessions WHERE token=?`, token).Scan(&session.Token, &session.UserID, &expiresAt, &createdAt)
+	session.ExpiresAt, session.CreatedAt = parseTime(expiresAt), parseTime(createdAt)
+	return &session, err
+}
+
+func (s *Store) DeleteSession(token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token=?`, token)
+	return err
+}
+
+func (s *Store) ClaimResource(userID, resourceType, resourceID string) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(resourceID) == "" {
+		return errors.New("resource owner is required")
+	}
+	_, err := s.db.Exec(`INSERT INTO resource_owners(resource_type,resource_id,user_id,created_at) VALUES(?,?,?,?) ON CONFLICT(resource_type,resource_id) DO UPDATE SET user_id=excluded.user_id`, resourceType, resourceID, userID, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *Store) OwnsResource(userID, resourceType, resourceID string) bool {
+	var one int
+	return s.db.QueryRow(`SELECT 1 FROM resource_owners WHERE user_id=? AND resource_type=? AND resource_id=?`, userID, resourceType, resourceID).Scan(&one) == nil
+}
+func (s *Store) ResourceOwner(resourceType, resourceID string) string {
+	var id string
+	_ = s.db.QueryRow(`SELECT user_id FROM resource_owners WHERE resource_type=? AND resource_id=?`, resourceType, resourceID).Scan(&id)
+	return id
+}
+
+func (s *Store) SaveUserModelSettings(userID string, settings ModelSettings) (*ModelSettings, error) {
+	capability := valueOr(strings.TrimSpace(settings.Capability), "text")
+	existing, _ := s.GetUserModelSettingsForCapability(userID, capability)
+	key := strings.TrimSpace(settings.APIKey)
+	if key == "" && existing != nil {
+		key = existing.APIKey
+	}
+	mode := valueOr(strings.TrimSpace(settings.Mode), "byok")
+	provider := valueOr(strings.TrimSpace(settings.Provider), "dashscope")
+	endpoint := valueOr(strings.TrimSpace(settings.Endpoint), "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation")
+	modelName := valueOr(strings.TrimSpace(settings.Model), "qwen3.8-flash")
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO user_model_capability_settings(user_id,capability,mode,api_key,endpoint,model,provider,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,capability) DO UPDATE SET mode=excluded.mode,api_key=excluded.api_key,endpoint=excluded.endpoint,model=excluded.model,provider=excluded.provider,updated_at=excluded.updated_at`, userID, capability, mode, key, endpoint, modelName, provider, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return &ModelSettings{Capability: capability, Mode: mode, APIKey: key, Endpoint: endpoint, Model: modelName, Provider: provider, UpdatedAt: now}, nil
+}
+func (s *Store) GetUserModelSettingsForCapability(userID, capability string) (*ModelSettings, error) {
+	var x ModelSettings
+	var key sql.NullString
+	var updated string
+	err := s.db.QueryRow(`SELECT capability,mode,api_key,endpoint,model,provider,updated_at FROM user_model_capability_settings WHERE user_id=? AND capability=?`, userID, capability).Scan(&x.Capability, &x.Mode, &key, &x.Endpoint, &x.Model, &x.Provider, &updated)
+	x.APIKey = key.String
+	x.UpdatedAt = parseTime(updated)
+	return &x, err
+}
+func (s *Store) ListUserModelSettings(userID string) ([]ModelSettings, error) {
+	rows, err := s.db.Query(`SELECT capability,mode,api_key,endpoint,model,provider,updated_at FROM user_model_capability_settings WHERE user_id=? ORDER BY capability`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelSettings{}
+	for rows.Next() {
+		var x ModelSettings
+		var key sql.NullString
+		var updated string
+		if err := rows.Scan(&x.Capability, &x.Mode, &key, &x.Endpoint, &x.Model, &x.Provider, &updated); err != nil {
+			return nil, err
+		}
+		x.APIKey = key.String
+		x.UpdatedAt = parseTime(updated)
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) FilterOwnedIDs(userID, resourceType string) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT resource_id FROM resource_owners WHERE user_id=? AND resource_type=?`, userID, resourceType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}
+
+// AdoptLegacyData gives the first registered account ownership of records that
+// predate authentication. Later accounts start with an empty workspace.
+func (s *Store) AdoptLegacyData(userID string) error {
+	resources := map[string]string{"product": "products", "space": "spaces", "job": "jobs", "chat": "chat_conversations", "skill": "custom_skills"}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for kind, table := range resources {
+		query := `INSERT OR IGNORE INTO resource_owners(resource_type,resource_id,user_id,created_at) SELECT ?,id,?,? FROM ` + table
+		if _, err := tx.Exec(query, kind, userID, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO user_model_capability_settings(user_id,capability,mode,api_key,endpoint,model,provider,updated_at) SELECT ?,capability,mode,api_key,endpoint,model,provider,updated_at FROM model_capability_settings`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE model_calls SET user_id=? WHERE COALESCE(user_id,'')=''`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListUserProducts(userID string) ([]Product, error) {
+	items, err := s.ListProducts()
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.FilterOwnedIDs(userID, "product")
+	if err != nil {
+		return nil, err
+	}
+	out := []Product{}
+	for _, item := range items {
+		if owned[item.ID] {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+func (s *Store) GetUserProduct(userID, id string) (*Product, error) {
+	if !s.OwnsResource(userID, "product", id) {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetProduct(id)
+}
+func (s *Store) ListUserSpaces(userID string) ([]Space, error) {
+	items, err := s.ListSpaces()
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.FilterOwnedIDs(userID, "space")
+	if err != nil {
+		return nil, err
+	}
+	out := []Space{}
+	for _, x := range items {
+		if owned[x.ID] {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+func (s *Store) GetUserSpace(userID, id string) (*Space, error) {
+	if !s.OwnsResource(userID, "space", id) {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetSpace(id)
+}
+func (s *Store) ListUserJobs(userID string) ([]Job, error) {
+	items, err := s.ListJobs()
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.FilterOwnedIDs(userID, "job")
+	if err != nil {
+		return nil, err
+	}
+	out := []Job{}
+	for _, x := range items {
+		if owned[x.ID] {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+func (s *Store) GetUserJob(userID, id string) (*Job, error) {
+	if !s.OwnsResource(userID, "job", id) {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetJob(id)
+}
+func (s *Store) ListUserChats(userID string) ([]ChatConversation, error) {
+	items, err := s.ListChatConversations()
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.FilterOwnedIDs(userID, "chat")
+	if err != nil {
+		return nil, err
+	}
+	out := []ChatConversation{}
+	for _, x := range items {
+		if owned[x.ID] {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+func (s *Store) GetUserChatThread(userID, id string) (*ChatThread, error) {
+	if !s.OwnsResource(userID, "chat", id) {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetChatThread(id)
+}
+func (s *Store) ListUserCustomSkills(userID string) ([]CustomSkill, error) {
+	items, err := s.ListCustomSkills()
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.FilterOwnedIDs(userID, "skill")
+	if err != nil {
+		return nil, err
+	}
+	out := []CustomSkill{}
+	for _, x := range items {
+		if owned[x.ID] {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+func (s *Store) GetUserCustomSkillByName(userID, name string) (*CustomSkill, error) {
+	item, err := s.GetCustomSkillByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if !s.OwnsResource(userID, "skill", item.ID) {
+		return nil, sql.ErrNoRows
+	}
+	return item, nil
+}
+
+func (s *Store) CreateVideoGeneration(input CreateVideoGenerationInput) (*VideoGeneration, error) {
+	now := time.Now().UTC()
+	assetIDs := append([]string(nil), input.SourceAssetIDs...)
+	if len(assetIDs) == 0 && input.SourceAssetID != "" {
+		assetIDs = []string{input.SourceAssetID}
+	}
+	assetJSON, _ := json.Marshal(assetIDs)
+	x := &VideoGeneration{ID: newID(), UserID: input.UserID, ProductID: input.ProductID, SpaceID: input.SpaceID, ConversationID: input.ConversationID, SourceAssetID: input.SourceAssetID, SourceAssetIDs: assetIDs, Mode: input.Mode, Prompt: input.Prompt, NegativePrompt: input.NegativePrompt, Model: input.Model, Resolution: input.Resolution, Ratio: input.Ratio, Duration: input.Duration, SoundEnabled: input.SoundEnabled, EstimatedCostCNY: input.EstimatedCostCNY, Status: "pending", CreatedAt: now, UpdatedAt: now}
+	_, err := s.db.Exec(`INSERT INTO video_generations(id,user_id,product_id,space_id,conversation_id,source_asset_id,source_asset_ids_json,mode,prompt,negative_prompt,model,resolution,ratio,duration,sound_enabled,estimated_cost_cny,status,created_at,updated_at) VALUES(?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.ID, x.UserID, x.ProductID, x.SpaceID, x.ConversationID, x.SourceAssetID, string(assetJSON), x.Mode, x.Prompt, x.NegativePrompt, x.Model, x.Resolution, x.Ratio, x.Duration, x.SoundEnabled, x.EstimatedCostCNY, x.Status, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	return x, err
+}
+
+func (s *Store) UpdateVideoGeneration(id, status, taskID, videoURL, localPath, errorMessage string) error {
+	_, err := s.db.Exec(`UPDATE video_generations SET status=?,provider_task_id=NULLIF(?,''),video_url=NULLIF(?,''),local_path=NULLIF(?,''),error_message=NULLIF(?,''),updated_at=? WHERE id=?`, status, taskID, videoURL, localPath, errorMessage, time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}
+
+func (s *Store) GetUserVideoGeneration(userID, id string) (*VideoGeneration, error) {
+	var x VideoGeneration
+	var productID, spaceID, conversationID, assetID, assetIDsJSON, negative, taskID, videoURL, localPath, errorMessage sql.NullString
+	var created, updated string
+	err := s.db.QueryRow(`SELECT id,user_id,product_id,space_id,conversation_id,source_asset_id,source_asset_ids_json,mode,prompt,negative_prompt,model,resolution,ratio,duration,sound_enabled,estimated_cost_cny,status,provider_task_id,video_url,local_path,error_message,created_at,updated_at FROM video_generations WHERE user_id=? AND id=?`, userID, id).Scan(&x.ID, &x.UserID, &productID, &spaceID, &conversationID, &assetID, &assetIDsJSON, &x.Mode, &x.Prompt, &negative, &x.Model, &x.Resolution, &x.Ratio, &x.Duration, &x.SoundEnabled, &x.EstimatedCostCNY, &x.Status, &taskID, &videoURL, &localPath, &errorMessage, &created, &updated)
+	x.ProductID, x.SpaceID, x.ConversationID, x.SourceAssetID, x.NegativePrompt, x.ProviderTaskID, x.VideoURL, x.LocalPath, x.ErrorMessage = productID.String, spaceID.String, conversationID.String, assetID.String, negative.String, taskID.String, videoURL.String, localPath.String, errorMessage.String
+	_ = json.Unmarshal([]byte(assetIDsJSON.String), &x.SourceAssetIDs)
+	if len(x.SourceAssetIDs) == 0 && x.SourceAssetID != "" {
+		x.SourceAssetIDs = []string{x.SourceAssetID}
+	}
+	x.CreatedAt, x.UpdatedAt = parseTime(created), parseTime(updated)
+	return &x, err
+}
+
+func (s *Store) ListUserVideoGenerations(userID string) ([]VideoGeneration, error) {
+	rows, err := s.db.Query(`SELECT id FROM video_generations WHERE user_id=? ORDER BY created_at DESC LIMIT 100`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	result := make([]VideoGeneration, 0, len(ids))
+	for _, id := range ids {
+		x, err := s.GetUserVideoGeneration(userID, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *x)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ensureColumn(table, column, columnType string) error {

@@ -63,6 +63,7 @@ func main() {
 	runner := jobs.NewRunner(store, buildAgent(modelClient))
 	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient))
 	runner.ResumeUnfinished()
+	handler.ResumeVideos()
 
 	log.Printf("ScriptAgent server listening on http://localhost:%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {

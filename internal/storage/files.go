@@ -14,6 +14,7 @@ import (
 const (
 	MaxVideoBytes          = 500 * 1024 * 1024
 	MaxMarkdownBytes       = 2 * 1024 * 1024
+	MaxDocumentBytes       = 20 * 1024 * 1024
 	MaxAssetBytes          = 100 * 1024 * 1024
 	MaxChatAttachmentBytes = 20 * 1024 * 1024
 )
@@ -24,6 +25,21 @@ type LocalStore struct {
 
 func NewLocalStore(root string) *LocalStore {
 	return &LocalStore{root: root}
+}
+
+func (s *LocalStore) SaveGeneratedVideo(id string, input io.Reader) (string, error) {
+	dir := filepath.Join(s.root, "generated")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, id+".mp4")
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, io.LimitReader(input, MaxVideoBytes+1))
+	return path, err
 }
 
 func (s *LocalStore) SaveUpload(file multipart.File, header *multipart.FileHeader, kind string) (string, error) {

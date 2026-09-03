@@ -2,6 +2,32 @@ package jobs
 
 import "time"
 
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name,omitempty"`
+	Role         string    `json:"role"`
+	Status       string    `json:"status"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type CreateUserInput struct {
+	Email, Name, Role, Status, PasswordHash string
+}
+
+type Session struct {
+	Token, UserID string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+}
+
+type CreateSessionInput struct {
+	Token, UserID string
+	ExpiresAt     time.Time
+}
+
 const (
 	StatusPending             = "pending"
 	StatusRunning             = "running"
@@ -52,6 +78,8 @@ type Space struct {
 	Summary       string    `json:"summary,omitempty"`
 	ProductID     string    `json:"product_id"`
 	AgentBrief    string    `json:"agent_brief,omitempty"`
+	MarketingGoal string    `json:"marketing_goal,omitempty"`
+	GoalStage     string    `json:"goal_stage,omitempty"`
 	Status        string    `json:"status"`
 	OriginSpaceID string    `json:"origin_space_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -63,13 +91,17 @@ type CreateSpaceInput struct {
 	Summary       string `json:"summary"`
 	ProductID     string `json:"product_id"`
 	AgentBrief    string `json:"agent_brief"`
+	MarketingGoal string `json:"marketing_goal"`
+	GoalStage     string `json:"goal_stage"`
 	OriginSpaceID string `json:"origin_space_id"`
 }
 type UpdateSpaceInput struct {
-	Title      string `json:"title"`
-	Summary    string `json:"summary"`
-	ProductID  string `json:"product_id"`
-	AgentBrief string `json:"agent_brief"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary"`
+	ProductID     string `json:"product_id"`
+	AgentBrief    string `json:"agent_brief"`
+	MarketingGoal string `json:"marketing_goal"`
+	GoalStage     string `json:"goal_stage"`
 }
 type ForkSpaceInput struct{ Title, Summary, AgentBrief string }
 
@@ -92,6 +124,59 @@ type ProductAsset struct {
 	MimeType     string    `json:"mime_type"`
 	SizeBytes    int64     `json:"size_bytes"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// VideoGeneration is one user-owned asynchronous UGC video render.
+type VideoGeneration struct {
+	ID               string    `json:"id"`
+	UserID           string    `json:"-"`
+	ProductID        string    `json:"product_id,omitempty"`
+	SpaceID          string    `json:"space_id,omitempty"`
+	ConversationID   string    `json:"conversation_id,omitempty"`
+	SourceAssetID    string    `json:"source_asset_id,omitempty"`
+	SourceAssetIDs   []string  `json:"source_asset_ids,omitempty"`
+	Mode             string    `json:"mode"`
+	Prompt           string    `json:"prompt"`
+	NegativePrompt   string    `json:"negative_prompt,omitempty"`
+	Model            string    `json:"model"`
+	Resolution       string    `json:"resolution"`
+	Ratio            string    `json:"ratio"`
+	Duration         int       `json:"duration"`
+	SoundEnabled     bool      `json:"sound_enabled"`
+	EstimatedCostCNY float64   `json:"estimated_cost_cny"`
+	Status           string    `json:"status"`
+	ProviderTaskID   string    `json:"provider_task_id,omitempty"`
+	VideoURL         string    `json:"video_url,omitempty"`
+	LocalPath        string    `json:"-"`
+	ErrorMessage     string    `json:"error_message,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type CreateVideoGenerationInput struct {
+	UserID, ProductID, SpaceID, ConversationID, SourceAssetID, Mode, Prompt, NegativePrompt, Model, Resolution, Ratio string
+	SourceAssetIDs                                                                                                    []string
+	Duration                                                                                                          int
+	SoundEnabled                                                                                                      bool
+	EstimatedCostCNY                                                                                                  float64
+}
+
+// ProactiveSuggestion is an explainable, user-owned next action proposed from
+// existing product signals. Execution always remains behind user confirmation.
+type ProactiveSuggestion struct {
+	ID             string    `json:"id"`
+	UserID         string    `json:"-"`
+	SpaceID        string    `json:"space_id,omitempty"`
+	ProductID      string    `json:"product_id,omitempty"`
+	TriggerType    string    `json:"trigger_type"`
+	Title          string    `json:"title"`
+	Summary        string    `json:"summary"`
+	ActionType     string    `json:"action_type"`
+	ActionTargetID string    `json:"action_target_id,omitempty"`
+	Priority       int       `json:"priority"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type CreativeReport struct {
@@ -168,14 +253,18 @@ type CreateProductInput struct {
 type UpdateProductInput struct{ Title string }
 
 type ModelSettings struct {
-	APIKey    string    `json:"-"`
-	Provider  string    `json:"provider"`
-	Endpoint  string    `json:"endpoint"`
-	Model     string    `json:"model"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Capability string    `json:"capability"`
+	Mode       string    `json:"mode"`
+	APIKey     string    `json:"-"`
+	Provider   string    `json:"provider"`
+	Endpoint   string    `json:"endpoint"`
+	Model      string    `json:"model"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type PublicModelSettings struct {
+	Capability string    `json:"capability"`
+	Mode       string    `json:"mode"`
 	Configured bool      `json:"configured"`
 	Source     string    `json:"source"`
 	APIKeyMask string    `json:"api_key_mask,omitempty"`
@@ -183,6 +272,12 @@ type PublicModelSettings struct {
 	Endpoint   string    `json:"endpoint"`
 	Model      string    `json:"model"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`
+}
+
+type PublicModelConfiguration struct {
+	Configured bool                  `json:"configured"`
+	Source     string                `json:"source"`
+	Profiles   []PublicModelSettings `json:"profiles"`
 }
 
 type ScriptResult struct {
@@ -220,15 +315,17 @@ type ChatMessage struct {
 }
 
 type ChatThread struct {
-	Conversation ChatConversation  `json:"conversation"`
-	Messages     []ChatMessage     `json:"messages"`
-	Citations    []ProductCitation `json:"citations,omitempty"`
-	AgentSteps   []AgentStep       `json:"agent_steps,omitempty"`
+	Conversation ChatConversation       `json:"conversation"`
+	Messages     []ChatMessage          `json:"messages"`
+	Citations    []ProductCitation      `json:"citations,omitempty"`
+	AgentSteps   []AgentStep            `json:"agent_steps,omitempty"`
+	AgentTraces  map[string][]AgentStep `json:"agent_traces,omitempty"`
 }
 
 type AgentStep struct {
 	Index       int    `json:"index"`
 	Kind        string `json:"kind"`
+	Status      string `json:"status,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Tool        string `json:"tool,omitempty"`
 	Input       string `json:"input,omitempty"`
