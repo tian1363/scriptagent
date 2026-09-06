@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-06 20:17
+
+- `b304371` docs: automate version changelog updates
+
 推送到 `main` 的新提交会由 GitHub Actions 自动追加到这里。带有 `[skip changelog]` 的提交不会写入记录。
 
 ## 2026-09-06 · 自托管 Beta 更新
