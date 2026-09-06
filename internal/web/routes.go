@@ -18,6 +18,7 @@ type Config struct {
 	AllowManagedMode bool
 	RegistrationMode string
 	InviteCodes      []string
+	AdminUserID      string
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -38,6 +39,11 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth).Get("/auth/me", h.me)
 		api.Group(func(private chi.Router) {
 			private.Use(h.requireAuth)
+			private.Get("/owner/session", h.ownerSession)
+			private.With(h.requireAdmin).Get("/owner/overview", h.ownerOverview)
+			private.With(h.requireAdmin).Get("/owner/invites", h.listInvites)
+			private.With(h.requireAdmin).Post("/owner/invites", h.createInvite)
+			private.With(h.requireAdmin).Post("/owner/invites/{id}/revoke", h.revokeInvite)
 			private.Get("/skills", h.listSkills)
 			private.Post("/skills/draft", h.generateSkillDraft)
 			private.Post("/skills", h.createSkill)

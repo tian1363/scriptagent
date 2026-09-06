@@ -34,10 +34,19 @@ func main() {
 		AllowManagedMode: envBool("SCRIPT_AGENT_ALLOW_MANAGED_MODE", false),
 		RegistrationMode: env("SCRIPT_AGENT_REGISTRATION_MODE", "invite"),
 		InviteCodes:      splitCSV(os.Getenv("SCRIPT_AGENT_INVITE_CODES")),
+		AdminUserID:      strings.TrimSpace(os.Getenv("SCRIPT_AGENT_ADMIN_USER_ID")),
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("create data dir: %v", err)
+	}
+	// Local owner binding is server-controlled and never included in source control.
+	if cfg.AdminUserID == "" {
+		value, err := os.ReadFile(filepath.Join(cfg.DataDir, "admin-user-id"))
+		if err != nil && !os.IsNotExist(err) {
+			log.Fatalf("read administrator binding: %v", err)
+		}
+		cfg.AdminUserID = strings.TrimSpace(string(value))
 	}
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		log.Fatalf("create upload dir: %v", err)
@@ -65,6 +74,9 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
+	if err := store.SetSoleAdministrator(cfg.AdminUserID); err != nil {
+		log.Fatalf("configure sole administrator: %v", err)
+	}
 	if err := store.ConfigureSecretEncryption(os.Getenv("SCRIPT_AGENT_ENCRYPTION_KEY")); err != nil {
 		log.Fatalf("configure API key encryption: %v", err)
 	}

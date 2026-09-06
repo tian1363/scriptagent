@@ -1,5 +1,8 @@
+import InviteManager from "./InviteManager";
+import EcommerceToolbox from "./EcommerceToolbox";
 import {
   Activity,
+  BriefcaseBusiness,
   ChartNoAxesCombined,
   Bot,
   CheckCircle2,
@@ -312,7 +315,16 @@ const chatQuickTasks = [
 ];
 
 export function App() {
-  const [view, setView] = useState("home");
+  const [view, setView] = useState(() => window.location.hash === "#toolbox" ? "toolbox" : "home");
+  useEffect(() => {
+    const syncToolboxRoute = () => { if (window.location.hash === "#toolbox") setView("toolbox"); };
+    window.addEventListener("hashchange", syncToolboxRoute);
+    return () => window.removeEventListener("hashchange", syncToolboxRoute);
+  }, []);
+  useEffect(() => {
+    if (view === "toolbox") window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#toolbox`);
+    else if (window.location.hash === "#toolbox") window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }, [view]);
   const [currentUser, setCurrentUser] = useState(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [registrationAvailable, setRegistrationAvailable] = useState(false);
@@ -608,6 +620,9 @@ export function App() {
 
   async function handleLogout() {
     await logout().catch(() => {});
+    setOwnerSession({ authenticated: false });
+    setOwnerOverview(null);
+    setView("home");
     setCurrentUser(null);
     setSelectedJob(null);
     setSelectedChat(null);
@@ -632,6 +647,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    setOwnerSession({ authenticated: false });
+    setOwnerOverview(null);
     if (!currentUser) return;
     refreshJobs().catch((err) => setError(err.message));
     refreshChats().catch(() => {});
@@ -644,8 +661,15 @@ export function App() {
     refreshModelSettings().catch(() => {});
     getOwnerSession()
       .then(setOwnerSession)
-      .catch(() => {});
+      .catch(() => setOwnerSession({ authenticated: false }));
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (view !== "admin" || !ownerSession.authenticated) return;
+    setIsOwnerLoading(true);
+    getOwnerOverview().then(setOwnerOverview).catch((err) => setError(err.message))
+      .finally(() => setIsOwnerLoading(false));
+  }, [view, ownerSession.authenticated]);
 
   useEffect(() => {
     if (!modelSettings) return;
@@ -1308,19 +1332,21 @@ export function App() {
         />
       ) : null}
       <AppSidebar
+        recentItems={[...chats.map(item => ({...item, kind: "chat"})), ...jobs.map(item => ({...item, kind: "job"}))].sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)).slice(0,5)}
+        onRecent={item => (item.kind === "chat" ? handleSelectChat(item.id).then(() => setView("chat")) : handleSelectJob(item.id).then(() => setView("jobs"))).catch(err => setError(err.message))}
         view={view}
         onChange={setView}
         icon={agentIcon}
         collapsed={isMainSidebarCollapsed}
         onToggle={() => setIsMainSidebarCollapsed((value) => !value)}
         showDebugPanel={showDebugPanel}
-        ownerAuthenticated={ownerSession.authenticated}
+        ownerAuthenticated={currentUser?.role === "admin" && ownerSession.authenticated}
         currentUser={currentUser}
         onLogout={handleLogout}
       />
       <div className="agent-frame">
         <main
-          className={`workspace ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""} ${view === "chat" && isChatHistoryCollapsed ? "chat-history-collapsed" : ""}`}
+          className={`workspace ${view === "toolbox" ? "toolbox-workspace" : ""} ${view === "products" || view === "calls" || view === "admin" ? "workspace-home" : ""} ${view === "chat" && isChatHistoryCollapsed ? "chat-history-collapsed" : ""}`}
         >
           {view === "jobs" ? (
             <JobsSidebar
@@ -1346,8 +1372,12 @@ export function App() {
           ) : null}
 
           <section
-            className={`main-pane ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}
+            className={`main-pane ${view === "toolbox" ? "toolbox-pane" : ""} ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}
           >
+            <div className="toolbox-host" hidden={view !== "toolbox"}>
+              <button className="secondary-button toolbox-radar-entry" type="button" onClick={() => setView("intelligence")}><Radar size={16}/>创意雷达</button>
+              <EcommerceToolbox key={currentUser.id} userId={currentUser.id} products={products} active={view === "toolbox"} />
+            </div>
             {view === "home" ? (
               <AgentStart
                 products={products}
@@ -1376,6 +1406,7 @@ export function App() {
             ) : null}
             {view === "spaces" ? (
               <SpacesWorkspace
+                onDirections={() => setView("intelligence")}
                 spaces={spaces}
                 products={products}
                 jobs={jobs}
@@ -1477,7 +1508,7 @@ export function App() {
                 error={error}
               />
             ) : null}
-            {view === "admin" && ownerSession.authenticated ? (
+            {view === "admin" && currentUser?.role === "admin" && ownerSession.authenticated ? (
               <OwnerDashboard
                 overview={ownerOverview}
                 isLoading={isOwnerLoading}
@@ -1485,7 +1516,7 @@ export function App() {
                 onRefresh={() =>
                   refreshCurrent().catch((err) => setError(err.message))
                 }
-                onLogout={handleOwnerLogout}
+                onLogout={handleLogout}
               />
             ) : null}
             {view === "settings" ? (
@@ -1496,7 +1527,7 @@ export function App() {
                 error={error}
                 onDebugPanel={setShowDebugPanel}
                 onSave={handleSaveModelSettings}
-                ownerSession={ownerSession}
+                ownerSession={currentUser?.role === "admin" ? ownerSession : { authenticated: false }}
                 isOwnerLoading={isOwnerLoading}
                 onOwnerLogin={handleOwnerLogin}
               />
@@ -1535,7 +1566,7 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
         <div className="auth-brand">
           <img src={agentIcon} alt="" />
           <div>
-            <strong>ScriptAgent</strong>
+            <strong>ScriptAgent <small className="product-beta">Beta</small></strong>
             <span>让每次创作都有目标、有依据</span>
           </div>
         </div>
@@ -1646,6 +1677,8 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
 }
 
 function AppSidebar({
+  recentItems = [],
+  onRecent,
   view,
   onChange,
   icon,
@@ -1657,11 +1690,10 @@ function AppSidebar({
   onLogout,
 }) {
   const items = [
-    ["home", "开始", House],
-    ["history", "历史", History],
+    ["home", "创作", House],
     ["spaces", "创意空间", FolderKanban],
-    ["intelligence", "创意雷达", Radar],
     ["products", "产品资料", Package],
+    ["toolbox", "工具箱", BriefcaseBusiness],
   ];
   const navButton = (id, label, Icon) => (
     <button
@@ -1686,26 +1718,36 @@ function AppSidebar({
         aria-label={collapsed ? "展开主菜单" : "收起主菜单"}
       >
         <img src={icon} alt="" />
-        <span>ScriptAgent</span>
+        <span>ScriptAgent <small className="product-beta">Beta</small></span>
         {collapsed ? null : (
           <ChevronLeft className="sidebar-collapse-mark" size={16} />
         )}
       </button>
       <nav>{items.map(([id, label, Icon]) => navButton(id, label, Icon))}</nav>
+      <details className="sidebar-recents" open={!collapsed}>
+        <summary title="最近创作"><History size={17}/><span>最近创作</span></summary>
+        <div className="sidebar-recent-list">
+          {!collapsed && recentItems.map(item => <button type="button" key={`${item.kind}-${item.id}`} title={item.title || "未命名创作"} onClick={() => onRecent(item)}>{item.title || "未命名创作"}</button>)}
+          <button type="button" onClick={() => onChange("history")} title="查看全部历史">查看全部</button>
+        </div>
+      </details>
       <div className="sidebar-bottom">
+        <details className="sidebar-account-menu">
+        <summary title="账号与设置" aria-label="账号与设置"><span className="account-avatar">{(currentUser?.name || currentUser?.email || "A").slice(0,1).toUpperCase()}</span><span className="account-copy"><strong>{currentUser?.name || "用户"}</strong><small>{currentUser?.email}</small></span></summary>
+        <div className="sidebar-account-options" onClick={event => {if(event.target.closest("button")) event.currentTarget.closest("details").open = false;}}>
         {ownerAuthenticated
           ? navButton("admin", "运营后台", ChartNoAxesCombined)
           : null}
         {showDebugPanel ? navButton("calls", "开发者模式", Activity) : null}
         {navButton("settings", "设置", Settings)}
-        <div className="sidebar-account">
+        <div className="sidebar-account" hidden>
           <span className="account-avatar">
             {(currentUser?.name || currentUser?.email || "A")
               .slice(0, 1)
               .toUpperCase()}
           </span>
           <span className="account-copy">
-            <strong>{currentUser?.name || "管理员"}</strong>
+            <strong>{currentUser?.name || "用户"}</strong>
             <small>{currentUser?.email}</small>
           </span>
           <button
@@ -1718,6 +1760,9 @@ function AppSidebar({
             <LogOut size={17} />
           </button>
         </div>
+        <button type="button" onClick={onLogout}><LogOut size={17}/><span>退出登录</span></button>
+        </div>
+        </details>
       </div>
     </aside>
   );
@@ -2395,6 +2440,69 @@ const videoStatusText = {
   failed: "生成失败",
 };
 
+function ReferencePromptEditor({ value, assets, selectedIds, onSelect, onChange }) {
+  const editor = useRef(null);
+  const [menu, setMenu] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const images = assets.filter((asset) => asset.kind === "image");
+  useEffect(() => {
+    if (editor.current && !editor.current.dataset.ready) {
+      editor.current.textContent = value || "";
+      editor.current.dataset.ready = "true";
+    }
+  }, [value]);
+  function readPrompt() {
+    const root = editor.current;
+    const read = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+      if (node.dataset?.assetLabel) return `@${node.dataset.assetLabel}`;
+      if (node.tagName === "BR") return "\n";
+      const text = Array.from(node.childNodes).map(read).join("");
+      return node !== root && node.tagName === "DIV" ? `${text}\n` : text;
+    };
+    return root ? read(root).replace(/\n{3,}/g, "\n\n").trim() : "";
+  }
+  function handleInput() {
+    onChange(readPrompt());
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !editor.current?.contains(selection.anchorNode)) return setMenu(false);
+    const before = selection.getRangeAt(0).cloneRange();
+    before.selectNodeContents(editor.current);
+    before.setEnd(selection.anchorNode, selection.anchorOffset);
+    setMenu(/@$/.test(before.toString()));
+  }
+  function insert(asset) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+      range.setStart(range.startContainer, range.startOffset - 1);
+      range.deleteContents();
+    }
+    const token = document.createElement("button");
+    token.type = "button";
+    token.className = "prompt-reference-token";
+    token.contentEditable = "false";
+    token.dataset.assetLabel = asset.original_name;
+    token.title = `预览 ${asset.original_name}`;
+    const image = document.createElement("img"); image.src = `/api/assets/${asset.id}/file`; image.alt = "";
+    const label = document.createElement("span"); label.textContent = asset.original_name;
+    token.append(image, label);
+    token.addEventListener("click", () => setPreview(asset));
+    range.insertNode(token);
+    const spacer = document.createTextNode(" "); token.after(spacer);
+    const next = document.createRange(); next.setStartAfter(spacer); next.collapse(true);
+    selection.removeAllRanges(); selection.addRange(next);
+    onSelect(asset.id); setMenu(false);
+    requestAnimationFrame(() => onChange(readPrompt()));
+  }
+  return <div className="reference-prompt-editor">
+    <div ref={editor} className="reference-prompt-input" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="描述人物、场景、动作、镜头运动、声音与画面风格…输入 @ 引用参考图" onInput={handleInput} onKeyDown={(event) => {if (event.key === "Escape") setMenu(false);}} />
+    {menu && <div className="reference-mention-menu" role="listbox"><strong>选择参考图</strong>{images.length ? images.map((asset) => <button type="button" key={asset.id} onMouseDown={(event) => {event.preventDefault(); insert(asset);}}><img src={`/api/assets/${asset.id}/file`} alt=""/><span>{asset.original_name}<small>{selectedIds.includes(asset.id) ? "已选参考图" : "点击引用"}</small></span></button>) : <p>当前产品资料没有图片</p>}</div>}
+    {preview && <div className="prompt-reference-preview"><button type="button" aria-label="关闭预览" onClick={() => setPreview(null)}><X size={15}/></button><img src={`/api/assets/${preview.id}/file`} alt={preview.original_name}/><small>{preview.original_name}</small></div>}
+  </div>;
+}
+
 function VideoComposerPanel({
   productId,
   conversationId,
@@ -2483,6 +2591,10 @@ function VideoComposerPanel({
       if (current.length >= selectionLimit) return current;
       return [...current, assetId];
     });
+  }
+  function selectMentionAsset(assetId) {
+    setMode("image");
+    setSourceAssetIds((current) => current.includes(assetId) ? current : current.length < 10 ? [...current, assetId] : current);
   }
   return (
     <section className="video-composer-panel">
@@ -2574,11 +2686,7 @@ function VideoComposerPanel({
       ) : null}
       <label className="video-prompt">
         <span>提示词</span>
-        <textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="描述人物、场景、动作、镜头运动、声音与画面风格…"
-        />
+        <ReferencePromptEditor value={prompt} assets={assets} selectedIds={sourceAssetIds} onSelect={selectMentionAsset} onChange={setPrompt}/>
         {sourceAssetIds.length ? (
           <small className="video-reference-help">
             可在提示词中直接使用“{mode === "image" ? "图1、图2" : "视频1、视频2"}”；提交时会自动附上素材对应关系。
@@ -3362,7 +3470,7 @@ function AgentStart({
   return (
     <section className="agent-start">
       <div className="agent-intro">
-        <span className="eyebrow">ScriptAgent</span>
+        <span className="eyebrow">ScriptAgent <small className="product-beta">Beta</small></span>
         <h1>今天想完成什么？</h1>
         <p>说出目标，助手会读取资料、规划步骤并执行。</p>
       </div>
@@ -3664,6 +3772,7 @@ function HistoryVideoCard({ video, onConversation }) {
 }
 
 function SpacesWorkspace({
+  onDirections,
   spaces,
   products,
   jobs,
@@ -3689,6 +3798,7 @@ function SpacesWorkspace({
           <span className="eyebrow">长期创作</span>
           <h1>创意空间</h1>
           <p>集中管理长期目标、产品资料和后续创作。</p>
+          <button className="secondary-button" type="button" onClick={onDirections}><Radar size={16}/>创意方向</button>
         </div>
         <button
           className={showCreate ? "secondary-button" : "primary-button"}
@@ -5664,7 +5774,7 @@ function SettingsWorkspace({
           </label>
           </div>
         </details>
-        <details className="settings-secondary-section owner-login-section">
+        {ownerSession?.authenticated && <details className="settings-secondary-section owner-login-section">
           <summary><ShieldCheck size={16} /><span><strong>运营后台</strong><small>{ownerSession?.authenticated ? "管理员已登录" : "仅所有者可见"}</small></span><ChevronDown size={16} /></summary>
           <div className="settings-secondary-body">
           <div className="section-heading">
@@ -5673,7 +5783,6 @@ function SettingsWorkspace({
               {ownerSession?.authenticated ? "管理员已登录" : "仅所有者可见"}
             </small>
           </div>
-          {ownerSession?.authenticated ? (
             <div className="owner-authenticated">
               <CheckCircle2 size={18} />
               <div>
@@ -5681,46 +5790,8 @@ function SettingsWorkspace({
                 <small>运营后台入口已显示在侧栏。</small>
               </div>
             </div>
-          ) : ownerSession?.configured ? (
-            <div className="owner-login-fields">
-              <label>
-                <span>管理员账号</span>
-                <input name="username" autoComplete="username" />
-              </label>
-              <label>
-                <span>管理员密码</span>
-                <input
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                />
-              </label>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={isOwnerLoading}
-                onClick={(event) => {
-                  const form = event.currentTarget.closest("form");
-                  onOwnerLogin({ preventDefault() {}, currentTarget: form });
-                }}
-              >
-                {isOwnerLoading ? "验证中" : "管理员登录"}
-              </button>
-            </div>
-          ) : (
-            <div className="security-callout">
-              <KeyRound size={18} />
-              <div>
-                <strong>尚未配置管理员账号</strong>
-                <p>
-                  在服务器设置 SCRIPT_AGENT_OWNER_USERNAME 和
-                  SCRIPT_AGENT_OWNER_PASSWORD 后重启。
-                </p>
-              </div>
-            </div>
-          )}
           </div>
-        </details>
+        </details>}
         <div className="submit-row">
           <div>
             <span>运行时配置</span>
@@ -5778,6 +5849,7 @@ function OwnerDashboard({ overview, isLoading, error, onRefresh, onLogout }) {
           </button>
         </div>
       </header>
+      <InviteManager />
       {error ? <div className="error-banner">{error}</div> : null}
       {!overview || isLoading ? (
         <div className="debug-empty">

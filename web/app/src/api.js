@@ -187,6 +187,9 @@ export async function getOwnerSession() {
 export async function getOwnerOverview() {
   return request("/api/owner/overview");
 }
+export const listInvites = () => request("/api/owner/invites");
+export const createInvite = (input) => request("/api/owner/invites", {method: "POST", headers: jsonHeaders, body: JSON.stringify(input)});
+export const revokeInvite = (id) => request(`/api/owner/invites/${encodeURIComponent(id)}/revoke`, {method: "POST", headers: jsonHeaders});
 export async function loginOwner(username, password) {
   return request("/api/owner/login", {
     method: "POST",

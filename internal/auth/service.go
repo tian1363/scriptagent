@@ -97,11 +97,8 @@ func (s *Service) Register(email, password, name, inviteCode string) (*jobs.User
 	if err != nil {
 		return nil, nil, err
 	}
-	role := "member"
-	if existingCount == 0 {
-		role = "admin"
-	}
-	userInput := jobs.CreateUserInput{Email: email, Name: strings.TrimSpace(name), Role: role, Status: "active", PasswordHash: hash}
+	// Registration never grants administrative privileges, including bootstrap.
+	userInput := jobs.CreateUserInput{Email: email, Name: strings.TrimSpace(name), Role: "member", Status: "active", PasswordHash: hash}
 	var user *jobs.User
 	if useInvite {
 		user, err = s.store.CreateUserWithInvite(userInput, inviteHash(strings.TrimSpace(inviteCode)))
@@ -146,7 +143,11 @@ func (s *Service) Authenticate(token string) (*jobs.User, error) {
 		_ = s.store.DeleteSession(token)
 		return nil, errors.New("登录已过期")
 	}
-	return s.store.GetUser(session.UserID)
+	user, err := s.store.GetUser(session.UserID)
+	if err != nil || user.Status != "active" {
+		return nil, errors.New("账号不可用")
+	}
+	return user, nil
 }
 
 func (s *Service) Logout(token string) error { return s.store.DeleteSession(strings.TrimSpace(token)) }

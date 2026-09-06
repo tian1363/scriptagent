@@ -347,6 +347,11 @@ CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at
 	if err := s.ensureColumn("chat_conversations", "summary", "TEXT"); err != nil {
 		return err
 	}
+	for name, definition := range map[string]string{"label": "TEXT NOT NULL DEFAULT ''", "expires_at": "TEXT NOT NULL DEFAULT ''", "revoked": "INTEGER NOT NULL DEFAULT 0", "used_by": "TEXT NOT NULL DEFAULT ''", "used_at": "TEXT NOT NULL DEFAULT ''"} {
+		if err := s.ensureColumn("registration_invites", name, definition); err != nil {
+			return err
+		}
+	}
 	if err := s.ensureColumn("chat_conversations", "space_id", "TEXT"); err != nil {
 		return err
 	}
@@ -1812,7 +1817,7 @@ func (s *Store) ListUsers() ([]User, error) {
 
 func (s *Store) CreateUser(input CreateUserInput) (*User, error) {
 	now := time.Now().UTC()
-	user := &User{ID: newID(), Email: strings.ToLower(strings.TrimSpace(input.Email)), Name: strings.TrimSpace(input.Name), Role: valueOr(input.Role, "admin"), Status: valueOr(input.Status, "active"), PasswordHash: input.PasswordHash, CreatedAt: now, UpdatedAt: now}
+	user := &User{ID: newID(), Email: strings.ToLower(strings.TrimSpace(input.Email)), Name: strings.TrimSpace(input.Name), Role: valueOr(input.Role, "member"), Status: valueOr(input.Status, "active"), PasswordHash: input.PasswordHash, CreatedAt: now, UpdatedAt: now}
 	_, err := s.db.Exec(`INSERT INTO users (id,email,name,role,status,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, user.ID, user.Email, user.Name, user.Role, user.Status, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	return user, err
 }
@@ -1825,7 +1830,7 @@ func (s *Store) CreateUserWithInvite(input CreateUserInput, codeHash string) (*U
 		return nil, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses`, codeHash)
+	result, err := tx.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses AND revoked=0 AND (expires_at='' OR expires_at>?)`, codeHash, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -1836,6 +1841,9 @@ func (s *Store) CreateUserWithInvite(input CreateUserInput, codeHash string) (*U
 	now := time.Now().UTC()
 	user := &User{ID: newID(), Email: strings.ToLower(strings.TrimSpace(input.Email)), Name: strings.TrimSpace(input.Name), Role: valueOr(input.Role, "member"), Status: valueOr(input.Status, "active"), PasswordHash: input.PasswordHash, CreatedAt: now, UpdatedAt: now}
 	if _, err := tx.Exec(`INSERT INTO users (id,email,name,role,status,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, user.ID, user.Email, user.Name, user.Role, user.Status, user.PasswordHash, now.Format(time.RFC3339), now.Format(time.RFC3339)); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE registration_invites SET used_by=?,used_at=? WHERE code_hash=?`, user.ID, now.Format(time.RFC3339), codeHash); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1903,7 +1911,7 @@ func (s *Store) AddRegistrationInvite(codeHash string, maxUses int) error {
 func (s *Store) ConsumeRegistrationInvite(codeHash string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	result, err := s.db.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses`, codeHash)
+	result, err := s.db.Exec(`UPDATE registration_invites SET uses=uses+1 WHERE code_hash=? AND uses<max_uses AND revoked=0 AND (expires_at='' OR expires_at>?)`, codeHash, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -1916,7 +1924,7 @@ func (s *Store) ConsumeRegistrationInvite(codeHash string) error {
 
 func (s *Store) HasAvailableRegistrationInvite() (bool, error) {
 	var one int
-	err := s.db.QueryRow(`SELECT 1 FROM registration_invites WHERE uses<max_uses LIMIT 1`).Scan(&one)
+	err := s.db.QueryRow(`SELECT 1 FROM registration_invites WHERE uses<max_uses AND revoked=0 AND (expires_at='' OR expires_at>?) LIMIT 1`, time.Now().UTC().Format(time.RFC3339)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

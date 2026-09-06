@@ -27,9 +27,15 @@ func TestSingleAccountRegistrationAndSession(t *testing.T) {
 	if user.Email != "admin@example.com" || user.PasswordHash == "" {
 		t.Fatalf("unexpected public user: %+v", user)
 	}
+	if user.Role != "member" {
+		t.Fatal("first registration must not grant admin")
+	}
 	second, _, err := service.Register("other@example.com", "safe-password", "Other", "")
 	if err != nil || second.ID == user.ID {
 		t.Fatalf("expected a distinct second account: user=%+v err=%v", second, err)
+	}
+	if second.Role != "member" {
+		t.Fatal("subsequent registration must not grant admin")
 	}
 	if _, _, err := service.Login(user.Email, "wrong-password"); err == nil {
 		t.Fatal("expected an invalid password to be rejected")

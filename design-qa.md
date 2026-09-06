@@ -47,3 +47,15 @@ The lower chat region was inspected at normal zoom. The composer textarea, skill
 - Browser console errors: none.
 
 final result: passed
+
+## Image-reference prompt interaction
+
+> Checked: 2026-09-06
+
+- Target: video prompt image-reference interaction shown in the supplied screenshot.
+- Build: passed.
+- Source image: available and reviewed.
+- Prototype capture: blocked because the in-app browser could not verify its admin-enforced security policy for the local URL.
+- Interaction verification: blocked for the same reason; no browser security control was bypassed.
+
+final result: blocked

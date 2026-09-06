@@ -1540,8 +1540,7 @@ func (h *Handler) saveModelSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if profile.Mode == "managed" {
-			current, _ := userctx.FromContext(r.Context())
-			if !h.cfg.AllowManagedMode || current.Role != "admin" {
+			if !h.cfg.AllowManagedMode || !h.isAdministrator(r) {
 				writeError(w, http.StatusForbidden, errors.New("当前账号仅允许使用自己的 API Key"))
 				return
 			}
