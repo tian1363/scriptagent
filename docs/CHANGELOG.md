@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-24 11:14
+
+- `57ac2e7` feat: add character library and creative skills
+
 ### 2026-09-06 20:17
 
 - `b304371` docs: automate version changelog updates
