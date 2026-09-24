@@ -59,3 +59,54 @@ final result: passed
 - Interaction verification: blocked for the same reason; no browser security control was bypassed.
 
 final result: blocked
+
+---
+
+# Product research workspace design QA
+
+## Scope
+
+- Reference: `/Users/bluething/.codex/generated_images/01a03941-4243-7231-9ce7-8285720105f6/exec-86ffc50c-735d-4291-9137-b2c9d84639a2.png`
+- Implementation capture: `/tmp/scriptagent-product-qa-initial.png`
+- Side-by-side comparison: `/tmp/scriptagent-design-compare.png`
+- Viewport: 1440 × 1024 CSS pixels, device scale factor 1
+- State: authenticated product workspace, first product selected, latest creative report selected, product-data drawer open
+
+## Visual evidence
+
+The full-page capture shows the intended report-first hierarchy: compact product library on the left, product identity and creative strategy report in the center, and progressively disclosed product source material on the right. The reference and implementation were normalized to the same pixel dimensions and reviewed side by side.
+
+Focused checks covered the selected product row, product header, context line, report heading and summary, clamped Markdown report, primary and secondary report actions, report history menu, document disclosure, asset strip, selected asset preview, file metadata, and drawer controls.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- Accepted implementation differences: the app preserves its existing collapsed global navigation preference; the QA fixture uses three real repository assets rather than five generated placeholders; the report body reflects backend-supported Markdown rather than mock-only structured fields.
+- No horizontal or page-level vertical overflow was present at the target viewport.
+- No console exceptions, warnings, or failed UI-state assertions were observed.
+
+## Interaction verification
+
+- Switch product: passed.
+- Open report history and expose both stored versions: passed.
+- Expand the complete report: passed.
+- Open and cancel report regeneration: passed.
+- Open and close the selected asset preview: passed.
+- Collapse and reopen the product-data drawer: passed.
+- Continue analysis with the current product attached and draft populated: passed.
+
+## Regression verification
+
+- Production frontend build: passed.
+- Frontend unit tests: 15 passed, 0 failed.
+- Browser checks used backend-shaped product, report, Markdown, and asset payloads. The fixture server was temporary and did not mutate application data.
+
+## Iteration history
+
+1. Replaced the previous dense product-management page with a report-first three-column workspace.
+2. Reduced always-visible controls and moved edit/start actions, source configuration, full report content, and document content behind progressive disclosure.
+3. Added responsive behavior, real asset thumbnails, drawer controls, report history, and verified all supported interactions.
+
+final result: passed

@@ -248,6 +248,7 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 		Scope:         "chat",
 		RefID:         conversationID,
 		RunID:         userMessage.ID,
+		SpaceID:       conversation.SpaceID,
 		SessionID:     conversationID,
 		TraceName:     "chat-agent-loop",
 		Goal:          displayContent,
@@ -959,6 +960,7 @@ func builtInSkill(name string) (string, error) {
 }
 
 var builtInSkillCatalog = []BuiltInSkillInfo{
+	{Name: "generate-video", Title: "生成视频", Description: "将当前脚本或描述生成视频，确认素材与规格后提交，并在对话中查看结果。", Category: "视频生成", InvocationPrompt: "/生成视频", Content: generateVideoSkillContent},
 	{
 		Name:             "fission_strategy",
 		Title:            "裂变策略",

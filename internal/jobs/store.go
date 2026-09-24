@@ -134,6 +134,13 @@ CREATE TABLE IF NOT EXISTS chat_agent_steps (
   FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS characters (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL,
+ reference_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, path TEXT NOT NULL DEFAULT '',
+ controls_json TEXT NOT NULL DEFAULT '{}', error_message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_characters_user ON characters(user_id,created_at);
 CREATE TABLE IF NOT EXISTS model_calls (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL,
