@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,10 @@ test('publishes source-backed, indexable Skill pages', () => {
   assert.match(listing, /href="\/scriptagent\/skills\/ugc-hook-writer\/"/);
   assert.match(listing, /★ 去 GitHub 点亮 Star/);
   assert.match(listing, /href="https:\/\/github.com\/tian1363\/scriptagent"/);
-  for (const slug of ['ugc-hook-writer', 'product-selling-point-writer', 'fission-strategy', 'script-review']) {
+  assert.doesNotMatch(listing, /fission-strategy|创意裂变策略/);
+  assert.doesNotMatch(sitemap, /fission-strategy/);
+  assert.equal(existsSync(path.join(website, 'public/skills/fission-strategy/index.html')), false);
+  for (const slug of ['ugc-hook-writer', 'product-selling-point-writer', 'script-review']) {
     const page = readFileSync(path.join(website, `public/skills/${slug}/index.html`), 'utf8');
     assert.match(page, new RegExp(`rel="canonical" href="https://tian1363.github.io/scriptagent/skills/${slug}/"`));
     assert.match(page, /完整工作流/);
