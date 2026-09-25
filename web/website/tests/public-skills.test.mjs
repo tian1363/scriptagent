@@ -15,10 +15,13 @@ test('publishes source-backed, indexable Skill pages', () => {
   const sitemap = readFileSync(path.join(website, 'public/sitemap.xml'), 'utf8');
   const listing = readFileSync(path.join(website, 'public/skills/index.html'), 'utf8');
   assert.match(listing, /href="\/scriptagent\/skills\/ugc-hook-writer\/"/);
+  assert.match(listing, /★ 去 GitHub 点亮 Star/);
+  assert.match(listing, /href="https:\/\/github.com\/tian1363\/scriptagent"/);
   for (const slug of ['ugc-hook-writer', 'product-selling-point-writer', 'fission-strategy', 'script-review']) {
     const page = readFileSync(path.join(website, `public/skills/${slug}/index.html`), 'utf8');
     assert.match(page, new RegExp(`rel="canonical" href="https://tian1363.github.io/scriptagent/skills/${slug}/"`));
     assert.match(page, /完整工作流/);
+    assert.match(page, /在 GitHub 给项目一个 Star/);
     assert.match(page, /github.com\/tian1363\/scriptagent\/blob\/main\/internal\/chat\/service.go/);
     assert.match(sitemap, new RegExp(`<loc>https://tian1363.github.io/scriptagent/skills/${slug}/</loc>`));
   }

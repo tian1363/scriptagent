@@ -24,3 +24,5 @@ GitHub Pages 从 `main` 自动发布到 <https://tian1363.github.io/scriptagent/
 首页的“公开 Skill”区块链接到 `/scriptagent/skills/`。构建脚本 `scripts/generate-public-skills.mjs` 从 `internal/chat/service.go` 的内置定义生成四个可直接分享的静态页面，附完整工作流、输入示例和源码入口；只发布仓库里已有的内置 Skill，不读取用户产品资料或自定义 Skill。生成结果位于 `public/skills/`，同时生成 `sitemap.xml` 和 `robots.txt`。运行 `npm run test:public-skills` 检查页面与来源同步。
 
 页面可供 Google 等搜索引擎发现，但是否收录由搜索引擎决定。发布后可在 Google Search Console 提交站点地图：<https://tian1363.github.io/scriptagent/sitemap.xml>。
+
+首页顶部和公开 Skill 内容后设有 GitHub Star 入口；Skill 列表与详情页也可返回项目仓库。入口只打开公开仓库，收藏动作由访客在 GitHub 完成，不展示未经核实的 Star 数。
