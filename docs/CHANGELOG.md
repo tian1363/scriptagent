@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 15:36
+
+- `2ca421d` feat: add UGC hooks and scenario-based selling point skills (#17)
+
 ### 2026-09-25 14:56
 
 - `04d9cbc` feat: publish public marketing website with beta entry (#16)
