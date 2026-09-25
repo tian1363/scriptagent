@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 16:10
+
+- `5ecde0b` Remove fission strategy from public Skill library (#21)
+
 ### 2026-09-25 16:07
 
 - `ebea35d` copy: reframe public skills as a creative skill library (#20)
