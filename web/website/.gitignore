@@ -1,5 +1,8 @@
 node_modules/
 dist/
+public/skills/
+public/sitemap.xml
+public/robots.txt
 references/
 design-qa.md
 AGENTS.md
