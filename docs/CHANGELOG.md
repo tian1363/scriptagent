@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 15:45
+
+- `164bd9a` feat: publish source-backed creative skills on website (#18)
+
 ### 2026-09-25 15:36
 
 - `2ca421d` feat: add UGC hooks and scenario-based selling point skills (#17)
