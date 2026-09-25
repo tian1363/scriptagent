@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 14:46
+
+- `a2ff04f` Publish ScriptAgent Beta website in main repository (#15)
+
 ### 2026-09-24 11:14
 
 - `57ac2e7` feat: add character library and creative skills
