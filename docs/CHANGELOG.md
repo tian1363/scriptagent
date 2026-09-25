@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 14:56
+
+- `04d9cbc` feat: publish public marketing website with beta entry (#16)
+
 ### 2026-09-25 14:46
 
 - `a2ff04f` Publish ScriptAgent Beta website in main repository (#15)
