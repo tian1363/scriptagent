@@ -1,0 +1,8 @@
+node_modules/
+dist/
+references/
+design-qa.md
+AGENTS.md
+.DS_Store
+.env*
+*.tar.gz
