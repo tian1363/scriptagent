@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 16:02
+
+- `5e139dd` feat: add contextual GitHub star calls to action (#19)
+
 ### 2026-09-25 15:45
 
 - `164bd9a` feat: publish source-backed creative skills on website (#18)
