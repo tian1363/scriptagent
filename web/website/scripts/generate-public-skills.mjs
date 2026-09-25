@@ -69,7 +69,7 @@ function layout({ title, description, canonical, body, listing = false }) {
 <meta property="og:type" content="article"><meta property="og:title" content="${escapeHTML(title)} · ScriptAgent"><meta property="og:description" content="${escapeHTML(description)}"><meta property="og:url" content="${canonical}"><meta property="og:image" content="${base}og-cover.jpg">
 <link rel="icon" href="${internal('assets/scriptagent-mark.png')}"><link rel="stylesheet" href="${internal('skills/style.css')}">
 <script type="application/ld+json">${JSON.stringify(schema).replaceAll('<', '\\u003c')}</script></head><body>
-<header class="site-header"><a class="brand" href="${internal()}"><img src="${internal('assets/scriptagent-mark.png')}" alt=""><strong>ScriptAgent</strong><span>OPEN SKILLS</span></a><nav><a href="${internal()}">官网</a><a href="${internal('skills/')}">公开 Skill</a><a href="${repository}" target="_blank" rel="noopener noreferrer">☆ Star on GitHub ↗</a></nav></header>
+<header class="site-header"><a class="brand" href="${internal()}"><img src="${internal('assets/scriptagent-mark.png')}" alt=""><strong>ScriptAgent</strong><span>OPEN SKILLS</span></a><nav><a href="${internal()}">官网</a><a href="${internal('skills/')}">Skill 库</a><a href="${repository}" target="_blank" rel="noopener noreferrer">☆ Star on GitHub ↗</a></nav></header>
 ${body}
 <footer><span>ScriptAgent · Open-source Beta</span><a href="${repository}">查看项目源码 ↗</a></footer></body></html>`;
 }
@@ -78,8 +78,8 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 const cards = skills.map((skill, index) => `<a class="skill-card" href="${internal(`skills/${skill.slug}/`)}"><span class="card-index">0${index + 1} / ${escapeHTML(skill.category)}</span><h2>${escapeHTML(skill.title)}</h2><p>${escapeHTML(skill.summary)}</p><span class="card-link">查看方法与完整提示词 <b>↗</b></span></a>`).join('');
 writeFileSync(path.join(output, 'index.html'), layout({
-  title: '公开创作 Skill', description: 'ScriptAgent 开源创作 Skill：UGC 开头、场景化卖点表达、创意裂变与脚本检查。可查看完整提示词和源码。', canonical: `${base}skills/`, listing: true,
-  body: `<main class="library"><p class="eyebrow">OPEN CREATIVE METHODS / 01—04</p><h1>创作方法，<em>公开分享。</em></h1><p class="lead">从真实产品资料出发，把卖点变成能拍、能说、能验证的 UGC 创意。这里公开部分内置 Skill 的完整工作流，你可以阅读、引用，也可以在开源项目里改进它们。</p><p class="english">Open creative workflows for product storytelling and UGC. Read the prompts, adapt them and contribute on GitHub.</p><div class="skill-grid">${cards}</div><aside class="star-callout"><div><span>OPEN SOURCE / OPEN IDEAS</span><h2>这些方法有用？帮它被更多人看见。</h2><p>一个 GitHub Star，能让更多创作者发现这套开源方法。</p></div><a href="${repository}" target="_blank" rel="noopener noreferrer">★ 去 GitHub 点亮 Star ↗</a></aside><aside class="note"><span>WHY OPEN?</span><p>好的创作方法值得被讨论。Skill 是工作流和判断标准，不是效果保证；实际结果仍取决于产品资料、素材和人的选择。</p></aside></main>`,
+  title: '创意 Skill 库', description: 'ScriptAgent 开源创作 Skill：UGC 开头、场景化卖点表达、创意裂变与脚本检查。可查看完整提示词和源码。', canonical: `${base}skills/`, listing: true,
+  body: `<main class="library"><p class="eyebrow">OPEN SKILL LIBRARY / 01—04</p><h1>创意 Skill 库，<em>打开就有招。</em></h1><p class="lead">从 UGC 开头到场景化卖点，每个 Skill 都是一套可拆解、可复用的创作方法。挑一个，开始试；完整工作流也可以拿去改。</p><p class="english">Creative Skills for UGC hooks, product benefits and script review. Pick one, try it and make it yours.</p><div class="skill-grid">${cards}</div><aside class="star-callout"><div><span>OPEN SOURCE / OPEN IDEAS</span><h2>这些方法有用？帮它被更多人看见。</h2><p>一个 GitHub Star，能让更多创作者发现这套开源方法。</p></div><a href="${repository}" target="_blank" rel="noopener noreferrer">★ 去 GitHub 点亮 Star ↗</a></aside><aside class="note"><span>WHY OPEN?</span><p>好的创作方法值得被讨论。Skill 是工作流和判断标准，不是效果保证；实际结果仍取决于产品资料、素材和人的选择。</p></aside></main>`,
 }));
 
 for (const skill of skills) {
