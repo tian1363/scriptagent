@@ -10,7 +10,7 @@ ScriptAgent 面向品牌、电商和内容团队。你只需整理一次产品�
 
 它重点解决三个问题：产品信息散落、每次创作都要重复交代背景，以及“策略—脚本—视频”之间需要反复手工搬运。
 
-官网源码与本地运行方法见 [web/website](web/website/README.md)。
+访问[在线官网](https://tian1363.github.io/scriptagent/)了解产品并申请 Beta 体验；官网源码与本地运行方法见 [web/website](web/website/README.md)。
 
 ## 它是怎样工作的
 
