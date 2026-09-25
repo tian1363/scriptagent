@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-25 16:07
+
+- `ebea35d` copy: reframe public skills as a creative skill library (#20)
+
 ### 2026-09-25 16:02
 
 - `5e139dd` feat: add contextual GitHub star calls to action (#19)
