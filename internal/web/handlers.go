@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tian1363/scriptagent/internal/auth"
+	"github.com/tian1363/scriptagent/internal/charactergen"
 	chatpkg "github.com/tian1363/scriptagent/internal/chat"
 	"github.com/tian1363/scriptagent/internal/creative"
 	"github.com/tian1363/scriptagent/internal/jobs"
@@ -29,16 +30,17 @@ import (
 )
 
 type Handler struct {
-	cfg       Config
-	store     *jobs.Store
-	files     *storage.LocalStore
-	runner    *jobs.Runner
-	publisher Publisher
-	chat      ChatResponder
-	creative  *creative.Service
-	auth      *auth.Service
-	video     *videogen.Client
-	authLimit *requestLimiter
+	characterImages *charactergen.Client
+	cfg             Config
+	store           *jobs.Store
+	files           *storage.LocalStore
+	runner          *jobs.Runner
+	publisher       Publisher
+	chat            ChatResponder
+	creative        *creative.Service
+	auth            *auth.Service
+	video           *videogen.Client
+	authLimit       *requestLimiter
 }
 
 type Publisher interface {
@@ -57,16 +59,17 @@ func NewHandler(cfg Config, store *jobs.Store, files *storage.LocalStore, runner
 		publisher = disabledPublisher{}
 	}
 	return &Handler{
-		cfg:       cfg,
-		store:     store,
-		files:     files,
-		runner:    runner,
-		publisher: publisher,
-		chat:      chat,
-		creative:  creativeReports,
-		auth:      auth.NewService(store, auth.Config{RegistrationMode: cfg.RegistrationMode, InviteCodes: cfg.InviteCodes}),
-		authLimit: newRequestLimiter(),
-		video:     videogen.New(store),
+		characterImages: charactergen.New(),
+		cfg:             cfg,
+		store:           store,
+		files:           files,
+		runner:          runner,
+		publisher:       publisher,
+		chat:            chat,
+		creative:        creativeReports,
+		auth:            auth.NewService(store, auth.Config{RegistrationMode: cfg.RegistrationMode, InviteCodes: cfg.InviteCodes}),
+		authLimit:       newRequestLimiter(),
+		video:           videogen.New(store),
 	}
 }
 

@@ -1,3 +1,6 @@
+import { chatTimeline } from "./chatTimeline.js";
+import { visibleAssistantContent } from "./assistantContent.js";
+import { parseVideoSkillRequest, prepareVideoDraft } from "./videoSkill.js";
 import InviteManager from "./InviteManager";
 import EcommerceToolbox from "./EcommerceToolbox";
 import {
@@ -39,8 +42,10 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   createJob,
+  createChat,
   createVideo,
   createCreativeReport,
   createProduct,
@@ -247,16 +252,6 @@ function lastAssistantMessage(messages = []) {
   return null;
 }
 
-function visibleAssistantContent(content = "") {
-  const value = String(content).trim();
-  if (!value.startsWith("{")) return value;
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed.answer === "string" ? parsed.answer : value;
-  } catch {
-    return value;
-  }
-}
 
 function videoParametersFromPrompt(prompt = "") {
   const ratios = prompt.match(/(?:16:9|9:16|1:1|4:3|3:4)/g);
@@ -278,12 +273,6 @@ function videoParametersFromPrompt(prompt = "") {
   const cid =
     prompt.match(/CID\s*:?\s*asset-([a-zA-Z0-9_-]+)/i)?.[1] || "";
   return { ratio: ratios?.[0] || "9:16", duration, cid };
-}
-
-function isDirectVideoCommand(content = "") {
-  return /^(?:请)?(?:直接|立即|开始|按上文|用上文)?(?:给我)?生成(?:这个|这段|一段)?视频[。！!]?$/u.test(
-    content.trim(),
-  );
 }
 
 const chatQuickTasks = [
@@ -315,6 +304,7 @@ const chatQuickTasks = [
 ];
 
 export function App() {
+  const [videoSkillRequest, setVideoSkillRequest] = useState(null);
   const [view, setView] = useState(() => window.location.hash === "#toolbox" ? "toolbox" : "home");
   useEffect(() => {
     const syncToolboxRoute = () => { if (window.location.hash === "#toolbox") setView("toolbox"); };
@@ -841,6 +831,11 @@ export function App() {
     setError("");
     setIsCreatingVideo(true);
     try {
+      if (!input.conversation_id) {
+        const conversation = await createChat("视频创作");
+        input = { ...input, conversation_id: conversation.id };
+        await handleSelectChat(conversation.id);
+      }
       await createVideo(input);
       await refreshVideos();
       return true;
@@ -937,6 +932,13 @@ export function App() {
   ) {
     content = content.trim();
     if (!content && !attachment) return;
+    const videoRequest = parseVideoSkillRequest(content);
+    if (videoRequest) {
+      const previous = conversationID ? visibleAssistantContent(lastAssistantMessage(selectedChat?.messages || [])?.content || "") : "";
+      setError(""); setChatDraft(""); setChatProductId(productID); setView("chat");
+      setVideoSkillRequest({ prompt: videoRequest.prompt || previous });
+      return;
+    }
     setError("");
     setIsSending(true);
     setIsChatThinking(true);
@@ -1023,50 +1025,6 @@ export function App() {
   async function handleSendChat(event) {
     event.preventDefault();
     const conversationID = selectedChat?.conversation?.id || "";
-    if (conversationID && isDirectVideoCommand(chatDraft)) {
-      const source = lastAssistantMessage(selectedChat?.messages || []);
-      const prompt = visibleAssistantContent(source?.content || "");
-      if (!prompt) {
-        setError("上文还没有可用于生成视频的提示词");
-        return;
-      }
-      const inferred = videoParametersFromPrompt(prompt);
-      let sourceAssetID = "";
-      let mode = "text";
-      if (chatProductId && inferred.cid) {
-        try {
-          const assets = await listProductAssets(chatProductId);
-          const asset = (Array.isArray(assets) ? assets : []).find(
-            (item) => item.id === inferred.cid,
-          );
-          if (asset) {
-            sourceAssetID = asset.id;
-            mode = asset.kind;
-          }
-        } catch {
-          // The prompt remains usable without a reference asset.
-        }
-      }
-      setChatDraft("");
-      const created = await handleCreateVideo({
-        product_id: chatProductId,
-        conversation_id: conversationID,
-        space_id: selectedChat?.conversation?.space_id || "",
-        source_asset_id: sourceAssetID,
-        source_asset_ids: sourceAssetID ? [sourceAssetID] : [],
-        mode,
-        prompt,
-        negative_prompt:
-          "广告感过强，棚拍感，过度磨皮，文字乱码，水印，品牌标识变形，产品外观不一致",
-        model: "wan3.0-video-prime",
-        resolution: "720P",
-        ratio: inferred.ratio,
-        duration: inferred.duration,
-        sound_enabled: true,
-      });
-      if (created) await handleSelectChat(conversationID);
-      return;
-    }
     await sendChatToAgent(
       chatDraft,
       chatProductId,
@@ -1375,8 +1333,7 @@ export function App() {
             className={`main-pane ${view === "toolbox" ? "toolbox-pane" : ""} ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}
           >
             <div className="toolbox-host" hidden={view !== "toolbox"}>
-              <button className="secondary-button toolbox-radar-entry" type="button" onClick={() => setView("intelligence")}><Radar size={16}/>创意雷达</button>
-              <EcommerceToolbox key={currentUser.id} userId={currentUser.id} products={products} active={view === "toolbox"} />
+              <EcommerceToolbox key={currentUser.id} userId={currentUser.id} products={products} active={view === "toolbox"} onOpenRadar={() => setView("intelligence")} />
             </div>
             {view === "home" ? (
               <AgentStart
@@ -1457,13 +1414,18 @@ export function App() {
                 isCreatingCreativeReport={isCreatingCreativeReport}
                 isCreatingProduct={isCreatingProduct}
                 isSavingProduct={isSavingProduct}
-                productStats={productStats}
                 error={error}
                 onSelect={setSelectedProductId}
                 onReportSelect={setSelectedCreativeReportId}
                 onStartJob={handleStartProductJob}
                 onCreateCreativeReport={handleCreateCreativeReport}
                 onReportToJob={handleReportToJob}
+                onContinueAnalysis={(productId) => {
+                  handleNewChat();
+                  setChatProductId(productId || "");
+                  setChatDraft("继续分析这份产品资料，找出可用于短视频创作的新角度。");
+                  setView("chat");
+                }}
                 onCreate={handleCreateProduct}
                 onUpdate={handleUpdateProduct}
               />
@@ -1497,6 +1459,8 @@ export function App() {
                 onCreateSkill={handleSaveSkill}
                 onCreateVideo={handleCreateVideo}
                 onRetryVideo={handleRetryVideo}
+                videoSkillRequest={videoSkillRequest}
+                onVideoSkillHandled={() => setVideoSkillRequest(null)}
                 onSend={handleSendChat}
               />
             ) : null}
@@ -2135,14 +2099,37 @@ function ChatWorkspace({
   onHistoryToggle,
   onEditSpace,
   onSend,
+  videoSkillRequest,
+  onVideoSkillHandled,
 }) {
   const messages = optimisticMessages || thread?.messages || [];
   const messagesRef = useRef(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [showVideoComposer, setShowVideoComposer] = useState(false);
+  const [videoPrompt, setVideoPrompt] = useState("");
+  useEffect(() => { setShowVideoComposer(false); }, [thread?.conversation?.id]);
+  const latestVideoAnswer = visibleAssistantContent(lastAssistantMessage(messages)?.content || "");
+  useEffect(() => {
+    if (!isThinking && !typingMessage && /视频生成提示词|视频提示词/.test(latestVideoAnswer) && prepareVideoDraft(latestVideoAnswer).prompt) {
+      setVideoPrompt(latestVideoAnswer);
+      setShowVideoComposer(true);
+    }
+  }, [latestVideoAnswer, isThinking, typingMessage, thread?.conversation?.id]);
+  function openVideoSkill() {
+    const request = parseVideoSkillRequest(draft);
+    setVideoPrompt(request ? request.prompt || visibleAssistantContent(lastAssistantMessage(messages)?.content || "") : draft.trim() || visibleAssistantContent(lastAssistantMessage(messages)?.content || ""));
+    setShowSkillMenu(false); setShowVideoComposer(true);
+  }
+  useEffect(() => {
+    if (videoSkillRequest) {
+      setVideoPrompt(videoSkillRequest.prompt); setShowSkillMenu(false); setShowVideoComposer(true); onVideoSkillHandled();
+    }
+  }, [videoSkillRequest, onVideoSkillHandled]);
   const [isListening, setIsListening] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef(null);
+  const voicePermissionPending = useRef(false);
+  const voiceMounted = useRef(true);
   const voiceBaseRef = useRef("");
   const SpeechRecognition =
     typeof window !== "undefined"
@@ -2150,13 +2137,14 @@ function ChatWorkspace({
       : null;
 
   useEffect(
-    () => () => {
+    () => { voiceMounted.current = true; return () => {
+      voiceMounted.current = false;
       if (recognitionRef.current) recognitionRef.current.abort();
-    },
+    }; },
     [],
   );
 
-  function toggleVoiceInput() {
+  async function toggleVoiceInput() {
     if (!SpeechRecognition) {
       setVoiceError("当前浏览器不支持语音输入，请使用最新版 Chrome 或 Edge。");
       return;
@@ -2165,6 +2153,24 @@ function ChatWorkspace({
       recognitionRef.current.stop();
       return;
     }
+    if (voicePermissionPending.current || recognitionRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceError("麦克风需要安全连接，请使用 HTTPS 或 localhost 打开页面。");
+      return;
+    }
+    voicePermissionPending.current = true;
+    setVoiceError("请在 Chrome 的麦克风授权提示中选择允许。");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      if (!voiceMounted.current) return;
+      setVoiceError("");
+    } catch (err) {
+      if (voiceMounted.current) setVoiceError(err.name === "NotAllowedError"
+        ? "麦克风访问被阻止。请点击 Chrome 地址栏左侧的网站设置，将麦克风改为允许；若仍被阻止，请在系统隐私设置中允许 Chrome 使用麦克风。"
+        : err.name === "NotFoundError" ? "未检测到麦克风，请连接后重试。" : "无法使用麦克风，请检查设备是否被其他应用占用后重试。");
+      return;
+    } finally { voicePermissionPending.current = false; }
     const recognition = new SpeechRecognition();
     recognition.lang = "zh-CN";
     recognition.continuous = true;
@@ -2183,7 +2189,7 @@ function ChatWorkspace({
     };
     recognition.onerror = (event) => {
       const messages = {
-        "not-allowed": "没有麦克风权限，请在浏览器中允许访问。",
+        "not-allowed": "语音识别被阻止，请检查 Chrome 网站麦克风权限和系统对 Chrome 的麦克风授权后重试。",
         "audio-capture": "未检测到可用麦克风。",
         "no-speech": "没有识别到语音，请重试。",
         network: "语音识别网络不可用，请稍后重试。",
@@ -2196,7 +2202,11 @@ function ChatWorkspace({
       recognitionRef.current = null;
     };
     recognitionRef.current = recognition;
-    recognition.start();
+    try { recognition.start(); } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+      setVoiceError("语音识别未能启动，请重试。");
+    }
   }
   let lastAssistantIndex = -1;
   messages.forEach((message, index) => {
@@ -2218,60 +2228,20 @@ function ChatWorkspace({
   }, [
     messages.length,
     conversationVideos.length,
+    showVideoComposer,
+    videoPrompt,
     isThinking,
     typingMessage?.visible,
   ]);
 
   function handleSkill(skill) {
+    if (skill.name === "generate-video") { openVideoSkill(); return; }
     onDraft(skill.invocation_prompt || `调用 ${skill.name} skill。`);
     setShowSkillMenu(false);
   }
 
   return (
-    <section className="chat-pane">
-      <div className="chat-context-bar">
-        {historyCollapsed ? (
-          <button
-            className="chat-history-inline"
-            type="button"
-            onClick={onHistoryToggle}
-            title="展开历史对话"
-            aria-label="展开历史对话"
-          >
-            <MessageSquare size={18} />
-          </button>
-        ) : null}
-        <label className="chat-product-select">
-          <Package size={15} />
-          <span>产品资料</span>
-          <select
-            value={selectedProductId}
-            disabled={Boolean(sourceSpace)}
-            onChange={(event) => onProduct(event.target.value)}
-          >
-            <option value="">未选择</option>
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.title}
-              </option>
-            ))}
-          </select>
-          {sourceSpace ? (
-            <>
-              <span className="space-context-lock">
-                由「{sourceSpace.title}」管理
-              </span>
-              <button
-                className="space-context-edit"
-                type="button"
-                onClick={onEditSpace}
-              >
-                回空间修改
-              </button>
-            </>
-          ) : null}
-        </label>
-      </div>
+    <section className="chat-pane chat-pane-inline-context">
       <div className="chat-messages" ref={messagesRef}>
         {messages.length ||
         conversationVideos.length ||
@@ -2279,7 +2249,10 @@ function ChatWorkspace({
         typingMessage ? (
           <>
             {citations?.length ? <CitationPanel citations={citations} /> : null}
-            {messages.map((message, index) => {
+            {chatTimeline(messages, conversationVideos).map((entry) => {
+              if (entry.type === "video") return <ChatVideoResults key={`video-${entry.item.id}`} videos={[entry.item]} onRetry={onRetryVideo} />;
+              const message = entry.item;
+              const index = entry.messageIndex;
               const persistedSteps =
                 thread?.agent_traces?.[message.id] || [];
               const traceSteps = persistedSteps.length
@@ -2310,16 +2283,11 @@ function ChatWorkspace({
                 isTyping
               />
             ) : null}
-            {conversationVideos.length ? (
-              <ChatVideoResults
-                videos={conversationVideos}
-                onRetry={onRetryVideo}
-              />
-            ) : null}
           </>
         ) : (
           <ChatTaskStarter onSelect={onDraft} />
         )}
+        {showVideoComposer && <VideoComposerPanel key={videoPrompt} inline productId={selectedProductId} conversationId={conversationId} spaceId={sourceSpace?.id || thread?.conversation?.space_id || ""} draft={videoPrompt} onCreate={onCreateVideo} isCreating={isCreatingVideo} error={error} onClose={() => setShowVideoComposer(false)} />}
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
@@ -2329,17 +2297,6 @@ function ChatWorkspace({
             onSelect={handleSkill}
             onCreate={onCreateSkill}
             onClose={() => setShowSkillMenu(false)}
-          />
-        ) : null}
-        {showVideoComposer ? (
-          <VideoComposerPanel
-            productId={selectedProductId}
-            conversationId={conversationId}
-            spaceId={sourceSpace?.id || thread?.conversation?.space_id || ""}
-            draft={draft}
-            onCreate={onCreateVideo}
-            isCreating={isCreatingVideo}
-            onClose={() => setShowVideoComposer(false)}
           />
         ) : null}
         {attachment ? (
@@ -2356,6 +2313,7 @@ function ChatWorkspace({
         />
         <div className="chat-composer-toolbar">
           <div className="composer-tools">
+            <div className="composer-input-group" role="group" aria-label="输入与素材">
             <button
               className={`composer-tool voice-input ${isListening ? "active listening" : ""}`}
               type="button"
@@ -2367,22 +2325,16 @@ function ChatWorkspace({
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
               <span>{isListening ? "正在听…" : "语音"}</span>
             </button>
-            <button
-              className={`composer-tool ${showSkillMenu ? "active" : ""}`}
-              type="button"
-              onClick={() => setShowSkillMenu((value) => !value)}
-            >
-              <Sparkles size={16} />
-              <span>技能</span>
-              <ChevronRight size={14} />
-            </button>
             <label
               className={`composer-tool composer-connector ${attachment ? "active" : ""}`}
               title="添加图片或视频素材"
+              role="button"
+              tabIndex={0}
+              aria-label="添加图片或视频素材"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector("input")?.click(); } }}
             >
               <Upload size={15} />
               <span>{attachment ? "已添加素材" : "素材"}</span>
-              <ChevronRight size={14} />
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
@@ -2391,19 +2343,55 @@ function ChatWorkspace({
                 }
               />
             </label>
+            </div>
+            <div className="composer-assist-group" role="group" aria-label="创作辅助">
+            <details className="product-connector" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+              <summary className={`composer-tool ${selectedProductId || sourceSpace ? "active" : ""}`} aria-label="产品连接器" title={sourceSpace ? `创意空间：${sourceSpace.title}` : selectedProductId ? `已连接：${products.find(product => product.id === selectedProductId)?.title || "产品资料"}` : "连接产品资料"}>
+                <Package size={18} />
+                {(selectedProductId || sourceSpace) && <span className="product-connector-dot" />}
+              </summary>
+              <div className="product-connector-popover">
+                <strong>连接产品资料</strong>
+                <label>产品库<select value={selectedProductId} disabled={Boolean(sourceSpace)} onChange={(event) => { onProduct(event.target.value); event.currentTarget.closest("details").open = false; }}>
+                  <option value="">不连接产品</option>
+                  {products.map(product => <option key={product.id} value={product.id}>{product.title}</option>)}
+                </select></label>
+                {sourceSpace && <div className="space-connector-context">
+                  <strong>创意空间 · {sourceSpace.title}</strong>
+                  <span>{marketingLabel(marketingGoals, sourceSpace.marketing_goal)} · {marketingLabel(marketingStages, sourceSpace.goal_stage)}</span>
+                  {sourceSpace.summary && <p>{sourceSpace.summary}</p>}
+                  {sourceSpace.agent_brief && <p>长期要求：{sourceSpace.agent_brief}</p>}
+                  <small>以上设定会加入每一轮对话上下文</small>
+                  <button type="button" onClick={onEditSpace}>回空间修改</button>
+                </div>}
+              </div>
+            </details>
             <button
-              className={`composer-tool ${showVideoComposer ? "active" : ""}`}
+              className={`composer-tool ${showSkillMenu ? "active" : ""}`}
               type="button"
+              aria-expanded={showSkillMenu}
+              onClick={() => setShowSkillMenu((value) => !value)}
+            >
+              <Sparkles size={16} />
+              <span>技能</span>
+              <ChevronRight size={14} />
+            </button>
+            </div>
+          </div>
+          <div className="composer-output-group" role="group" aria-label="生成与发送">
+            <button
+              className={`composer-tool composer-video-tool ${showVideoComposer ? "active" : ""}`}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={showVideoComposer}
               onClick={() => {
-                setShowSkillMenu(false);
-                setShowVideoComposer((value) => !value);
+                openVideoSkill();
               }}
             >
               <Video size={16} />
               <span>生成视频</span>
               <ChevronRight size={14} />
             </button>
-          </div>
           <button
             className="composer-send"
             type="submit"
@@ -2416,6 +2404,7 @@ function ChatWorkspace({
               <Send size={18} />
             )}
           </button>
+          </div>
         </div>
         {voiceError ? (
           <div className="voice-input-message" role="status">
@@ -2504,22 +2493,29 @@ function ReferencePromptEditor({ value, assets, selectedIds, onSelect, onChange 
 }
 
 function VideoComposerPanel({
+  inline = false,
   productId,
   conversationId,
   spaceId,
   draft,
   onCreate,
   isCreating,
+  error,
   onClose,
 }) {
+  const modalRef = useRef(null);
+  useEffect(() => { if (!inline) modalRef.current?.showModal(); }, [inline]);
+  const [prepared] = useState(() => prepareVideoDraft(draft || ""));
+  const [editing, setEditing] = useState(!inline);
   const [mode, setMode] = useState("text");
   const [assets, setAssets] = useState([]);
   const [sourceAssetIds, setSourceAssetIds] = useState([]);
-  const [prompt, setPrompt] = useState(draft || "");
-  const [resolution, setResolution] = useState("720P");
-  const [duration, setDuration] = useState(5);
-  const [ratio, setRatio] = useState("9:16");
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [prompt, setPrompt] = useState(prepared.prompt);
+  const [resolution, setResolution] = useState(prepared.resolution);
+  const [duration, setDuration] = useState(prepared.duration);
+  const [ratio, setRatio] = useState(prepared.ratio);
+  const [soundEnabled, setSoundEnabled] = useState(prepared.soundEnabled);
+  const submitting = useRef(false);
 
   useEffect(() => {
     if (!productId) {
@@ -2549,6 +2545,9 @@ function VideoComposerPanel({
   }, [productId]);
 
   async function generate() {
+    if (submitting.current || !canGenerate) return;
+    submitting.current = true;
+    try {
     const selectedAssets = sourceAssetIds
       .map((id) => assets.find((asset) => asset.id === id))
       .filter(Boolean);
@@ -2576,6 +2575,7 @@ function VideoComposerPanel({
       sound_enabled: soundEnabled,
     });
     if (created) onClose();
+    } finally { submitting.current = false; }
   }
 
   const visibleAssets = assets.filter((asset) => asset.kind === mode);
@@ -2596,17 +2596,22 @@ function VideoComposerPanel({
     setMode("image");
     setSourceAssetIds((current) => current.includes(assetId) ? current : current.length < 10 ? [...current, assetId] : current);
   }
-  return (
+  const content = (
     <section className="video-composer-panel">
       <div className="video-composer-head">
         <div>
-          <strong>生成视频</strong>
-          <small>写下想要的画面和动作</small>
+          <strong id="video-composer-title">{inline ? "视频草稿 · 待确认" : "生成视频"}</strong>
+          {!inline && <small>写下想要的画面和动作</small>}
         </div>
         <button type="button" onClick={onClose} aria-label="关闭视频设置">
           <X size={17} />
         </button>
       </div>
+      {inline && !editing && <div className="video-draft-summary">
+        <p>{prompt || "还没有画面描述，请先编辑提示词。"}</p>
+        <div className="video-draft-meta"><span>{duration} 秒</span><span>{ratio}</span><span>{resolution}</span><span>{soundEnabled ? "有声" : "无声"}</span><span>{mode === "text" ? "纯文本" : `${sourceAssetIds.length} 个参考素材`}</span></div>
+      </div>}
+      <div className="video-composer-body" hidden={!editing}>
       <div className="ugc-mode-switch">
         <button
           type="button"
@@ -2711,7 +2716,7 @@ function VideoComposerPanel({
             value={duration}
             onChange={(event) => setDuration(Number(event.target.value))}
           >
-            {[2, 3, 4, 5, 6, 8, 10, 15, 20, 30].map((value) => (
+            {Array.from({length: 29}, (_, i) => i + 2).map((value) => (
               <option value={value} key={value}>
                 {value} 秒
               </option>
@@ -2739,8 +2744,11 @@ function VideoComposerPanel({
           <span>生成声音</span>
         </label>
       </div>
+      </div>
+      <div className="video-composer-submit-area">
+      {error && <div className="error-banner" role="alert">{error}</div>}
       <div className="video-composer-actions">
-        <small>生成后可离开当前对话，任务会继续运行。</small>
+        {inline ? <button type="button" className="video-draft-edit" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? "收起编辑" : "编辑提示词与参数"}</button> : <small>生成后可离开当前对话，任务会继续运行。</small>}
         <button
           className="primary-button"
           type="button"
@@ -2755,13 +2763,15 @@ function VideoComposerPanel({
           ) : (
             <>
               <Video size={15} />
-              生成
+              {inline ? "确认并生成视频" : "生成"}
             </>
           )}
         </button>
       </div>
+      </div>
     </section>
   );
+  return inline ? <div className="chat-video-draft">{content}</div> : createPortal(<dialog ref={modalRef} className="video-composer-dialog" aria-labelledby="video-composer-title" onCancel={onClose}>{content}</dialog>, document.body);
 }
 
 function ChatVideoResults({ videos, onRetry }) {
@@ -2954,22 +2964,16 @@ function agentStepLabel(step) {
 
 function ChatTaskStarter({ onSelect }) {
   return (
-    <section className="chat-starter">
-      <div>
-        <h3>从一个具体任务开始</h3>
-        <p>
-          选一个常见任务，我会把问题放进输入框，你可以补充产品、平台或素材限制。
-        </p>
-      </div>
+    <section className="chat-starter chat-starter-minimal" aria-label="快捷创作任务">
+      <h3>想从哪里开始？</h3>
       <div className="starter-list">
         {chatQuickTasks.map((task) => (
           <button
             key={task.title}
             type="button"
-            onClick={() => onSelect(task.description)}
+            onClick={(event) => { onSelect(task.description); event.currentTarget.closest('.chat-pane')?.querySelector('.chat-form textarea')?.focus(); }}
           >
-            <strong>{task.title}</strong>
-            <span>{task.description}</span>
+            {({"生成裂变方向": "找创意方向", "写产品 Markdown": "整理产品资料", "拆解并复刻素材": "拆解参考素材", "生成视频提示词": "写视频提示词"})[task.title] || task.title}
           </button>
         ))}
       </div>
@@ -2978,7 +2982,17 @@ function ChatTaskStarter({ onSelect }) {
 }
 
 function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
+  const menuRef = useRef(null);
+  useEffect(() => {
+    const outside = event => { if (menuRef.current && !menuRef.current.contains(event.target) && !event.target.closest('.composer-assist-group')) onClose(); };
+    const escape = event => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [onClose]);
   const [selectedSkill, setSelectedSkill] = useState(skills[0] || null);
+  const [skillQuery, setSkillQuery] = useState("");
+  const visibleSkills = skills.filter(skill => `${skill.title} ${skill.description} ${skill.category}`.toLowerCase().includes(skillQuery.trim().toLowerCase()));
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -3067,25 +3081,16 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
   }
 
   return (
-    <section className="skill-command-menu">
-      <div className="skill-command-head">
-        <span>技能</span>
-        <small>{skills.length}</small>
-        <button
-          className="skill-create-entry"
-          type="button"
-          onClick={startCreate}
-        >
-          <Plus size={14} />
-          新建技能
-        </button>
-        <button type="button" onClick={onClose}>
-          关闭
-        </button>
+    <section ref={menuRef} className="skill-command-menu skill-command-compact" aria-label="技能浏览">
+      <div className="skill-browser-toolbar">
+        <label className="skill-mobile-picker">切换技能<select value={selectedSkill?.name || ""} onChange={e => {setSelectedSkill(skills.find(s => s.name === e.target.value));setIsCreating(false);}}>{skills.map(s => <option key={s.name} value={s.name}>{s.title}</option>)}</select></label>
+        <button type="button" onClick={startCreate}>新建</button><button type="button" onClick={onClose}>关闭</button>
       </div>
       <div className="skill-command-body">
+        <aside className="skill-navigation" id="skill-navigation" aria-label="技能目录">
+          <label className="skill-search"><Search size={15}/><input aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={e => setSkillQuery(e.target.value)}/></label>
         <div className="skill-command-list">
-          {skills.map((skill) => (
+          {visibleSkills.map((skill) => (
             <button
               className={
                 selectedSkill?.name === skill.name && !isCreating
@@ -3093,6 +3098,8 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
                   : ""
               }
               key={skill.name}
+              aria-current={selectedSkill?.name === skill.name && !isCreating ? "true" : undefined}
+              title={skill.description}
               type="button"
               onClick={() => {
                 setSelectedSkill(skill);
@@ -3103,11 +3110,13 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
                 <Sparkles size={17} />
               </span>
               <strong>{skill.title}</strong>
-              <small>{skill.description}</small>
               <em>{skill.category}</em>
             </button>
           ))}
+          {!visibleSkills.length && <p className="skill-search-empty">没有匹配的技能</p>}
         </div>
+        <div className="skill-navigation-footer"><button type="button" className="skill-create-entry" onClick={startCreate}><Plus size={14}/>新建技能</button><button type="button" onClick={onClose}>关闭</button></div>
+        </aside>
         {isCreating ? (
           <div className="skill-create-panel">
             <div className="skill-preview-heading">
@@ -3238,17 +3247,9 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
               </div>
               <em>{selectedSkill.category}</em>
             </div>
-            <dl className="skill-metadata">
-              <div>
-                <dt>名称</dt>
-                <dd>{selectedSkill.name}</dd>
-              </div>
-              <div>
-                <dt>描述</dt>
-                <dd>{selectedSkill.description}</dd>
-              </div>
-            </dl>
-            <div className="skill-preview-content">
+            <p className="skill-description">{selectedSkill.description !== selectedSkill.title ? selectedSkill.description : "查看下方流程与要求，确认后用于当前对话。"}</p>
+            <div className="skill-preview-content" key={selectedSkill.name}>
+              <details className="skill-technical-details"><summary>技能信息</summary><dl className="skill-metadata"><div><dt>标识</dt><dd>{selectedSkill.name}</dd></div></dl></details>
               <MarkdownContent content={selectedSkill.content || "暂无正文"} />
             </div>
             <div className="skill-preview-actions">
@@ -3257,7 +3258,7 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
                 type="button"
                 onClick={() => onSelect(selectedSkill)}
               >
-                使用这个 Skill
+                在对话中使用
               </button>
               {selectedSkill.source === "custom" ? (
                 <button
@@ -3474,35 +3475,37 @@ function AgentStart({
         <h1>今天想完成什么？</h1>
         <p>说出目标，助手会读取资料、规划步骤并执行。</p>
       </div>
-      <div className="agent-goal-card">
+      <form className="chat-form home-chat-form" onSubmit={event => { event.preventDefault(); if (goal.trim() && !isSending) onSend(productID, goal); }}>
         <textarea
+          rows="3"
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
           placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子"
         />
-        <div>
-          <select
+        <div className="chat-composer-toolbar">
+          <details className="product-connector" onKeyDown={event => { if (event.key === "Escape") {event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus();} }}>
+            <summary className={`composer-tool ${productID ? "active" : ""}`} aria-label="产品连接器" title={products.find(product => product.id === productID)?.title || "连接产品资料"}><Package size={18}/>{productID && <span className="product-connector-dot"/>}</summary>
+            <div className="product-connector-popover"><strong>连接产品资料</strong><label>产品库<select
             value={productID}
-            onChange={(event) => setProductID(event.target.value)}
+            onChange={(event) => { setProductID(event.target.value); event.currentTarget.closest("details").open = false; }}
           >
-            <option value="">暂不选择资料</option>
+            <option value="">不连接产品</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.title}
               </option>
             ))}
-          </select>
+          </select></label></div></details>
           <button
-            className="primary-button"
-            type="button"
+            className="composer-send"
+            type="submit"
+            aria-label={isSending ? "发送中" : "发送"}
             disabled={!goal.trim() || isSending}
-            onClick={() => onSend(productID, goal)}
           >
-            <Play size={15} />
-            {isSending ? "处理中" : "发送"}
+            {isSending ? <Loader2 className="spin" size={18}/> : <Send size={18}/>}
           </button>
         </div>
-      </div>
+      </form>
       {suggestions?.length ? (
         <section className="proactive-panel">
           <div className="section-heading">
@@ -4526,16 +4529,23 @@ function ProductKnowledgeWorkspace({
   products,
   selectedProductId,
   productPreview,
+  creativeReports,
+  selectedCreativeReportId,
   isLoadingProductPreview,
+  isLoadingCreativeReports,
+  isCreatingCreativeReport,
   isCreatingProduct,
   isSavingProduct,
   error,
   onSelect,
   onStartJob,
+  onReportSelect,
+  onCreateCreativeReport,
+  onReportToJob,
+  onContinueAnalysis,
   onCreate,
   onUpdate,
 }) {
-  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
   const [isNew, setIsNew] = useState(false);
   const [isParsingDocument, setIsParsingDocument] = useState(false);
@@ -4544,14 +4554,24 @@ function ProductKnowledgeWorkspace({
   const [assets, setAssets] = useState([]);
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const [previewAsset, setPreviewAsset] = useState(null);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
   const [deletingAssetId, setDeletingAssetId] = useState("");
+  const [isSourcesOpen, setIsSourcesOpen] = useState(true);
+  const [isReportExpanded, setIsReportExpanded] = useState(false);
+  const [isReportFormOpen, setIsReportFormOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const selected =
     products.find((item) => item.id === selectedProductId) || products[0];
-  const visible = products.filter((item) =>
-    item.title.toLowerCase().includes(query.toLowerCase()),
-  );
+  const selectedReport =
+    creativeReports.find((report) => report.id === selectedCreativeReportId) ||
+    creativeReports[0];
+  const selectedAsset =
+    assets.find((asset) => asset.id === selectedAssetId) ||
+    assets.find((asset) => asset.kind === "image") ||
+    assets[0];
+  const coverAsset =
+    assets.find((asset) => asset.kind === "image") || assets[0];
   useEffect(() => {
     if (!editing) {
       setTitle(selected?.title || "");
@@ -4564,8 +4584,16 @@ function ProductKnowledgeWorkspace({
       return;
     }
     listProductAssets(selected.id)
-      .then((items) => setAssets(Array.isArray(items) ? items : []))
+      .then((items) => {
+        const next = Array.isArray(items) ? items : [];
+        setAssets(next);
+        setSelectedAssetId(
+          next.find((asset) => asset.kind === "image")?.id || next[0]?.id || "",
+        );
+      })
       .catch(() => setAssets([]));
+    setIsReportExpanded(false);
+    setIsReportFormOpen(false);
   }, [selected?.id]);
   async function save(event) {
     event.preventDefault();
@@ -4610,6 +4638,7 @@ function ProductKnowledgeWorkspace({
     try {
       await deleteProductAsset(asset.id);
       setAssets((items) => items.filter((item) => item.id !== asset.id));
+      if (selectedAssetId === asset.id) setSelectedAssetId("");
       if (previewAsset?.id === asset.id) setPreviewAsset(null);
     } catch (err) {
       window.alert(err.message);
@@ -4617,8 +4646,22 @@ function ProductKnowledgeWorkspace({
       setDeletingAssetId("");
     }
   }
+  function startNewProduct() {
+    setEditing(true);
+    setIsNew(true);
+    setTitle("");
+    setContent(
+      "# 产品资料\n\n## 核心卖点\n\n## 目标用户\n\n## 使用场景\n\n## 表达边界\n",
+    );
+    setParsedFilename("");
+    setDocumentParseError("");
+  }
   return (
-    <section className="knowledge-workspace">
+    <section
+      className={`knowledge-workspace product-research-workspace ${
+        isSourcesOpen && !editing ? "sources-open" : "sources-closed"
+      }`}
+    >
       {previewAsset ? (
         <AssetPreviewModal
           asset={previewAsset}
@@ -4627,72 +4670,42 @@ function ProductKnowledgeWorkspace({
           onDelete={removeAsset}
         />
       ) : null}
-      <header>
-        <div>
-          <span className="eyebrow">可持续更新的资料</span>
-          <h1>产品资料</h1>
-          <p>把产品说清楚一次，后续创作和执行都会自动带上它。</p>
-        </div>
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => {
-            setEditing(true);
-            setIsNew(true);
-            setTitle("");
-            setContent(
-              "# 产品资料\n\n## 卖点\n\n## 目标用户\n\n## 使用场景\n\n## 表达边界\n",
-            );
-            setParsedFilename("");
-            setDocumentParseError("");
-          }}
-        >
-          {" "}
-          <Plus size={16} />
-          新建
-        </button>
-      </header>
-      <div className="knowledge-grid">
-        <aside className="knowledge-list">
-          <label className="knowledge-search">
-            <Search size={15} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索资料"
-            />
-          </label>
-          <div className="knowledge-entry-note">
-            你可以上传 Markdown、粘贴文字，或在这里直接修改。
+      <div className="research-layout">
+        <aside className="research-product-list" aria-label="我的产品">
+          <div className="research-list-head">
+            <strong>我的产品</strong>
+            <button type="button" onClick={startNewProduct} aria-label="新建产品">
+              <Plus size={18} />
+            </button>
           </div>
-          {visible.length ? (
-            visible.map((item) => (
-              <button
-                className={selected?.id === item.id ? "active" : ""}
-                type="button"
-                key={item.id}
-                onClick={() => {
-                  setEditing(false);
-                  setIsNew(false);
-                  onSelect(item.id);
-                }}
-              >
-                <Package size={16} />
-                <span>
-                  <strong>{item.title}</strong>
-                  <small>更新 {formatTime(item.updated_at)}</small>
-                </span>
-                <ChevronRight size={15} />
-              </button>
-            ))
-          ) : (
-            <EmptyState text="还没有匹配的资料" compact />
-          )}
+          <div className="research-product-rows">
+            {products.length ? (
+              products.map((item) => (
+                <button
+                  className={selected?.id === item.id ? "active" : ""}
+                  type="button"
+                  key={item.id}
+                  onClick={() => {
+                    setEditing(false);
+                    setIsNew(false);
+                    onSelect(item.id);
+                  }}
+                >
+                  <ProductListThumbnail product={item} />
+                  <span>
+                    <strong>{item.title}</strong>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <EmptyState text="还没有产品资料" compact />
+            )}
+          </div>
         </aside>
-        <main className="knowledge-reader">
+        <main className="research-main">
           {editing ? (
             <form
-              className="living-product-editor"
+              className="living-product-editor research-product-editor"
               onSubmit={async (event) => {
                 if (selected && !isNew) return save(event);
                 event.preventDefault();
@@ -4776,108 +4789,268 @@ function ProductKnowledgeWorkspace({
             </form>
           ) : selected ? (
             <>
-              <div className="knowledge-reader-head">
-                <div>
-                  <span className="eyebrow">当前资料</span>
-                  <h2>{selected.title}</h2>
-                  <small>
-                    {selected.md_name} · 更新 {formatTime(selected.updated_at)}
-                  </small>
+              <header className="research-product-head">
+                <div className="research-product-cover" aria-hidden="true">
+                  {coverAsset?.kind === "image" ? (
+                    <img src={`/api/assets/${coverAsset.id}/file`} alt="" />
+                  ) : (
+                    <Package size={28} />
+                  )}
                 </div>
-                <div>
+                <div className="research-product-title">
+                  <h1>{selected.title}</h1>
+                  <p>
+                    {assets.length} 个素材
+                    <span aria-hidden="true" />
+                    最近更新：{formatTime(selected.updated_at)}
+                  </p>
+                </div>
+                <details className="research-overflow">
+                  <summary aria-label="产品操作">•••</summary>
+                  <div>
                   <button
-                    className="secondary-button"
                     type="button"
-                    onClick={() => setEditing(true)}
+                    onClick={() => {
+                      setEditing(true);
+                      setIsNew(false);
+                    }}
                   >
                     <FileText size={15} />
-                    修改
+                    编辑产品资料
                   </button>
                   <button
-                    className="primary-button"
                     type="button"
                     onClick={() => onStartJob(selected.id)}
                   >
                     <Play size={15} />
                     开始创作
                   </button>
-                </div>
-              </div>
-              {isLoadingProductPreview ? (
-                <EmptyState text="正在读取资料" />
-              ) : productPreview?.content ? (
-                <MarkdownContent content={productPreview.content} />
-              ) : (
-                <EmptyState text="资料为空，点击修改补充内容" />
-              )}
-              <section className="product-assets">
-                <div>
-                  <strong>图片与视频素材</strong>
-                  <small>任务执行时可作为产品参考素材</small>
-                </div>
-                <label className="asset-upload">
-                  <Upload size={15} />
-                  {isUploadingAsset ? "上传中" : "添加素材"}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
-                    onChange={addAsset}
-                  />
-                </label>
-                {assets.length ? (
-                  <div className="asset-gallery">
-                    {assets.map((asset) => (
-                      <ProductMediaCard
-                        asset={asset}
-                        deleting={deletingAssetId === asset.id}
-                        onPreview={setPreviewAsset}
-                        onDelete={removeAsset}
-                        key={asset.id}
-                      />
-                    ))}
                   </div>
+                </details>
+              </header>
+
+              <div className="research-context-line">
+                <Sparkles size={17} />
+                <span>面向短视频平台的产品创意分析</span>
+              </div>
+
+              <section className="research-report">
+                <div className="research-report-head">
+                  <div>
+                    <h2>创意策略报告</h2>
+                    <p>
+                      {selectedReport
+                        ? `生成时间：${formatTime(selectedReport.created_at)}`
+                        : "基于现有产品资料生成可执行的创意方向"}
+                    </p>
+                  </div>
+                  {creativeReports.length ? (
+                    <details className="research-report-history">
+                      <summary>
+                        <History size={15} />
+                        历史报告
+                        <ChevronDown size={14} />
+                      </summary>
+                      <div>
+                        {creativeReports.map((report) => (
+                          <button
+                            type="button"
+                            key={report.id}
+                            className={report.id === selectedReport?.id ? "active" : ""}
+                            onClick={() => onReportSelect(report.id)}
+                          >
+                            <strong>{formatTime(report.created_at)}</strong>
+                            <span>{reportConfigLabel(report.source_config_json)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+
+                {isLoadingCreativeReports ? (
+                  <EmptyState text="正在读取创意策略报告" compact />
+                ) : selectedReport ? (
+                  <>
+                    {selectedReport.report_summary ? (
+                      <p className="research-report-summary">
+                        {selectedReport.report_summary}
+                      </p>
+                    ) : null}
+                    <div className={`research-report-content ${isReportExpanded ? "expanded" : ""}`}>
+                      <MarkdownContent content={selectedReport.report_markdown} />
+                    </div>
+                    <div className="research-report-actions">
+                      <button className="primary-button" type="button" onClick={() => onReportToJob(selectedReport)}>
+                        <Play size={16} />
+                        转为脚本
+                      </button>
+                      <button className="research-text-action" type="button" onClick={() => setIsReportFormOpen((value) => !value)}>
+                        <RefreshCw size={15} />
+                        重新生成
+                      </button>
+                      <button className="research-text-action continue" type="button" onClick={() => onContinueAnalysis(selected.id)}>
+                        继续分析
+                        <ChevronRight size={15} />
+                      </button>
+                    </div>
+                    <button className="research-expand-report" type="button" onClick={() => setIsReportExpanded((value) => !value)}>
+                      <ChevronDown size={15} />
+                      {isReportExpanded ? "收起完整报告" : "展开完整报告"}
+                    </button>
+                  </>
                 ) : (
-                  <p className="asset-empty">
-                    还没有素材。添加产品图、包装图、演示视频或可用镜头。
-                  </p>
+                  <div className="research-report-empty">
+                    <p>还没有创意策略报告。</p>
+                    <button className="primary-button" type="button" onClick={() => setIsReportFormOpen(true)}>
+                      生成第一份报告
+                    </button>
+                  </div>
                 )}
+
+                {isReportFormOpen ? (
+                  <form className="research-report-form" onSubmit={onCreateCreativeReport}>
+                    <input type="hidden" name="product_name" value={selected.title} />
+                    <input type="hidden" name="date_range" value="近 30 天" />
+                    <input type="hidden" name="sample_count" value="50" />
+                    <label>
+                      <span>这次重点</span>
+                      <textarea name="requirement" rows="3" placeholder="例如：优先分析小红书开头钩子和生活化场景。" />
+                    </label>
+                    <details>
+                      <summary>补充数据来源</summary>
+                      <div className="research-report-source-fields">
+                        <label>
+                          <span>DataEye URL</span>
+                          <input name="dataeye_url" type="url" placeholder="https://..." />
+                        </label>
+                        <label>
+                          <span>素材备注</span>
+                          <textarea name="material_note" rows="2" />
+                        </label>
+                      </div>
+                    </details>
+                    <div>
+                      <button className="secondary-button" type="button" onClick={() => setIsReportFormOpen(false)}>取消</button>
+                      <button className="primary-button" type="submit" disabled={isCreatingCreativeReport}>
+                        {isCreatingCreativeReport ? "生成中" : "生成报告"}
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
               </section>
+              {error ? <div className="error-banner research-error">{error}</div> : null}
             </>
           ) : (
             <EmptyState text="从左侧选择资料，或新建一份" />
           )}
         </main>
-        <aside className="knowledge-checks">
-          <span className="eyebrow">创作前检查</span>
-          <h2>资料是否够用？</h2>
-          {["核心卖点", "目标用户", "使用场景", "表达边界", "可用素材"].map(
-            (label) => (
-              <div key={label}>
-                <span
-                  className={
-                    content.includes(label) ||
-                    productPreview?.content?.includes(label) ||
-                    (label === "可用素材" && assets.length)
-                      ? "check-ok"
-                      : "check-wait"
-                  }
-                />
-                <strong>{label}</strong>
-                <small>
-                  {content.includes(label) ||
-                  productPreview?.content?.includes(label) ||
-                  (label === "可用素材" && assets.length)
-                    ? "已记录"
-                    : "建议补充"}
-                </small>
+        {!editing ? (
+          <aside className="research-sources" aria-label="产品资料">
+            <header>
+              <h2>产品资料</h2>
+              <button type="button" onClick={() => setIsSourcesOpen(false)} aria-label="收起产品资料">
+                <X size={19} />
+              </button>
+            </header>
+            <details className="research-document-source">
+              <summary>
+                <FileText size={17} />
+                <span>
+                  <strong>{selected?.md_name || "产品文档"}</strong>
+                  <small>更新 {formatTime(selected?.updated_at)}</small>
+                </span>
+                <ChevronRight size={16} />
+              </summary>
+              <div className="research-document-preview">
+                {isLoadingProductPreview ? (
+                  <span>读取中</span>
+                ) : productPreview?.content ? (
+                  <MarkdownContent content={productPreview.content} />
+                ) : (
+                  <span>暂无文档内容</span>
+                )}
               </div>
-            ),
-          )}
-          <p>资料不完整也能开始。助手会在执行前提醒你缺少什么。</p>
-          {error ? <div className="error-banner">{error}</div> : null}
-        </aside>
+            </details>
+
+            <section className="research-asset-source">
+              <div>
+                <strong>素材文件 ({assets.length})</strong>
+                <label>
+                  <Upload size={14} />
+                  {isUploadingAsset ? "上传中" : "添加"}
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={addAsset} />
+                </label>
+              </div>
+              {assets.length ? (
+                <div className="research-asset-strip">
+                  {assets.map((asset) => (
+                    <button type="button" key={asset.id} className={asset.id === selectedAsset?.id ? "active" : ""} onClick={() => setSelectedAssetId(asset.id)} title={asset.original_name}>
+                      {asset.kind === "video" ? (
+                        <video src={`/api/assets/${asset.id}/file`} muted preload="metadata" />
+                      ) : (
+                        <img src={`/api/assets/${asset.id}/file`} alt="" />
+                      )}
+                      <span>{asset.original_name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="asset-empty">还没有图片或视频素材。</p>
+              )}
+            </section>
+
+            {selectedAsset ? (
+              <section className="research-selected-asset">
+                <button type="button" className="research-selected-asset-preview" onClick={() => setPreviewAsset(selectedAsset)} aria-label={`预览 ${selectedAsset.original_name}`}>
+                  {selectedAsset.kind === "video" ? (
+                    <video src={`/api/assets/${selectedAsset.id}/file`} muted preload="metadata" />
+                  ) : (
+                    <img src={`/api/assets/${selectedAsset.id}/file`} alt={selectedAsset.original_name} />
+                  )}
+                </button>
+                <dl>
+                  <div><dt>文件名</dt><dd>{selectedAsset.original_name}</dd></div>
+                  <div><dt>上传时间</dt><dd>{formatTime(selectedAsset.created_at)}</dd></div>
+                  <div><dt>文件大小</dt><dd>{formatBytes(selectedAsset.size_bytes)}</dd></div>
+                  <div><dt>文件类型</dt><dd>{selectedAsset.mime_type || selectedAsset.kind}</dd></div>
+                </dl>
+              </section>
+            ) : null}
+          </aside>
+        ) : null}
+        {!isSourcesOpen && !editing && selected ? (
+          <button type="button" className="research-open-sources" onClick={() => setIsSourcesOpen(true)}>
+            <FileText size={16} />
+            产品资料
+          </button>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function ProductListThumbnail({ product }) {
+  const [asset, setAsset] = useState(null);
+  useEffect(() => {
+    let active = true;
+    listProductAssets(product.id)
+      .then((items) => {
+        if (!active) return;
+        const list = Array.isArray(items) ? items : [];
+        setAsset(list.find((item) => item.kind === "image") || null);
+      })
+      .catch(() => {
+        if (active) setAsset(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [product.id]);
+  return (
+    <span className="research-list-thumbnail" aria-hidden="true">
+      {asset ? <img src={`/api/assets/${asset.id}/file`} alt="" /> : <Package size={18} />}
+    </span>
   );
 }
 

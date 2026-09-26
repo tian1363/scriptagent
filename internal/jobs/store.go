@@ -134,6 +134,13 @@ CREATE TABLE IF NOT EXISTS chat_agent_steps (
   FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS characters (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL,
+ reference_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, path TEXT NOT NULL DEFAULT '',
+ controls_json TEXT NOT NULL DEFAULT '{}', error_message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_characters_user ON characters(user_id,created_at);
 CREATE TABLE IF NOT EXISTS model_calls (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL,
@@ -345,6 +352,12 @@ CREATE INDEX IF NOT EXISTS idx_custom_skills_updated ON custom_skills(updated_at
 		return err
 	}
 	if err := s.ensureColumn("chat_conversations", "summary", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_agent_steps", "raw_observation_chars", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("chat_agent_steps", "prompt_observation_chars", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	for name, definition := range map[string]string{"label": "TEXT NOT NULL DEFAULT ''", "expires_at": "TEXT NOT NULL DEFAULT ''", "revoked": "INTEGER NOT NULL DEFAULT 0", "used_by": "TEXT NOT NULL DEFAULT ''", "used_at": "TEXT NOT NULL DEFAULT ''"} {
@@ -1204,7 +1217,7 @@ func (s *Store) SaveChatAgentSteps(conversationID, messageID string, steps []Age
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, step := range steps {
-		if _, err = tx.Exec(`INSERT INTO chat_agent_steps(id,conversation_id,message_id,step_index,kind,reason,tool,input,observation,error,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, newID(), conversationID, messageID, step.Index, step.Kind, step.Reason, step.Tool, step.Input, step.Observation, step.Error, now); err != nil {
+		if _, err = tx.Exec(`INSERT INTO chat_agent_steps(id,conversation_id,message_id,step_index,kind,reason,tool,input,observation,error,raw_observation_chars,prompt_observation_chars,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, newID(), conversationID, messageID, step.Index, step.Kind, step.Reason, step.Tool, step.Input, step.Observation, step.Error, step.RawObservationChars, step.PromptObservationChars, now); err != nil {
 			return err
 		}
 	}
@@ -1212,7 +1225,7 @@ func (s *Store) SaveChatAgentSteps(conversationID, messageID string, steps []Age
 }
 
 func (s *Store) ListChatAgentTraces(conversationID string) (map[string][]AgentStep, error) {
-	rows, err := s.db.Query(`SELECT message_id,step_index,kind,COALESCE(reason,''),COALESCE(tool,''),COALESCE(input,''),COALESCE(observation,''),COALESCE(error,'') FROM chat_agent_steps WHERE conversation_id=? ORDER BY created_at,step_index`, conversationID)
+	rows, err := s.db.Query(`SELECT message_id,step_index,kind,COALESCE(reason,''),COALESCE(tool,''),COALESCE(input,''),COALESCE(observation,''),COALESCE(error,''),raw_observation_chars,prompt_observation_chars FROM chat_agent_steps WHERE conversation_id=? ORDER BY created_at,step_index`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -1221,7 +1234,7 @@ func (s *Store) ListChatAgentTraces(conversationID string) (map[string][]AgentSt
 	for rows.Next() {
 		var messageID string
 		var step AgentStep
-		if err := rows.Scan(&messageID, &step.Index, &step.Kind, &step.Reason, &step.Tool, &step.Input, &step.Observation, &step.Error); err != nil {
+		if err := rows.Scan(&messageID, &step.Index, &step.Kind, &step.Reason, &step.Tool, &step.Input, &step.Observation, &step.Error, &step.RawObservationChars, &step.PromptObservationChars); err != nil {
 			return nil, err
 		}
 		result[messageID] = append(result[messageID], step)

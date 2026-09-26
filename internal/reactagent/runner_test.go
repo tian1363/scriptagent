@@ -39,6 +39,17 @@ func TestDefaultMaxStepsIsFour(t *testing.T) {
 	}
 }
 
+func TestToolObservationCountsOnlyWhenPreparedForNextPrompt(t *testing.T) {
+	steps := []Step{{Kind: "tool", Observation: "产品资料", RawObservationChars: 9000}, {Kind: "final"}}
+	if steps[0].PromptObservationChars != 0 {
+		t.Fatal("a tool result has not yet entered a model prompt")
+	}
+	markToolObservationsPrompted(steps)
+	if steps[0].PromptObservationChars != len([]rune("产品资料")) || steps[0].RawObservationChars != 9000 {
+		t.Fatalf("unexpected observation lengths: %+v", steps[0])
+	}
+}
+
 func TestToolCallKeyNormalizesEquivalentJSON(t *testing.T) {
 	first := toolCallKey("retrieve", []byte(`{"b":2,"a":1}`))
 	second := toolCallKey(" retrieve ", []byte(`{"a":1,"b":2}`))

@@ -87,6 +87,9 @@ func main() {
 	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chat.NewService(store, modelClient), creative.NewService(store, modelClient))
 	runner.ResumeUnfinished()
 	handler.ResumeVideos()
+	if err := store.InterruptCharacterGenerations(); err != nil {
+		log.Printf("character recovery: %v", err)
+	}
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
