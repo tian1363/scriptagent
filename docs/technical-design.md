@@ -509,7 +509,7 @@ POST /api/chats/{id}/messages
 - 通用对话响应包含 `agent_steps`，用于前端展示本轮 ReAct 步骤。步骤字段包括序号、类型、可见决策摘要、工具名、工具输入、工具观察和错误信息。
 - 第一版 ReAct 工具为只读能力：`list_products`、`retrieve_product_sections`、`read_product_markdown`、`call_skill`。
 - `call_skill` 调用的是内置工作流/提示词模板，不执行外部命令或系统工具。
-- 内置 skill 包括：`fission_strategy`、`product_markdown_writer`、`script_review`、`material_replication_analysis`、`seedance_video_prompt_writer`。其中素材分析 skill 直接消费用户上传的图片或视频，输出可溯源的多模态拆解与视频复刻建议。
+- 内置 skill 包括：`ugc_hook_writer`、`product_selling_point_writer`、`fission_strategy`、`product_markdown_writer`、`script_review`、`material_replication_analysis`、`seedance_video_prompt_writer`。UGC 开头和场景化卖点表达优先读取已选产品资料，分别输出可拍摄开头与有依据的卖点场景；素材分析 skill 直接消费用户上传的图片或视频，输出可溯源的多模态拆解与视频复刻建议。
 - 通用对话前端必须展示内置 skill 卡片；用户点击卡片后只填充输入框，不自动发送。
 - 前端发送后先用临时消息本地展示用户输入；接口返回真实消息后再同步会话记录。
 - 等待接口响应期间显示模型思考状态；助手回复返回后按打字机效果展示，展示完成后回落到真实会话消息。

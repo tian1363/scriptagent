@@ -1,0 +1,36 @@
+name: ScriptAgent Beta 体验申请
+description: 告诉我们你在跨境电商 UGC 创作中的真实难题
+labels: []
+title: "[Beta] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你愿意试用 ScriptAgent。这个申请会作为公开 GitHub Issue 发布，请不要填写邮箱、电话、未公开的商品资料或客户信息。我们会在 Issue 中回复下一步。
+  - type: dropdown
+    id: role
+    attributes:
+      label: 你的角色 / Your role
+      options:
+        - 跨境品牌或卖家 / Brand or seller
+        - 广告或内容团队 / Agency or content team
+        - UGC 创作者 / Creator
+        - 开发者 / Developer
+        - 其他 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: pain
+    attributes:
+      label: 你最想解决的创作问题 / Your biggest creative bottleneck
+      description: 用具体例子说明，不需要提供商业机密。
+      placeholder: 例如：同一商品需要针对不同市场测试多个短视频开头，但团队很难持续产出新角度。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 怎样的结果会让你觉得值得继续用？ / What would make it useful?
+      placeholder: 例如：30 分钟内得到 3 条可拍的 UGC 脚本和对应镜头。
+    validations:
+      required: false

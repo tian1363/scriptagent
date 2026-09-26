@@ -20,14 +20,16 @@ type Tool struct {
 }
 
 type Step struct {
-	Index       int             `json:"index"`
-	Kind        string          `json:"kind"`
-	Status      string          `json:"status,omitempty"`
-	Reason      string          `json:"reason,omitempty"`
-	Tool        string          `json:"tool,omitempty"`
-	Input       json.RawMessage `json:"input,omitempty"`
-	Observation string          `json:"observation,omitempty"`
-	Error       string          `json:"error,omitempty"`
+	Index                  int             `json:"index"`
+	Kind                   string          `json:"kind"`
+	Status                 string          `json:"status,omitempty"`
+	Reason                 string          `json:"reason,omitempty"`
+	Tool                   string          `json:"tool,omitempty"`
+	Input                  json.RawMessage `json:"input,omitempty"`
+	Observation            string          `json:"observation,omitempty"`
+	RawObservationChars    int             `json:"raw_observation_chars,omitempty"`
+	PromptObservationChars int             `json:"prompt_observation_chars,omitempty"`
+	Error                  string          `json:"error,omitempty"`
 }
 
 type Result struct {
@@ -100,6 +102,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 	}
 	toolResults := map[string]Step{}
 	for index := 0; index < r.maxSteps; index++ {
+		markToolObservationsPrompted(steps)
 		modelReason := "正在理解任务并判断下一步"
 		if index > 0 {
 			modelReason = "正在结合已有信息继续判断"
@@ -164,9 +167,11 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 				step.Status = "error"
 				step.Error = err.Error()
 				step.Observation = truncateRunes(err.Error(), 1600)
+				step.RawObservationChars = len([]rune(err.Error()))
 			} else {
 				step.Status = "completed"
 				step.Observation = truncateRunes(observation, 5000)
+				step.RawObservationChars = len([]rune(observation))
 			}
 			appendStep(step)
 			toolResults[callKey] = step
@@ -184,6 +189,14 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 		Answer: "我已经完成多轮工具检查，但还没有得到足够稳定的最终答案。请缩小问题范围，或指定要使用的产品/skill。",
 		Steps:  steps,
 	}, nil
+}
+
+func markToolObservationsPrompted(steps []Step) {
+	for i := range steps {
+		if steps[i].Kind == "tool" && steps[i].Observation != "" {
+			steps[i].PromptObservationChars = len([]rune(steps[i].Observation))
+		}
+	}
 }
 
 func toolCallKey(tool string, input json.RawMessage) string {
