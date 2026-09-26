@@ -274,9 +274,23 @@ func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
 		}
 		found[skill.Name] = true
 	}
-	for _, name := range []string{"fission_strategy", "material_replication_analysis", "seedance_video_prompt_writer"} {
+	for _, name := range []string{"fission_strategy", "material_replication_analysis", "seedance_video_prompt_writer", "ugc_hook_writer", "product_selling_point_writer"} {
 		if !found[name] {
 			t.Fatalf("expected skill %s in catalog", name)
+		}
+	}
+}
+
+func TestNewCreativeSkillsRequireGroundedProductClaims(t *testing.T) {
+	for _, name := range []string{"ugc_hook_writer", "product_selling_point_writer"} {
+		content, err := builtInSkill(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, phrase := range []string{"产品资料", "场景", "证据"} {
+			if !strings.Contains(content, phrase) {
+				t.Errorf("%s missing %q guidance", name, phrase)
+			}
 		}
 	}
 }
