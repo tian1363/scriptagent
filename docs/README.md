@@ -1,6 +1,6 @@
 # ScriptAgent 文档中心
 
-> 最近维护：2026-08-28 · 事实基线：当前 `main` 分支
+> 最近维护：2026-09-06 · 事实基线：当前 `main` 分支
 
 ## 阅读顺序
 
@@ -14,7 +14,10 @@
 
 | 文档 | 内容 | 当前状态 |
 | --- | --- | --- |
+| [版本更新日志](CHANGELOG.md) | 新功能、安全变化、升级步骤与已知限制 | 随版本维护 |
 | [模型能力](model-capabilities.md) | 能力路由、托管/BYOK、默认模型 | 已按当前设置页更新 |
+| [电商工具箱](ecommerce-toolbox.md) | 批量参考、版本编辑、复制与本地保存 | 当前可用 |
+| [邀请测试部署](invite-deployment.md) | 唯一管理员、邀请码、安全配置与备份 | 当前 Beta 基线 |
 | [Token 优化](token-optimization.md) | 摘要、上下文、工具调用与缓存策略 | 已实施策略 |
 | [Langfuse](langfuse-observability.md) | OTLP 接入、隐私与排障 | 可选能力 |
 | [UGC 视频生成](ugc-video-generation.md) | 产品参考图、异步生成、预览与下载 | 当前可用 |

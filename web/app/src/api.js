@@ -338,3 +338,18 @@ async function request(path, init) {
   if (!isJSON) throw new Error("服务暂时不可用，请稍后再试");
   return data;
 }
+
+export async function generateToolboxDraft(input, signal) {
+  return request("/api/toolbox/draft", { method: "POST", headers: jsonHeaders, body: JSON.stringify(input), signal });
+}
+
+export async function createChat(title = "视频创作") {
+ return request("/api/chats", {method: "POST", headers: jsonHeaders, body: JSON.stringify({title})});
+}
+
+export async function listCharacters(signal) { return request('/api/characters', { signal }); }
+export async function uploadCharacter(name, file) {
+ const body = new FormData(); body.append('name',name); body.append('image',file);
+ return request('/api/characters',{method:'POST',body});
+}
+export async function generateCharacter(input) { return request('/api/characters/generate',{method:'POST',headers:jsonHeaders,body:JSON.stringify(input)}); }
