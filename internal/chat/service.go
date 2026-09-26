@@ -1159,14 +1159,16 @@ func toJobAgentSteps(steps []reactagent.Step) []jobs.AgentStep {
 	result := make([]jobs.AgentStep, 0, len(steps))
 	for _, step := range steps {
 		result = append(result, jobs.AgentStep{
-			Index:       step.Index,
-			Kind:        step.Kind,
-			Status:      step.Status,
-			Reason:      step.Reason,
-			Tool:        step.Tool,
-			Input:       string(step.Input),
-			Observation: step.Observation,
-			Error:       step.Error,
+			Index:                  step.Index,
+			Kind:                   step.Kind,
+			Status:                 step.Status,
+			Reason:                 step.Reason,
+			Tool:                   step.Tool,
+			Input:                  string(step.Input),
+			Observation:            step.Observation,
+			RawObservationChars:    step.RawObservationChars,
+			PromptObservationChars: step.PromptObservationChars,
+			Error:                  step.Error,
 		})
 	}
 	return result
