@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-26 13:25
+
+- `8a1d1bb` Record tool observation lengths for retrieval baseline (#22)
+
 ### 2026-09-25 16:10
 
 - `5ecde0b` Remove fission strategy from public Skill library (#21)
