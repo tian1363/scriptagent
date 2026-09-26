@@ -6,6 +6,42 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-26 13:25
+
+- `8a1d1bb` Record tool observation lengths for retrieval baseline (#22)
+
+### 2026-09-25 16:10
+
+- `5ecde0b` Remove fission strategy from public Skill library (#21)
+
+### 2026-09-25 16:07
+
+- `ebea35d` copy: reframe public skills as a creative skill library (#20)
+
+### 2026-09-25 16:02
+
+- `5e139dd` feat: add contextual GitHub star calls to action (#19)
+
+### 2026-09-25 15:45
+
+- `164bd9a` feat: publish source-backed creative skills on website (#18)
+
+### 2026-09-25 15:36
+
+- `2ca421d` feat: add UGC hooks and scenario-based selling point skills (#17)
+
+### 2026-09-25 14:56
+
+- `04d9cbc` feat: publish public marketing website with beta entry (#16)
+
+### 2026-09-25 14:46
+
+- `a2ff04f` Publish ScriptAgent Beta website in main repository (#15)
+
+### 2026-09-24 11:14
+
+- `57ac2e7` feat: add character library and creative skills
+
 ### 2026-09-06 20:17
 
 - `b304371` docs: automate version changelog updates

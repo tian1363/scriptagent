@@ -323,14 +323,16 @@ type ChatThread struct {
 }
 
 type AgentStep struct {
-	Index       int    `json:"index"`
-	Kind        string `json:"kind"`
-	Status      string `json:"status,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Tool        string `json:"tool,omitempty"`
-	Input       string `json:"input,omitempty"`
-	Observation string `json:"observation,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Index                  int    `json:"index"`
+	Kind                   string `json:"kind"`
+	Status                 string `json:"status,omitempty"`
+	Reason                 string `json:"reason,omitempty"`
+	Tool                   string `json:"tool,omitempty"`
+	Input                  string `json:"input,omitempty"`
+	Observation            string `json:"observation,omitempty"`
+	RawObservationChars    int    `json:"raw_observation_chars,omitempty"`
+	PromptObservationChars int    `json:"prompt_observation_chars,omitempty"`
+	Error                  string `json:"error,omitempty"`
 }
 
 // AgentRun represents one task execution inside a creative space.

@@ -4,7 +4,7 @@ export function createVersion(patch = {}) {
   return { id: crypto.randomUUID(), selected: true, title: "", target: null, notes: "", text: "", scope: "both", name: "", claims: "", adapt: true, ...patch };
 }
 export function initialVersions() {
-  return Object.fromEntries(Object.keys(MODE_LABELS).map((mode) => [mode, Array.from({ length: 3 }, () => createVersion())]));
+  return Object.fromEntries(Object.keys(MODE_LABELS).map((mode) => [mode, [createVersion()]]));
 }
 export function versionIssues(mode, version) {
   const issues = [];
