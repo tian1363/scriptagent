@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-26 13:39
+
+- `6142a5d` build: refresh application and CI dependencies (#23)
+
 ### 2026-09-26 13:30
 
 - `91b6c14` build(deps): bump actions/checkout from 4 to 7 (#4)
