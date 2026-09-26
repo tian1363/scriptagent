@@ -6,6 +6,11 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-26 13:30
+
+- `91b6c14` build(deps): bump actions/checkout from 4 to 7 (#4)
+- `3eec693` build(deps): bump actions/setup-node from 4 to 7 (#5)
+
 ### 2026-09-26 13:25
 
 - `8a1d1bb` Record tool observation lengths for retrieval baseline (#22)
