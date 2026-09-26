@@ -381,7 +381,7 @@ func TestChatAgentStepsPersistPerAssistantMessage(t *testing.T) {
 	}
 	first, _ := store.AddChatMessage(conversation.ID, "assistant", "第一轮")
 	second, _ := store.AddChatMessage(conversation.ID, "assistant", "第二轮")
-	if err := store.SaveChatAgentSteps(conversation.ID, first.ID, []AgentStep{{Index: 1, Kind: "tool", Tool: "list_products", Reason: "读取产品"}}); err != nil {
+	if err := store.SaveChatAgentSteps(conversation.ID, first.ID, []AgentStep{{Index: 1, Kind: "tool", Tool: "retrieve_product_sections", Reason: "读取产品", RawObservationChars: 7200, PromptObservationChars: 5015}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SaveChatAgentSteps(conversation.ID, second.ID, []AgentStep{{Index: 1, Kind: "final", Reason: "整理结果"}}); err != nil {
@@ -391,8 +391,11 @@ func TestChatAgentStepsPersistPerAssistantMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if thread.AgentTraces[first.ID][0].Tool != "list_products" || thread.AgentTraces[second.ID][0].Kind != "final" {
+	if thread.AgentTraces[first.ID][0].Tool != "retrieve_product_sections" || thread.AgentTraces[second.ID][0].Kind != "final" {
 		t.Fatalf("unexpected per-message traces: %+v", thread.AgentTraces)
+	}
+	if step := thread.AgentTraces[first.ID][0]; step.RawObservationChars != 7200 || step.PromptObservationChars != 5015 {
+		t.Fatalf("retrieval lengths were not persisted: %+v", step)
 	}
 }
 
