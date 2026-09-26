@@ -23,6 +23,26 @@
 | ReAct 调用控制 | 默认最多 4 步，相同工具和参数复用已有结果 | 防止调用链膨胀和循环 |
 | 裂变 Prompt 瘦身 | 只传复刻脚本、用户要求和本次所需维度规则 | 移除重复的大块上游内容 |
 
+## 产品资料检索长度基线
+
+`chat_agent_steps` 现在记录每次工具返回的 `raw_observation_chars`，以及该结果实际被放进下一轮模型请求时的 `prompt_observation_chars`。两者按 Unicode 字符计数，不是 Token；数值为 0 的旧记录不能用于计算。最后一步执行的工具没有下一轮模型请求时，后者保持 0。重复工具调用不会重复执行 Handler，因此其原始长度为 0。
+
+先收集真实的 `retrieve_product_sections` 样本，再决定是否做分块准入的旁路判断。基线查询：
+
+```sql
+SELECT COUNT(*) AS calls,
+       SUM(CASE WHEN raw_observation_chars > 5000 THEN 1 ELSE 0 END) AS long_results,
+       SUM(CASE WHEN prompt_observation_chars > 0 THEN 1 ELSE 0 END) AS results_sent_to_model,
+       ROUND(AVG(NULLIF(raw_observation_chars, 0)), 1) AS mean_raw_chars,
+       ROUND(AVG(NULLIF(prompt_observation_chars, 0)), 1) AS mean_prompt_chars
+FROM chat_agent_steps
+WHERE tool = 'retrieve_product_sections'
+  AND COALESCE(error, '') = ''
+  AND raw_observation_chars > 0;
+```
+
+这只测量工具结果长度，不等于整次 Prompt 的 Token 用量。结合 `model_calls` 的实际 Token、延迟和脚本质量评估，才能判断新策略是否有收益。现阶段不删减检索结果，也不额外调用判别模型。
+
 ## 1. 会话摘要与近期窗口不重叠
 
 会话上下文由两部分组成：

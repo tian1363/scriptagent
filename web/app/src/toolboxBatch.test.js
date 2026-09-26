@@ -44,5 +44,8 @@ test("legacy saved plans remain restorable, and new batches preserve all version
   assert.equal(legacy.copy[0].text, "旧方案");
   const versionsByMode = initialVersions();
   assert.equal(restoreBatch({ versionsByMode }), versionsByMode);
-  assert.equal(new Set(Object.values(versionsByMode).flat().map((row) => row.id)).size, 9);
+  assert.equal(new Set(Object.values(versionsByMode).flat().map((row) => row.id)).size, 3);
+  for (const rows of Object.values(versionsByMode)) assert.equal(rows.length, 1);
+  const existing = { copy: Array.from({ length: 12 }, (_, i) => createVersion({ text: `文案 ${i}` })) };
+  assert.equal(restoreBatch({ versionsByMode: existing }).copy.length, 12);
 });
