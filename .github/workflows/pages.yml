@@ -38,7 +38,7 @@ jobs:
         env:
           SITE_BASE_PATH: /scriptagent/
         run: npm run build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web/website/dist/client
       - id: deployment
