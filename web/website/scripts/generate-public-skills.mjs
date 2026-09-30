@@ -14,6 +14,13 @@ const internal = (path = '') => `${sitePath}${path}`;
 
 const skills = [
   {
+    slug: 'hook-replication', name: 'hook_replication', title: '开头钩子复刻', en: 'Hook Replication',
+    summary: '拆解参考视频的开头结构、口播节奏与视觉锚点，为目标产品设计可拍摄的原创钩子和衔接镜头。',
+    english: 'Analyze a reference video hook, then adapt its structure and pacing into an original opening and transition for your product.',
+    category: '素材复刻', prompt: '调用 hook_replication skill，以我上传的视频为参考，结合当前产品，复刻开头钩子的结构与节奏，并写出衔接正片的分镜。',
+    example: '上传一条参考视频，选中目标产品；请拆解前 5 秒的钩子，并设计原创开头与正片首镜的衔接。',
+  },
+  {
     slug: 'ugc-hook-writer', name: 'ugc_hook_writer', title: 'UGC 开头', en: 'UGC Hooks',
     summary: '从真实使用瞬间出发，写出能拍摄的首帧、口播、字幕与产品承接。',
     english: 'Design a shootable opening from a real moment of use, with a first frame, spoken line, caption and product transition.',
@@ -71,8 +78,8 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 const cards = skills.map((skill, index) => `<a class="skill-card" href="${internal(`skills/${skill.slug}/`)}"><span class="card-index">0${index + 1} / ${escapeHTML(skill.category)}</span><h2>${escapeHTML(skill.title)}</h2><p>${escapeHTML(skill.summary)}</p><span class="card-link">查看方法与完整提示词 <b>↗</b></span></a>`).join('');
 writeFileSync(path.join(output, 'index.html'), layout({
-  title: '创意 Skill 库', description: 'ScriptAgent 开源创作 Skill：UGC 开头、场景化卖点表达与脚本检查。可查看完整提示词和源码。', canonical: `${base}skills/`, listing: true,
-  body: `<main class="library"><p class="eyebrow">OPEN SKILL LIBRARY / 01—03</p><h1>创意 Skill 库，<em>打开就有招。</em></h1><p class="lead">从 UGC 开头到场景化卖点，每个 Skill 都是一套可拆解、可复用的创作方法。挑一个，开始试；完整工作流也可以拿去改。</p><p class="english">Creative Skills for UGC hooks, product benefits and script review. Pick one, try it and make it yours.</p><div class="skill-grid">${cards}</div><aside class="star-callout"><div><span>OPEN SOURCE / OPEN IDEAS</span><h2>这些方法有用？帮它被更多人看见。</h2><p>一个 GitHub Star，能让更多创作者发现这套开源方法。</p></div><a href="${repository}" target="_blank" rel="noopener noreferrer">★ 去 GitHub 点亮 Star ↗</a></aside><aside class="note"><span>WHY OPEN?</span><p>好的创作方法值得被讨论。Skill 是工作流和判断标准，不是效果保证；实际结果仍取决于产品资料、素材和人的选择。</p></aside></main>`,
+  title: '创意 Skill 库', description: 'ScriptAgent 开源创作 Skill：开头钩子复刻、UGC 开头、场景化卖点表达与脚本检查。可查看完整提示词和源码。', canonical: `${base}skills/`, listing: true,
+  body: `<main class="library"><p class="eyebrow">OPEN SKILL LIBRARY / 01—04</p><h1>创意 Skill 库，<em>打开就有招。</em></h1><p class="lead">从参考视频钩子拆解到场景化卖点，每个 Skill 都是一套可拆解、可复用的创作方法。挑一个，开始试；完整工作流也可以拿去改。</p><p class="english">Creative Skills for reference hooks, UGC openings, product benefits and script review. Pick one, try it and make it yours.</p><div class="skill-grid">${cards}</div><aside class="star-callout"><div><span>OPEN SOURCE / OPEN IDEAS</span><h2>这些方法有用？帮它被更多人看见。</h2><p>一个 GitHub Star，能让更多创作者发现这套开源方法。</p></div><a href="${repository}" target="_blank" rel="noopener noreferrer">★ 去 GitHub 点亮 Star ↗</a></aside><aside class="note"><span>WHY OPEN?</span><p>好的创作方法值得被讨论。Skill 是工作流和判断标准，不是效果保证；实际结果仍取决于产品资料、素材和人的选择。</p></aside></main>`,
 }));
 
 for (const skill of skills) {
@@ -92,5 +99,5 @@ writeFileSync(path.join(output, 'style.css'), `@import url('https://fonts.google
 appendFileSync(path.join(output, 'style.css'), `.star-callout{margin-top:70px;background:#27211d;color:#fbf7f0;padding:35px 40px;display:flex;align-items:center;justify-content:space-between;gap:30px}.star-callout span{font-size:10px;font-weight:700;letter-spacing:.16em;color:#f6ac83}.star-callout h2{font-family:'Noto Serif SC',serif;font-size:25px;letter-spacing:-.04em;margin:10px 0}.star-callout p{font-size:12px;line-height:1.7;color:#d7cbc1;margin:0}.star-callout>a,.skill-star>a{display:inline-flex;align-items:center;justify-content:center;background:#f0523d;color:#fff;padding:13px 18px;font-size:12px;font-weight:700;white-space:nowrap;transition:background .2s,transform .2s}.star-callout>a:hover,.skill-star>a:hover{background:#da462f;transform:translateY(-2px)}.skill-star{border-top:1px solid #ffffff2e;margin-top:28px;padding-top:24px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}.skill-star>span{font-size:12px;font-weight:700}.skill-star>small{font-size:10px;line-height:1.5;color:#ab9f96}@media(max-width:760px){.star-callout{padding:27px;display:block}.star-callout>a{margin-top:22px}}@media(prefers-reduced-motion:reduce){.star-callout>a,.skill-star>a{transition:none}}`);
 writeFileSync(path.join(website, 'public/sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[base, `${base}skills/`, ...skills.map(skill => `${base}skills/${skill.slug}/`)].map(url => `  <url><loc>${url}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(path.join(website, 'public/robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${base}sitemap.xml\n`);
-appendFileSync(path.join(output, 'style.css'), `.skill-grid{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:1100px){.skill-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.skill-grid{grid-template-columns:1fr}}`);
+appendFileSync(path.join(output, 'style.css'), `.skill-grid{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:760px){.skill-grid{grid-template-columns:1fr}}`);
 console.log(`Generated ${skills.length} public Skill pages from built-in definitions.`);
