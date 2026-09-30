@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-09-30 18:26
+
+- `7bc4c9d` feat: publish hook replication skill on website
+
 ### 2026-09-26 13:39
 
 - `6142a5d` build: refresh application and CI dependencies (#23)
