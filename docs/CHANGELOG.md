@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:21
+
+- `dcbd056` feat: refine creative workflows and toolbox UI
+
 ### 2026-09-30 18:26
 
 - `7bc4c9d` feat: publish hook replication skill on website
