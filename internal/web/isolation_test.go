@@ -53,9 +53,30 @@ func TestPrivateAPIsDoNotExposeAnotherUsersResources(t *testing.T) {
 	mustClaim(t, store, owner.ID, "job", job.ID)
 	chat, _ := store.CreateChatConversationWithContext("owner-chat", space.ID, product.ID)
 	mustClaim(t, store, owner.ID, "chat", chat.ID)
+	chatMessage, err := store.AddChatMessage(chat.ID, "user", "附件：owner.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatAttachment, err := store.AddChatAttachment(chat.ID, chatMessage.ID, jobs.ChatAttachment{Kind: "image", OriginalName: "owner.png", MimeType: "image/png", Size: 16, Path: assetPath})
+	if err != nil {
+		t.Fatal(err)
+	}
 	skill, _ := store.CreateCustomSkill(jobs.CreateCustomSkillInput{Name: "owner-skill", Title: "Owner", Description: "private", Category: "test", InvocationPrompt: "use", Content: "# Owner"})
 	mustClaim(t, store, owner.ID, "skill", skill.ID)
 	video, _ := store.CreateVideoGeneration(jobs.CreateVideoGenerationInput{UserID: owner.ID, ProductID: product.ID, SpaceID: space.ID, ConversationID: chat.ID, Mode: "text", Prompt: "owner-video", Model: "wan3.0-video", Resolution: "720P", Ratio: "9:16", Duration: 5})
+	if err := store.UpdateVideoGeneration(video.ID, "completed", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := store.CreateVideoGeneration(jobs.CreateVideoGenerationInput{UserID: owner.ID, SpaceID: space.ID, Mode: "text", Prompt: "pending-video", Model: "wan3.0-video", Resolution: "720P", Ratio: "9:16", Duration: 5})
+	response := doRequest(t, ownerClient, http.MethodGet, server.URL+"/api/spaces/"+space.ID+"/videos", "")
+	var spaceVideos []jobs.VideoGeneration
+	if err := json.NewDecoder(response.Body).Decode(&spaceVideos); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || len(spaceVideos) != 1 || spaceVideos[0].ID != video.ID || spaceVideos[0].ID == pending.ID {
+		t.Fatalf("space videos returned %d with %+v", response.StatusCode, spaceVideos)
+	}
 
 	for _, path := range []string{"/api/products", "/api/spaces", "/api/jobs", "/api/chats", "/api/videos", "/api/skills"} {
 		response := doRequest(t, otherClient, http.MethodGet, server.URL+path, "")
@@ -75,15 +96,38 @@ func TestPrivateAPIsDoNotExposeAnotherUsersResources(t *testing.T) {
 		{http.MethodDelete, "/api/assets/" + asset.ID, ""},
 		{http.MethodPut, "/api/products/" + product.ID, `{"title":"changed","content":"changed"}`},
 		{http.MethodGet, "/api/spaces/" + space.ID + "/observability", ""},
+		{http.MethodGet, "/api/spaces/" + space.ID + "/videos", ""},
 		{http.MethodPut, "/api/spaces/" + space.ID, `{"title":"changed"}`},
 		{http.MethodDelete, "/api/spaces/" + space.ID, ""},
 		{http.MethodGet, "/api/jobs/" + job.ID, ""},
 		{http.MethodPost, "/api/jobs/" + job.ID + "/retry", "{}"},
 		{http.MethodGet, "/api/chats/" + chat.ID, ""},
+		{http.MethodGet, "/api/chats/" + chat.ID + "/attachments/" + chatAttachment.ID + "/file", ""},
 		{http.MethodGet, "/api/chats/" + chat.ID + "/progress", ""},
 		{http.MethodGet, "/api/videos/" + video.ID, ""},
 		{http.MethodGet, "/api/videos/" + video.ID + "/file", ""},
 		{http.MethodPut, "/api/skills/" + skill.ID, `{"name":"owner-skill","title":"Changed","description":"private","content":"# Changed"}`},
+	}
+	attachmentURL := server.URL + "/api/chats/" + chat.ID + "/attachments/" + chatAttachment.ID + "/file"
+	response = doRequest(t, ownerClient, http.MethodGet, attachmentURL, "")
+	content, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || string(content) != "not-a-real-image" {
+		t.Fatalf("owner attachment returned %d: %q", response.StatusCode, content)
+	}
+	request, err := http.NewRequest(http.MethodGet, attachmentURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Range", "bytes=0-2")
+	response, err = ownerClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusPartialContent || string(content) != "not" {
+		t.Fatalf("ranged attachment returned %d: %q", response.StatusCode, content)
 	}
 	for _, test := range cases {
 		response := doRequest(t, otherClient, test.method, server.URL+test.path, test.body)
@@ -91,6 +135,43 @@ func TestPrivateAPIsDoNotExposeAnotherUsersResources(t *testing.T) {
 		if response.StatusCode < 400 || response.StatusCode >= 500 {
 			t.Fatalf("%s %s returned %d; expected a non-disclosing client error", test.method, test.path, response.StatusCode)
 		}
+	}
+
+	unassigned, err := store.CreateChatConversation("unassigned-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustClaim(t, store, owner.ID, "chat", unassigned.ID)
+	olderVideo, err := store.CreateVideoGeneration(jobs.CreateVideoGenerationInput{UserID: owner.ID, ConversationID: unassigned.ID, Mode: "text", Prompt: "earlier-video", Model: "wan3.0-video", Resolution: "720P", Ratio: "9:16", Duration: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateVideoGeneration(olderVideo.ID, "completed", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	assignPath := server.URL + "/api/chats/" + unassigned.ID + "/space"
+	response = doRequest(t, otherClient, http.MethodPut, assignPath, `{"space_id":"`+space.ID+`"}`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("other user assigned chat: %d", response.StatusCode)
+	}
+	response = doRequest(t, ownerClient, http.MethodPut, assignPath, `{"space_id":"`+space.ID+`"}`)
+	var assigned jobs.ChatThread
+	if err := json.NewDecoder(response.Body).Decode(&assigned); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || assigned.Conversation.SpaceID != space.ID || assigned.Conversation.ProductID != product.ID {
+		t.Fatalf("chat assignment returned %d: %+v", response.StatusCode, assigned.Conversation)
+	}
+	linked, err := store.GetUserVideoGeneration(owner.ID, olderVideo.ID)
+	if err != nil || linked.SpaceID != space.ID {
+		t.Fatalf("existing video was not linked: %+v, %v", linked, err)
+	}
+	response = doRequest(t, ownerClient, http.MethodPut, assignPath, `{"space_id":"`+space.ID+`"}`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("reassignment returned %d", response.StatusCode)
 	}
 }
 

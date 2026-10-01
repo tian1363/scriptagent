@@ -76,7 +76,7 @@ func (a *QwenScriptAgent) Run(ctx context.Context, run jobs.RunContext, job jobs
 		Step:      "video_analysis",
 	}, []model.ContentItem{
 		{Video: videoDataURL, FPS: a.videoFPS},
-		{Text: videoAnalysisPrompt(job, string(product))},
+		{Text: videoAnalysisPrompt(job)},
 	})
 	if err != nil {
 		return jobs.ScriptResult{}, fmt.Errorf("video analysis failed: %w", err)

@@ -82,6 +82,19 @@ func (h *Handler) listVideos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (h *Handler) listSpaceVideos(w http.ResponseWriter, r *http.Request) {
+	items, err := h.store.ListUserCompletedVideosForSpace(userIDFromRequest(r), chi.URLParam(r, "id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (h *Handler) listProactiveSuggestions(w http.ResponseWriter, r *http.Request) {
 	items, err := h.store.RefreshProactiveSuggestions(userIDFromRequest(r))
 	if err != nil {
@@ -169,7 +182,12 @@ func (h *Handler) createVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Model == "" {
-		input.Model = "wan3.0-video-prime"
+		if settings, err := h.store.GetUserModelSettingsForCapability(userIDFromRequest(r), "video_generation"); err == nil {
+			input.Model = settings.Model
+		}
+		if input.Model == "" {
+			input.Model = "wan3.0-video-prime"
+		}
 	}
 	if input.Model != "wan3.0-video-prime" && input.Model != "wan3.0-video" {
 		writeError(w, http.StatusBadRequest, errors.New("当前仅支持 Wan 3.0 视频模型"))
@@ -1057,40 +1075,26 @@ func (h *Handler) deleteSpace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
-func (h *Handler) listCreativeReports(w http.ResponseWriter, r *http.Request) {
-	productID := chi.URLParam(r, "id")
-	if _, err := h.store.GetUserProduct(userIDFromRequest(r), productID); err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	reports, err := h.store.ListCreativeReports(productID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, reports)
-}
-
-func (h *Handler) createCreativeReport(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) interpretCreative(w http.ResponseWriter, r *http.Request) {
 	if h.creative == nil {
-		writeError(w, http.StatusBadRequest, errors.New("creative report service is not configured"))
+		writeError(w, http.StatusBadRequest, errors.New("creative service is not configured"))
 		return
 	}
-	if _, err := h.store.GetUserProduct(userIDFromRequest(r), chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	var input creative.DataEyeConfig
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+	var input creative.InterpretInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	report, err := h.creative.GenerateReport(r.Context(), chi.URLParam(r, "id"), input)
+	result, err := h.creative.Interpret(r.Context(), input)
 	if err != nil {
+		if errors.Is(err, creative.ErrInvalidSourceURL) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, report)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
@@ -1334,6 +1338,26 @@ func (h *Handler) getChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, thread)
 }
 
+func (h *Handler) assignChatSpace(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		SpaceID string `json:"space_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.SpaceID) == "" {
+		writeError(w, http.StatusBadRequest, errors.New("请选择创意空间"))
+		return
+	}
+	thread, err := h.store.AssignUserChatToSpace(userIDFromRequest(r), chi.URLParam(r, "id"), input.SpaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thread)
+}
+
 func (h *Handler) getChatProgress(w http.ResponseWriter, r *http.Request) {
 	conversationID := chi.URLParam(r, "id")
 	if _, err := h.store.GetUserChatThread(userIDFromRequest(r), conversationID); err != nil {
@@ -1371,7 +1395,9 @@ func (h *Handler) sendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		input.ProductID = space.ProductID
 	}
-	thread, err := h.chat.SendWithAttachments(r.Context(), conversationID, input.Content, input.ProductID, attachments)
+	chatCtx, cancel := chatExecutionContext(r.Context())
+	defer cancel()
+	thread, err := h.chat.SendWithAttachments(chatCtx, conversationID, input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -1412,12 +1438,21 @@ func (h *Handler) sendNewChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		conversationID = conversation.ID
 	}
-	thread, err := h.chat.SendWithAttachments(r.Context(), conversationID, input.Content, input.ProductID, attachments)
+	chatCtx, cancel := chatExecutionContext(r.Context())
+	defer cancel()
+	thread, err := h.chat.SendWithAttachments(chatCtx, conversationID, input.Content, input.ProductID, attachments)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, thread)
+}
+
+// A browser may close its connection while a model run is in progress. Once the
+// request has been authenticated and parsed, finish the run and persist its
+// answer even if the response can no longer be delivered to that browser.
+func chatExecutionContext(requestCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(requestCtx), 14*time.Minute)
 }
 
 type chatMessageInput struct {

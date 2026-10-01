@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL,
   FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS chat_attachments (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL,
+  kind TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT NOT NULL,
+  size INTEGER NOT NULL, path TEXT NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chat_attachments_message ON chat_attachments(message_id);
 CREATE TABLE IF NOT EXISTS chat_agent_steps (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL,
   step_index INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT, tool TEXT,
@@ -632,7 +640,7 @@ func (s *Store) CreateSpace(input CreateSpaceInput) (*Space, error) {
 }
 
 func (s *Store) ListSpaces() ([]Space, error) {
-	rows, err := s.db.Query(`SELECT id,title,COALESCE(summary,''),COALESCE(product_id,''),COALESCE(agent_brief,''),COALESCE(marketing_goal,''),COALESCE(goal_stage,''),status,COALESCE(origin_space_id,''),created_at,updated_at FROM spaces ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT s.id,s.title,COALESCE(s.summary,''),COALESCE(s.product_id,''),COALESCE(s.agent_brief,''),COALESCE(s.marketing_goal,''),COALESCE(s.goal_stage,''),s.status,COALESCE(s.origin_space_id,''),s.created_at,s.updated_at,COUNT(pa.id) FROM spaces s LEFT JOIN product_assets pa ON pa.product_id=s.product_id GROUP BY s.id ORDER BY s.updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +649,7 @@ func (s *Store) ListSpaces() ([]Space, error) {
 	for rows.Next() {
 		var x Space
 		var c, u string
-		if err := rows.Scan(&x.ID, &x.Title, &x.Summary, &x.ProductID, &x.AgentBrief, &x.MarketingGoal, &x.GoalStage, &x.Status, &x.OriginSpaceID, &c, &u); err != nil {
+		if err := rows.Scan(&x.ID, &x.Title, &x.Summary, &x.ProductID, &x.AgentBrief, &x.MarketingGoal, &x.GoalStage, &x.Status, &x.OriginSpaceID, &c, &u, &x.AssetCount); err != nil {
 			return nil, err
 		}
 		x.CreatedAt = parseTime(c)
@@ -1261,7 +1269,64 @@ ORDER BY created_at ASC`, conversationID)
 		}
 		result = append(result, *message)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	attachments, err := s.ListChatAttachments(conversationID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range result {
+		result[index].Attachments = attachments[result[index].ID]
+	}
+	return result, nil
+}
+
+func (s *Store) AddChatAttachment(conversationID, messageID string, attachment ChatAttachment) (*ChatAttachment, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	attachment.ID = newID()
+	attachment.MessageID = messageID
+	attachment.CreatedAt = time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO chat_attachments (id,conversation_id,message_id,kind,original_name,mime_type,size,path,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		attachment.ID, conversationID, messageID, attachment.Kind, attachment.OriginalName, attachment.MimeType, attachment.Size, attachment.Path, attachment.CreatedAt.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	return &attachment, nil
+}
+
+func (s *Store) ListChatAttachments(conversationID string) (map[string][]ChatAttachment, error) {
+	rows, err := s.db.Query(`SELECT id,message_id,kind,original_name,mime_type,size,path,created_at FROM chat_attachments WHERE conversation_id=? ORDER BY created_at,id`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string][]ChatAttachment{}
+	for rows.Next() {
+		var attachment ChatAttachment
+		var createdAt string
+		if err := rows.Scan(&attachment.ID, &attachment.MessageID, &attachment.Kind, &attachment.OriginalName, &attachment.MimeType, &attachment.Size, &attachment.Path, &createdAt); err != nil {
+			return nil, err
+		}
+		attachment.CreatedAt = parseTime(createdAt)
+		result[attachment.MessageID] = append(result[attachment.MessageID], attachment)
+	}
 	return result, rows.Err()
+}
+
+func (s *Store) GetChatAttachment(conversationID, attachmentID string) (*ChatAttachment, error) {
+	var attachment ChatAttachment
+	var createdAt string
+	err := s.db.QueryRow(`SELECT id,message_id,kind,original_name,mime_type,size,path,created_at FROM chat_attachments WHERE conversation_id=? AND id=?`, conversationID, attachmentID).Scan(&attachment.ID, &attachment.MessageID, &attachment.Kind, &attachment.OriginalName, &attachment.MimeType, &attachment.Size, &attachment.Path, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	attachment.CreatedAt = parseTime(createdAt)
+	return &attachment, nil
 }
 
 func (s *Store) SaveChatSummary(conversationID, summary, summaryMessageID string) error {
@@ -2154,6 +2219,42 @@ func (s *Store) GetUserChatThread(userID, id string) (*ChatThread, error) {
 	}
 	return s.GetChatThread(id)
 }
+
+func (s *Store) AssignUserChatToSpace(userID, conversationID, spaceID string) (*ChatThread, error) {
+	conversationID, spaceID = strings.TrimSpace(conversationID), strings.TrimSpace(spaceID)
+	if _, err := s.GetUserChatThread(userID, conversationID); err != nil {
+		return nil, err
+	}
+	space, err := s.GetUserSpace(userID, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE chat_conversations SET space_id=?, product_id=NULLIF(?,''), updated_at=? WHERE id=? AND (space_id IS NULL OR space_id='')`, space.ID, space.ProductID, time.Now().UTC().Format(time.RFC3339), conversationID)
+	if err != nil {
+		return nil, err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if count != 1 {
+		return nil, errors.New("对话已加入创意空间")
+	}
+	if _, err := tx.Exec(`UPDATE video_generations SET space_id=? WHERE user_id=? AND conversation_id=? AND (space_id IS NULL OR space_id='')`, space.ID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetUserChatThread(userID, conversationID)
+}
 func (s *Store) ListUserCustomSkills(userID string) ([]CustomSkill, error) {
 	items, err := s.ListCustomSkills()
 	if err != nil {
@@ -2236,6 +2337,37 @@ func (s *Store) ListUserVideoGenerations(userID string) ([]VideoGeneration, erro
 		result = append(result, *x)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) ListUserCompletedVideosForSpace(userID, spaceID string) ([]VideoGeneration, error) {
+	if _, err := s.GetUserSpace(userID, spaceID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT id FROM video_generations WHERE user_id=? AND space_id=? AND status='completed' ORDER BY updated_at DESC`, userID, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]VideoGeneration, 0, len(ids))
+	for _, id := range ids {
+		video, err := s.GetUserVideoGeneration(userID, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *video)
+	}
+	return result, nil
 }
 
 func (s *Store) ensureColumn(table, column, columnType string) error {

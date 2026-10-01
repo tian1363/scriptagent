@@ -6,6 +6,28 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:50
+
+- `f214e64` build(deps): bump react-dom from 19.2.8 to 19.3.0 in /web/app (#28)
+
+### 2026-10-01 15:49
+
+- `ff4906e` build(deps): bump actions/checkout from 4 to 7 (#26)
+- `7ebf921` build(deps): bump actions/upload-pages-artifact from 3 to 5 (#27)
+
+### 2026-10-01 15:47
+
+- `0c7c778` build(deps): bump actions/setup-node from 4 to 7 (#24)
+- `0f9d0ad` build(deps): bump actions/deploy-pages from 4 to 5 (#25)
+
+### 2026-10-01 15:21
+
+- `dcbd056` feat: refine creative workflows and toolbox UI
+
+### 2026-09-30 18:26
+
+- `7bc4c9d` feat: publish hook replication skill on website
+
 ### 2026-09-26 13:39
 
 - `6142a5d` build: refresh application and CI dependencies (#23)

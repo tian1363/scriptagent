@@ -488,3 +488,41 @@ func TestUserWithoutSettingsDoesNotFallBackToManagedKey(t *testing.T) {
 		t.Fatalf("user unexpectedly inherited a managed credential: %+v", runtime)
 	}
 }
+
+func TestSpaceAssetCountTracksLinkedProduct(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "assets.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	product, err := store.CreateProduct(CreateProductInput{Title: "果汁", MDPath: "product.md", MDName: "product.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := store.CreateSpace(CreateSpaceInput{Title: "九月", ProductID: product.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateSpace(CreateSpaceInput{Title: "未关联"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"image", "video"} {
+		if _, err := store.CreateProductAsset(ProductAsset{ProductID: product.ID, Kind: kind, Path: "sample", OriginalName: "sample", MimeType: "image/png"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spaces, err := store.ListSpaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, space := range spaces {
+		want := 0
+		if space.ID == linked.ID {
+			want = 2
+		}
+		if space.AssetCount != want {
+			t.Fatalf("space %s asset count = %d, want %d", space.Title, space.AssetCount, want)
+		}
+	}
+}
