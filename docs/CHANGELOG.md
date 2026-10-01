@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:55
+
+- `a5488d6` build(deps): bump vite from 8.2.2 to 8.3.1 in /web/app (#32)
+
 ### 2026-10-01 15:53
 
 - `e11a6c5` build(deps): bump lucide-react from 1.40.0 to 1.48.0 in /web/app (#29)
