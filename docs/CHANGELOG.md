@@ -6,6 +6,11 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:47
+
+- `0c7c778` build(deps): bump actions/setup-node from 4 to 7 (#24)
+- `0f9d0ad` build(deps): bump actions/deploy-pages from 4 to 5 (#25)
+
 ### 2026-10-01 15:21
 
 - `dcbd056` feat: refine creative workflows and toolbox UI
