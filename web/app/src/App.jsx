@@ -1,6 +1,6 @@
 import { chatTimeline } from "./chatTimeline.js";
 import { visibleAssistantContent } from "./assistantContent.js";
-import { parseVideoSkillRequest, prepareVideoDraft } from "./videoSkill.js";
+import { hasVideoScript, parseVideoSkillRequest, prepareVideoDraft, videoReferenceIDs } from "./videoSkill.js";
 import InviteManager from "./InviteManager";
 import EcommerceToolbox from "./EcommerceToolbox";
 import {
@@ -47,10 +47,10 @@ import {
   createJob,
   createChat,
   createVideo,
-  createCreativeReport,
   createProduct,
   parseProductDocument,
   createSpace,
+  assignChatSpace,
   deleteSpace,
   updateSpace,
   createSkill,
@@ -79,10 +79,10 @@ import {
   getChatProgress,
   getJob,
   getProductMarkdown,
-  listCreativeReports,
   listProducts,
   listProductAssets,
   listSpaces,
+  listSpaceVideos,
   uploadProductAsset,
   deleteProductAsset,
   listSkills,
@@ -100,6 +100,27 @@ import {
   sendNewChatMessage,
 } from "./api.js";
 import agentIcon from "./assets/scriptagent-agent-v2.png";
+
+function lastAssistantMessage(messages) {
+  return [...(Array.isArray(messages) ? messages : [])]
+    .reverse()
+    .find((message) => message.role === "assistant");
+}
+
+function typingStep(length) {
+  if (length > 1800) return 8;
+  if (length > 900) return 5;
+  if (length > 360) return 3;
+  return 2;
+}
+
+const chatQuickTasks = [
+  { title: "生成裂变方向", description: "基于当前产品，先给我 3 个适合短视频的裂变方向，并说明每个方向改哪里。" },
+  { title: "写产品 Markdown", description: "帮我把这个产品整理成可用于生成脚本的 Markdown，需要包含卖点、用户、场景、限制和素材备注。" },
+  { title: "优化脚本", description: "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。" },
+  { title: "拆解并复刻素材", description: "调用 material_replication_analysis skill，分析我上传的图片或视频，拆解设计方式、内容表达和视听结构，并给出视频复刻建议。" },
+  { title: "生成视频提示词", description: "调用 seedance_video_prompt_writer skill，把这条分镜脚本转成 Seedance 可用的视频生成提示词。" },
+];
 
 const resultTabs = [
   ["run_log", "运行日志"],
@@ -196,112 +217,18 @@ function defaultFissionDirection(index) {
   return fissionDirections[index % fissionDirections.length]?.value || "";
 }
 
-function hashText(text = "") {
-  return Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+function insertedSkillSlash(event) {
+  const input = event.nativeEvent;
+  if (input?.inputType !== "insertText" || input.data !== "/" || input.isComposing) return -1;
+  const position = event.currentTarget.selectionStart - 1;
+  const before = event.currentTarget.value.slice(0, position);
+  return /(?:https?:\/\/\S*|https?:|www\.\S*)$/i.test(before) ? -1 : position;
 }
 
-function productCoverVariant(product) {
-  return hashText(`${product?.id || ""}${product?.title || ""}`) % 5;
+function replaceSkillSlash(value, position, invocation) {
+  if (position < 0 || value[position] !== "/") return invocation;
+  return [value.slice(0, position).trimEnd(), invocation, value.slice(position + 1).trimStart()].filter(Boolean).join(" ");
 }
-
-function productInitial(title = "") {
-  return title.trim().slice(0, 1).toUpperCase() || "S";
-}
-
-function buildProductStats(products = [], jobs = []) {
-  const result = new Map();
-  const safeProducts = Array.isArray(products) ? products : [];
-  const safeJobs = Array.isArray(jobs) ? jobs : [];
-  safeProducts.forEach((product) => {
-    const matchedJobs = safeJobs.filter(
-      (job) => job.product_md_name === product.md_name,
-    );
-    const usableJobs = matchedJobs.filter((job) => job.status !== "failed");
-    const scriptCount = usableJobs.reduce(
-      (total, job) => total + 1 + Number(job.fission_count || 0),
-      0,
-    );
-    const latestJob = matchedJobs.reduce((latest, job) => {
-      if (!latest) return job;
-      return new Date(job.updated_at).getTime() >
-        new Date(latest.updated_at).getTime()
-        ? job
-        : latest;
-    }, null);
-    result.set(product.id, {
-      taskCount: matchedJobs.length,
-      scriptCount,
-      latestJob,
-      latestAt: latestJob?.updated_at || "",
-    });
-  });
-  return result;
-}
-
-function typingStep(length) {
-  if (length > 1800) return 8;
-  if (length > 900) return 5;
-  if (length > 360) return 3;
-  return 2;
-}
-
-function lastAssistantMessage(messages = []) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].role === "assistant") return messages[index];
-  }
-  return null;
-}
-
-
-function videoParametersFromPrompt(prompt = "") {
-  const ratios = prompt.match(/(?:16:9|9:16|1:1|4:3|3:4)/g);
-  const rangeEnds = [
-    ...prompt.matchAll(/\d+\s*[-–—~至]\s*(\d+)\s*(?:s|秒)/gi),
-  ].map((match) => Number(match[1]));
-  const statedDuration = prompt.match(
-    /(\d+)\s*(?:s|秒)(?:视频|成片|真人|UGC)/i,
-  );
-  const duration = Math.max(
-    2,
-    Math.min(
-      30,
-      rangeEnds.length
-        ? Math.max(...rangeEnds)
-        : Number(statedDuration?.[1] || 5),
-    ),
-  );
-  const cid =
-    prompt.match(/CID\s*:?\s*asset-([a-zA-Z0-9_-]+)/i)?.[1] || "";
-  return { ratio: ratios?.[0] || "9:16", duration, cid };
-}
-
-const chatQuickTasks = [
-  {
-    title: "生成裂变方向",
-    description:
-      "基于当前产品，先给我 3 个适合短视频的裂变方向，并说明每个方向改哪里。",
-  },
-  {
-    title: "写产品 Markdown",
-    description:
-      "帮我把这个产品整理成可用于生成脚本的 Markdown，需要包含卖点、用户、场景、限制和素材备注。",
-  },
-  {
-    title: "优化脚本",
-    description:
-      "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。",
-  },
-  {
-    title: "拆解并复刻素材",
-    description:
-      "调用 material_replication_analysis skill，分析我上传的图片或视频，拆解设计方式、内容表达和视听结构，并给出视频复刻建议。",
-  },
-  {
-    title: "生成视频提示词",
-    description:
-      "调用 seedance_video_prompt_writer skill，把这条分镜脚本转成 Seedance 可用的视频生成提示词。",
-  },
-];
 
 export function App() {
   const [videoSkillRequest, setVideoSkillRequest] = useState(null);
@@ -336,13 +263,7 @@ export function App() {
   const [skills, setSkills] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productPreview, setProductPreview] = useState(null);
-  const [creativeReports, setCreativeReports] = useState([]);
-  const [selectedCreativeReportId, setSelectedCreativeReportId] = useState("");
   const [isLoadingProductPreview, setIsLoadingProductPreview] = useState(false);
-  const [isLoadingCreativeReports, setIsLoadingCreativeReports] =
-    useState(false);
-  const [isCreatingCreativeReport, setIsCreatingCreativeReport] =
-    useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [jobInitialRequirement, setJobInitialRequirement] = useState("");
@@ -737,13 +658,10 @@ export function App() {
   useEffect(() => {
     if (view !== "products" || !selectedProductId) {
       setProductPreview(null);
-      setCreativeReports([]);
-      setSelectedCreativeReportId("");
       return undefined;
     }
     let cancelled = false;
     setIsLoadingProductPreview(true);
-    setIsLoadingCreativeReports(true);
     getProductMarkdown(selectedProductId)
       .then((preview) => {
         if (!cancelled) setProductPreview(preview);
@@ -753,19 +671,6 @@ export function App() {
       })
       .finally(() => {
         if (!cancelled) setIsLoadingProductPreview(false);
-      });
-    listCreativeReports(selectedProductId)
-      .then((reports) => {
-        if (!cancelled) {
-          setCreativeReports(reports);
-          setSelectedCreativeReportId(reports[0]?.id || "");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setCreativeReports([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingCreativeReports(false);
       });
     return () => {
       cancelled = true;
@@ -895,11 +800,14 @@ export function App() {
 
   async function handleSelectChat(id) {
     setError("");
-    setOptimisticChatMessages(null);
-    setTypingMessage(null);
-    setChatCitations([]);
-    setChatAgentSteps([]);
-    setIsChatThinking(false);
+    const returningToRunningChat = isSending && id === selectedChat?.conversation?.id;
+    if (!returningToRunningChat) {
+      setOptimisticChatMessages(null);
+      setTypingMessage(null);
+      setChatCitations([]);
+      setChatAgentSteps([]);
+      setIsChatThinking(false);
+    }
     setChatAttachment(null);
     const thread = await getChat(id);
     setSelectedChat(thread);
@@ -909,6 +817,25 @@ export function App() {
     setChatProductId(
       sourceSpace?.product_id || thread.conversation?.product_id || "",
     );
+  }
+
+  async function handleAssignChatSpace(spaceId) {
+    const space = spaces.find((item) => item.id === spaceId);
+    if (!space) return;
+    setError("");
+    try {
+      if (selectedChat?.conversation?.id) {
+        const thread = await assignChatSpace(selectedChat.conversation.id, space.id);
+        setSelectedChat(thread);
+        await Promise.all([refreshChats(thread.conversation.id), refreshVideos()]);
+      } else {
+        setSelectedChat({ conversation: { space_id: space.id, product_id: space.product_id || "", title: space.title }, messages: [] });
+      }
+      setChatProductId(space.product_id || "");
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
   }
 
   function handleNewChat() {
@@ -955,6 +882,7 @@ export function App() {
       id: `temp-user-${Date.now()}`,
       role: "user",
       content: displayContent,
+      attachments: attachment ? [{ id: "", kind: attachment.type.startsWith("video/") ? "video" : "image", original_name: attachment.name, file: attachment }] : [],
       created_at: new Date().toISOString(),
     };
     const continuingCurrentChat = Boolean(
@@ -1034,11 +962,18 @@ export function App() {
     );
   }
 
-  async function handleStartAgentChat(productID, goal) {
+  async function handleStartAgentChat(productID, goal, attachment = null) {
     setView("chat");
     setSelectedChat(null);
     setChatProductId(productID || "");
-    await sendChatToAgent(goal, productID || "");
+    await sendChatToAgent(goal, productID || "", "", attachment);
+  }
+
+  function handleStartVideoSkill(productID, prompt) {
+    setSelectedChat(null);
+    setChatProductId(productID || "");
+    setVideoSkillRequest({ prompt: prompt.trim() });
+    setView("chat");
   }
 
   async function handleStartSpaceAgent(space) {
@@ -1114,49 +1049,11 @@ export function App() {
   const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
   const selectedCall =
     modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
-  const productStats = useMemo(
-    () => buildProductStats(products, jobs),
-    [products, jobs],
-  );
-
   function handleStartProductJob(productId, requirement = "", spaceId = "") {
     setSelectedProductId(productId);
     setJobInitialRequirement(requirement);
     window.sessionStorage.setItem("scriptagent:space-id", spaceId);
     setView("jobs");
-  }
-
-  async function handleCreateCreativeReport(event) {
-    event.preventDefault();
-    const selectedProduct = products.find(
-      (product) => product.id === selectedProductId,
-    );
-    if (!selectedProduct) return;
-    const form = new FormData(event.currentTarget);
-    setError("");
-    setIsCreatingCreativeReport(true);
-    try {
-      const report = await createCreativeReport(selectedProduct.id, {
-        source_type: "dataeye",
-        dataeye_url: form.get("dataeye_url") || "",
-        dataeye_id: form.get("dataeye_id") || "",
-        product_name: form.get("product_name") || selectedProduct.title,
-        date_range: form.get("date_range") || "近 30 天",
-        media: form.get("media") || "",
-        country: form.get("country") || "",
-        sort_metric: form.get("sort_metric") || "热度/曝光/播放优先",
-        sample_count: Number(form.get("sample_count") || 50),
-        requirement: form.get("requirement") || "",
-        material_note: form.get("material_note") || "",
-      });
-      const reports = await listCreativeReports(selectedProduct.id);
-      setCreativeReports(reports);
-      setSelectedCreativeReportId(report.id);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsCreatingCreativeReport(false);
-    }
   }
 
   async function handleUpdateProduct(id, title, content) {
@@ -1220,18 +1117,6 @@ export function App() {
     }
   }
 
-  function handleReportToJob(report) {
-    if (!report) return;
-    const requirement = [
-      "基于产品创意策略报告生成裂变脚本。",
-      report.report_summary ? `报告摘要：${report.report_summary}` : "",
-      "优先沿用报告中的创意方向、钩子、卖点呈现和验收指标；每条裂变脚本仍只能选择 1 个裂变元素。",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    handleStartProductJob(report.product_id, requirement);
-  }
-
   function handleCreateIntelligenceTask(space, signal) {
     setError("");
     setView("chat");
@@ -1290,7 +1175,7 @@ export function App() {
         />
       ) : null}
       <AppSidebar
-        recentItems={[...chats.map(item => ({...item, kind: "chat"})), ...jobs.map(item => ({...item, kind: "job"}))].sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)).slice(0,5)}
+        recentItems={[...chats.map(item => ({...item, kind: "chat"})), ...jobs.map(item => ({...item, kind: "job"}))].sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))}
         onRecent={item => (item.kind === "chat" ? handleSelectChat(item.id).then(() => setView("chat")) : handleSelectJob(item.id).then(() => setView("jobs"))).catch(err => setError(err.message))}
         view={view}
         onChange={setView}
@@ -1338,13 +1223,14 @@ export function App() {
             {view === "home" ? (
               <AgentStart
                 products={products}
-                jobs={jobs}
+                skills={skills}
                 spaces={spaces}
                 suggestions={suggestions}
                 isSending={isSending}
                 onSend={handleStartAgentChat}
+                onVideoSkill={handleStartVideoSkill}
+                onCreateSkill={handleSaveSkill}
                 onSpaces={() => setView("spaces")}
-                onHistory={() => setView("history")}
                 onSuggestion={handleSuggestion}
               />
             ) : null}
@@ -1366,7 +1252,8 @@ export function App() {
                 onDirections={() => setView("intelligence")}
                 spaces={spaces}
                 products={products}
-                jobs={jobs}
+                videos={videos}
+                onConversation={handleOpenVideoHistory}
                 suggestions={suggestions}
                 isCreating={isCreatingSpace}
                 isSending={isSending}
@@ -1407,25 +1294,12 @@ export function App() {
                 products={products}
                 selectedProductId={selectedProductId}
                 productPreview={productPreview}
-                creativeReports={creativeReports}
-                selectedCreativeReportId={selectedCreativeReportId}
                 isLoadingProductPreview={isLoadingProductPreview}
-                isLoadingCreativeReports={isLoadingCreativeReports}
-                isCreatingCreativeReport={isCreatingCreativeReport}
                 isCreatingProduct={isCreatingProduct}
                 isSavingProduct={isSavingProduct}
                 error={error}
                 onSelect={setSelectedProductId}
-                onReportSelect={setSelectedCreativeReportId}
                 onStartJob={handleStartProductJob}
-                onCreateCreativeReport={handleCreateCreativeReport}
-                onReportToJob={handleReportToJob}
-                onContinueAnalysis={(productId) => {
-                  handleNewChat();
-                  setChatProductId(productId || "");
-                  setChatDraft("继续分析这份产品资料，找出可用于短视频创作的新角度。");
-                  setView("chat");
-                }}
                 onCreate={handleCreateProduct}
                 onUpdate={handleUpdateProduct}
               />
@@ -1453,11 +1327,14 @@ export function App() {
                 sourceSpace={spaces.find(
                   (space) => space.id === selectedChat?.conversation?.space_id,
                 )}
+                spaces={spaces}
+                onAssignSpace={handleAssignChatSpace}
                 historyCollapsed={isChatHistoryCollapsed}
                 onHistoryToggle={() => setIsChatHistoryCollapsed(false)}
                 onEditSpace={() => setView("spaces")}
                 onCreateSkill={handleSaveSkill}
                 onCreateVideo={handleCreateVideo}
+                videoModel={modelSettings?.profiles?.find((profile) => profile.capability === "video_generation")?.model || "wan3.0-video-prime"}
                 onRetryVideo={handleRetryVideo}
                 videoSkillRequest={videoSkillRequest}
                 onVideoSkillHandled={() => setVideoSkillRequest(null)}
@@ -1543,7 +1420,7 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
           </h1>
           <p>
             {mode === "register"
-              ? "首个管理员可直接创建；其他用户需要邀请码。"
+              ? "全新实例的首个账号可直接创建；后续账号需要邀请码。"
               : "登录后继续使用你的创意空间和产品资料。"}
           </p>
         </div>
@@ -1633,7 +1510,7 @@ function AuthGate({ error, registrationAvailable, onSubmit }) {
           </button>
         </form>
         <p className="auth-note">
-          每个账号拥有独立的产品资料、创作空间、对话与模型配置。
+          每个账号拥有独立的产品资料、创意空间、对话与模型配置。
         </p>
       </section>
     </main>
@@ -1691,8 +1568,12 @@ function AppSidebar({
       <details className="sidebar-recents" open={!collapsed}>
         <summary title="最近创作"><History size={17}/><span>最近创作</span></summary>
         <div className="sidebar-recent-list">
-          {!collapsed && recentItems.map(item => <button type="button" key={`${item.kind}-${item.id}`} title={item.title || "未命名创作"} onClick={() => onRecent(item)}>{item.title || "未命名创作"}</button>)}
-          <button type="button" onClick={() => onChange("history")} title="查看全部历史">查看全部</button>
+          <div className="sidebar-recent-items">
+            {!collapsed && (recentItems.length ? recentItems.map(item => <button type="button" key={`${item.kind}-${item.id}`} title={item.title || "未命名创作"} onClick={() => onRecent(item)}>{item.title || "未命名创作"}</button>) : <span className="sidebar-recent-empty">暂无最近创作</span>)}
+          </div>
+          <button className="sidebar-recent-all" type="button" onClick={() => onChange("history")} aria-label="查看全部历史">
+            <span>查看全部</span><ChevronRight size={15} aria-hidden="true" />
+          </button>
         </div>
       </details>
       <div className="sidebar-bottom">
@@ -2072,6 +1953,19 @@ function JobsWorkspace(props) {
   );
 }
 
+function useDismissDetailsOnOutsidePointer() {
+  const detailsRef = useRef(null);
+  useEffect(() => {
+    function dismiss(event) {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target)) details.open = false;
+    }
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
+  }, []);
+  return detailsRef;
+}
+
 function ChatWorkspace({
   thread,
   optimisticMessages,
@@ -2084,6 +1978,8 @@ function ChatWorkspace({
   skills,
   selectedProductId,
   sourceSpace,
+  spaces,
+  onAssignSpace,
   historyCollapsed,
   isSending,
   error,
@@ -2095,6 +1991,7 @@ function ChatWorkspace({
   onProduct,
   onCreateSkill,
   onCreateVideo,
+  videoModel,
   onRetryVideo,
   onHistoryToggle,
   onEditSpace,
@@ -2104,20 +2001,22 @@ function ChatWorkspace({
 }) {
   const messages = optimisticMessages || thread?.messages || [];
   const messagesRef = useRef(null);
+  const productConnectorRef = useDismissDetailsOnOutsidePointer();
   const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const skillSlashRef = useRef(-1);
   const [showVideoComposer, setShowVideoComposer] = useState(false);
+  const [spaceChoice, setSpaceChoice] = useState("");
+  const [assigningSpace, setAssigningSpace] = useState(false);
   const [videoPrompt, setVideoPrompt] = useState("");
   useEffect(() => { setShowVideoComposer(false); }, [thread?.conversation?.id]);
   const latestVideoAnswer = visibleAssistantContent(lastAssistantMessage(messages)?.content || "");
-  useEffect(() => {
-    if (!isThinking && !typingMessage && /视频生成提示词|视频提示词/.test(latestVideoAnswer) && prepareVideoDraft(latestVideoAnswer).prompt) {
-      setVideoPrompt(latestVideoAnswer);
-      setShowVideoComposer(true);
-    }
-  }, [latestVideoAnswer, isThinking, typingMessage, thread?.conversation?.id]);
-  function openVideoSkill() {
-    const request = parseVideoSkillRequest(draft);
-    setVideoPrompt(request ? request.prompt || visibleAssistantContent(lastAssistantMessage(messages)?.content || "") : draft.trim() || visibleAssistantContent(lastAssistantMessage(messages)?.content || ""));
+  const latestScriptAnswer = [...messages].reverse().find((message) =>
+    message.role === "assistant" && hasVideoScript(visibleAssistantContent(message.content || "")),
+  );
+  function openVideoSkill(sourceDraft = draft) {
+    const request = parseVideoSkillRequest(sourceDraft);
+    const script = visibleAssistantContent(latestScriptAnswer?.content || "");
+    setVideoPrompt(request ? request.prompt || script || latestVideoAnswer : sourceDraft.trim() || script || latestVideoAnswer);
     setShowSkillMenu(false); setShowVideoComposer(true);
   }
   useEffect(() => {
@@ -2235,13 +2134,23 @@ function ChatWorkspace({
   ]);
 
   function handleSkill(skill) {
-    if (skill.name === "generate-video") { openVideoSkill(); return; }
-    onDraft(skill.invocation_prompt || `调用 ${skill.name} skill。`);
+    const position = skillSlashRef.current;
+    skillSlashRef.current = -1;
+    if (skill.name === "generate-video") {
+      const cleanedDraft = position >= 0 && draft[position] === "/" ? replaceSkillSlash(draft, position, "").trim() : draft;
+      if (cleanedDraft !== draft) onDraft(cleanedDraft);
+      openVideoSkill(cleanedDraft); return;
+    }
+    onDraft(replaceSkillSlash(draft, position, skill.invocation_prompt || `调用 ${skill.name} skill。`));
     setShowSkillMenu(false);
   }
 
   return (
     <section className="chat-pane chat-pane-inline-context">
+      <div className="chat-space-bar">
+        <div className="chat-space-identity"><FolderKanban size={17} /><div><strong>{sourceSpace ? `创意空间 · ${sourceSpace.title}` : "未加入创意空间"}</strong><small>{sourceSpace ? `${marketingLabel(marketingGoals, sourceSpace.marketing_goal)} · ${marketingLabel(marketingStages, sourceSpace.goal_stage)}${sourceSpace.summary ? ` · ${sourceSpace.summary}` : ""}` : "加入空间后，后续对话会带入该空间的创作目的和长期要求"}</small></div></div>
+        {!sourceSpace && spaces.length ? <div className="chat-space-assign"><select aria-label="选择要加入的创意空间" value={spaceChoice} disabled={assigningSpace || isSending} onChange={(event) => setSpaceChoice(event.target.value)}><option value="">选择创意空间</option>{spaces.map((space) => <option key={space.id} value={space.id}>{space.title}</option>)}</select><button className="secondary-button" type="button" disabled={!spaceChoice || assigningSpace || isSending} onClick={async () => { setAssigningSpace(true); try { await onAssignSpace(spaceChoice); setSpaceChoice(""); } catch {} finally { setAssigningSpace(false); } }}>{assigningSpace ? "加入中" : "加入空间"}</button></div> : null}
+      </div>
       <div className="chat-messages" ref={messagesRef}>
         {messages.length ||
         conversationVideos.length ||
@@ -2287,7 +2196,7 @@ function ChatWorkspace({
         ) : (
           <ChatTaskStarter onSelect={onDraft} />
         )}
-        {showVideoComposer && <VideoComposerPanel key={videoPrompt} inline productId={selectedProductId} conversationId={conversationId} spaceId={sourceSpace?.id || thread?.conversation?.space_id || ""} draft={videoPrompt} onCreate={onCreateVideo} isCreating={isCreatingVideo} error={error} onClose={() => setShowVideoComposer(false)} />}
+        {showVideoComposer && <VideoComposerPanel key={videoPrompt} inline productId={selectedProductId} conversationId={conversationId} spaceId={sourceSpace?.id || thread?.conversation?.space_id || ""} draft={videoPrompt} model={videoModel} onCreate={onCreateVideo} isCreating={isCreatingVideo} error={error} onClose={() => setShowVideoComposer(false)} />}
       </div>
       <form className="chat-form" onSubmit={onSend}>
         {error ? <div className="error-banner">{error}</div> : null}
@@ -2307,7 +2216,11 @@ function ChatWorkspace({
         ) : null}
         <textarea
           value={draft}
-          onChange={(event) => onDraft(event.target.value)}
+          onChange={(event) => {
+            onDraft(event.target.value);
+            const position = insertedSkillSlash(event);
+            if (position >= 0) { skillSlashRef.current = position; setShowSkillMenu(true); }
+          }}
           rows="3"
           placeholder="发消息或创建任务… / 使用技能，添加素材"
         />
@@ -2345,7 +2258,7 @@ function ChatWorkspace({
             </label>
             </div>
             <div className="composer-assist-group" role="group" aria-label="创作辅助">
-            <details className="product-connector" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+            <details ref={productConnectorRef} className="product-connector" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
               <summary className={`composer-tool ${selectedProductId || sourceSpace ? "active" : ""}`} aria-label="产品连接器" title={sourceSpace ? `创意空间：${sourceSpace.title}` : selectedProductId ? `已连接：${products.find(product => product.id === selectedProductId)?.title || "产品资料"}` : "连接产品资料"}>
                 <Package size={18} />
                 {(selectedProductId || sourceSpace) && <span className="product-connector-dot" />}
@@ -2370,7 +2283,7 @@ function ChatWorkspace({
               className={`composer-tool ${showSkillMenu ? "active" : ""}`}
               type="button"
               aria-expanded={showSkillMenu}
-              onClick={() => setShowSkillMenu((value) => !value)}
+              onClick={() => { skillSlashRef.current = -1; setShowSkillMenu((value) => !value); }}
             >
               <Sparkles size={16} />
               <span>技能</span>
@@ -2498,6 +2411,7 @@ function VideoComposerPanel({
   conversationId,
   spaceId,
   draft,
+  model,
   onCreate,
   isCreating,
   error,
@@ -2506,7 +2420,7 @@ function VideoComposerPanel({
   const modalRef = useRef(null);
   useEffect(() => { if (!inline) modalRef.current?.showModal(); }, [inline]);
   const [prepared] = useState(() => prepareVideoDraft(draft || ""));
-  const [editing, setEditing] = useState(!inline);
+  const [editing, setEditing] = useState(!inline || !prepared.prompt || (hasVideoScript(draft) && !/(?:^|\n)\s*(?:#{1,6}\s*)?视频生成提示词\s*[:：\n]/.test(draft)));
   const [mode, setMode] = useState("text");
   const [assets, setAssets] = useState([]);
   const [sourceAssetIds, setSourceAssetIds] = useState([]);
@@ -2527,14 +2441,21 @@ function VideoComposerPanel({
     listProductAssets(productId)
       .then((items) => {
         if (!active) return;
-        setAssets(
-          (Array.isArray(items) ? items : []).filter(
+        const available = (Array.isArray(items) ? items : []).filter(
             (item) =>
               item.kind === "image" ||
               (item.kind === "video" &&
                 /\.(mp4|mov)$/i.test(item.original_name)),
-          ),
-        );
+          );
+        setAssets(available);
+        const referenced = videoReferenceIDs(draft).map((id) => available.find((asset) => asset.id === id)).filter(Boolean);
+        const images = referenced.filter((asset) => asset.kind === "image").slice(0, 10);
+        const videos = referenced.filter((asset) => asset.kind === "video").slice(0, 5);
+        const chosen = images.length ? images : videos;
+        if (chosen.length) {
+          setMode(chosen[0].kind);
+          setSourceAssetIds(chosen.map((asset) => asset.id));
+        }
       })
       .catch(() => {
         if (active) setAssets([]);
@@ -2568,7 +2489,7 @@ function VideoComposerPanel({
       prompt: referencedPrompt,
       negative_prompt:
         "广告感过强，棚拍感，过度磨皮，文字乱码，水印，品牌标识变形，产品外观不一致",
-      model: "wan3.0-video-prime",
+      model,
       resolution,
       ratio,
       duration: Number(duration),
@@ -2982,13 +2903,17 @@ function ChatTaskStarter({ onSelect }) {
 }
 
 function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
-  const menuRef = useRef(null);
+  const searchRef = useRef(null);
+  const mobilePickerRef = useRef(null);
   useEffect(() => {
-    const outside = event => { if (menuRef.current && !menuRef.current.contains(event.target) && !event.target.closest('.composer-assist-group')) onClose(); };
+    const previousFocus = document.activeElement;
+    (window.matchMedia("(max-width: 760px)").matches ? mobilePickerRef : searchRef).current?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, []);
+  useEffect(() => {
     const escape = event => { if (event.key === 'Escape') onClose(); };
-    document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+    return () => { document.removeEventListener('keydown', escape); };
   }, [onClose]);
   const [selectedSkill, setSelectedSkill] = useState(skills[0] || null);
   const [skillQuery, setSkillQuery] = useState("");
@@ -3080,15 +3005,16 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
     setIsCreating(true);
   }
 
-  return (
-    <section ref={menuRef} className="skill-command-menu skill-command-compact" aria-label="技能浏览">
+  return createPortal(
+    <div className="skill-command-overlay" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="skill-command-menu skill-command-compact" role="dialog" aria-modal="true" aria-label="技能浏览">
       <div className="skill-browser-toolbar">
-        <label className="skill-mobile-picker">切换技能<select value={selectedSkill?.name || ""} onChange={e => {setSelectedSkill(skills.find(s => s.name === e.target.value));setIsCreating(false);}}>{skills.map(s => <option key={s.name} value={s.name}>{s.title}</option>)}</select></label>
+        <label className="skill-mobile-picker">切换技能<select ref={mobilePickerRef} value={selectedSkill?.name || ""} onChange={e => {setSelectedSkill(skills.find(s => s.name === e.target.value));setIsCreating(false);}}>{skills.map(s => <option key={s.name} value={s.name}>{s.title}</option>)}</select></label>
         <button type="button" onClick={startCreate}>新建</button><button type="button" onClick={onClose}>关闭</button>
       </div>
       <div className="skill-command-body">
         <aside className="skill-navigation" id="skill-navigation" aria-label="技能目录">
-          <label className="skill-search"><Search size={15}/><input aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={e => setSkillQuery(e.target.value)}/></label>
+          <label className="skill-search"><Search size={15}/><input ref={searchRef} aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={e => setSkillQuery(e.target.value)}/></label>
         <div className="skill-command-list">
           {visibleSkills.map((skill) => (
             <button
@@ -3280,6 +3206,8 @@ function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
         )}
       </div>
     </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -3346,15 +3274,50 @@ function CitationPanel({ citations }) {
 
 function ChatMessageBubble({ message, isTyping = false }) {
   const content = displayChatMessageContent(message);
+  const attachments = message.attachments || [];
+  const visibleText = message.role === "user" && attachments.length ? content.replace(/\n\n附件：[\s\S]*$/, "").trim() : content;
   return (
     <div className={`chat-message ${message.role} ${isTyping ? "typing" : ""}`}>
       <span>{message.role === "assistant" ? "助手" : "用户"}</span>
-      <p>
-        {content}
+      {(visibleText || isTyping) && <p>
+        {visibleText}
         {isTyping ? <b className="typing-cursor" /> : null}
-      </p>
+      </p>}
+      {attachments.map((item, index) => <ChatAttachmentCard key={item.id || `local-${index}`} attachment={item} conversationId={message.conversation_id} />)}
     </div>
   );
+}
+
+function ChatAttachmentCard({ attachment, conversationId }) {
+  const [localURL, setLocalURL] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    if (!attachment.file) return undefined;
+    const url = URL.createObjectURL(attachment.file);
+    setLocalURL(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment.file]);
+  useEffect(() => {
+    if (previewOpen) dialogRef.current?.showModal();
+  }, [previewOpen]);
+  const base = attachment.id && conversationId ? `/api/chats/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachment.id)}` : "";
+  const mediaURL = localURL || (base ? `${base}/file` : "");
+  const posterURL = base ? `${base}/poster` : "";
+  const isVideo = attachment.kind === "video";
+  return <>
+    <button className="chat-attachment-card" type="button" disabled={!mediaURL} onClick={() => setPreviewOpen(true)} aria-label={`预览${isVideo ? "视频" : "图片"} ${attachment.original_name}`}>
+      <span className="chat-attachment-cover">
+        {mediaURL ? isVideo ? <video src={mediaURL} poster={posterURL || undefined} preload="metadata" muted playsInline aria-hidden="true" /> : <img src={mediaURL} alt="" /> : <Video size={22} />}
+        {isVideo && <span className="chat-attachment-play"><Play size={20} fill="currentColor" /></span>}
+      </span>
+      <span className="chat-attachment-name">{attachment.original_name}</span>
+    </button>
+    {previewOpen && createPortal(<dialog ref={dialogRef} className="chat-attachment-dialog" onCancel={() => setPreviewOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }} aria-label={`预览 ${attachment.original_name}`}>
+      <header><strong>{attachment.original_name}</strong><button type="button" onClick={() => setPreviewOpen(false)} aria-label="关闭预览"><X size={18} /></button></header>
+      <div className="chat-attachment-stage">{isVideo ? <video src={mediaURL} controls autoPlay playsInline /> : <img src={mediaURL} alt={attachment.original_name} />}</div>
+    </dialog>, document.body)}
+  </>;
 }
 
 function displayChatMessageContent(message) {
@@ -3452,38 +3415,117 @@ function FissionDirectionPicker({ count }) {
   );
 }
 
+const homeIdeaPrompts = [
+  "为我的产品设计 3 个短视频开场钩子",
+  "分析一条参考视频，提炼可复用的创意结构",
+  "基于现有素材，规划一周的小红书内容",
+];
+
 function AgentStart({
   products,
-  jobs,
+  skills,
   spaces,
   suggestions,
   isSending,
   onSend,
+  onVideoSkill,
+  onCreateSkill,
   onSpaces,
-  onHistory,
   onSuggestion,
 }) {
   const [goal, setGoal] = useState("");
+  const [activeIdeaIndex, setActiveIdeaIndex] = useState(0);
   const [productID, setProductID] = useState(products[0]?.id || "");
-  const safeJobs = Array.isArray(jobs) ? jobs : [];
+  const [attachment, setAttachment] = useState(null);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const skillSlashRef = useRef(-1);
+  const composerRef = useRef(null);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const recognitionRef = useRef(null);
+  const productConnectorRef = useDismissDetailsOnOutsidePointer();
+  const speechRecognition = typeof window !== "undefined" ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+  useEffect(() => () => recognitionRef.current?.abort(), []);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setActiveIdeaIndex((index) => (index + 1) % homeIdeaPrompts.length);
+    }, 5500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  function toggleVoiceInput() {
+    if (recognitionRef.current) { recognitionRef.current.stop(); return; }
+    if (!speechRecognition) { setVoiceError("当前浏览器不支持语音输入，请使用支持语音识别的浏览器。"); return; }
+    const recognition = new speechRecognition();
+    const base = goal.trimEnd();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = () => { setIsListening(true); setVoiceError(""); };
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0].transcript;
+      setGoal(`${base}${base && transcript ? " " : ""}${transcript}`);
+    };
+    recognition.onerror = () => { setVoiceError("语音识别失败，请检查麦克风权限后重试。"); setIsListening(false); };
+    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
+    recognitionRef.current = recognition;
+    try { recognition.start(); } catch { recognitionRef.current = null; setVoiceError("语音识别未能启动，请重试。"); }
+  }
+
+  function handleSkill(skill) {
+    setShowSkillMenu(false);
+    const position = skillSlashRef.current;
+    skillSlashRef.current = -1;
+    if (skill.name === "generate-video") {
+      onVideoSkill(productID, position >= 0 && goal[position] === "/" ? replaceSkillSlash(goal, position, "").trim() : goal);
+      return;
+    }
+    setGoal(replaceSkillSlash(goal, position, skill.invocation_prompt || `调用 ${skill.name} skill。`));
+    composerRef.current?.querySelector("textarea")?.focus();
+  }
   const safeSpaces = Array.isArray(spaces) ? spaces : [];
-  const active = safeJobs.filter((job) => runningStatuses.has(job.status));
+  const featuredSkills = [...(skills || [])].sort((a, b) => Number(b.source === "custom") - Number(a.source === "custom")).slice(0, 4);
   return (
     <section className="agent-start">
       <div className="agent-intro">
         <span className="eyebrow">ScriptAgent <small className="product-beta">Beta</small></span>
         <h1>今天想完成什么？</h1>
         <p>说出目标，助手会读取资料、规划步骤并执行。</p>
+        <button className="home-idea" type="button" onClick={() => { setGoal(homeIdeaPrompts[activeIdeaIndex]); composerRef.current?.querySelector("textarea")?.focus(); }}>
+          <span className="home-idea-icon"><Sparkles size={15} /></span>
+          <span className="home-idea-label">试试这样开始</span>
+          <span className="home-idea-text" key={activeIdeaIndex}>{homeIdeaPrompts[activeIdeaIndex]}</span>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>
       </div>
-      <form className="chat-form home-chat-form" onSubmit={event => { event.preventDefault(); if (goal.trim() && !isSending) onSend(productID, goal); }}>
+      <form ref={composerRef} className="chat-form home-chat-form" onSubmit={event => { event.preventDefault(); if ((goal.trim() || attachment) && !isSending) onSend(productID, goal, attachment); }}>
+        {showSkillMenu ? <SkillCommandMenu skills={skills || []} onSelect={handleSkill} onCreate={onCreateSkill} onClose={() => setShowSkillMenu(false)} /> : null}
+        {attachment ? <AttachmentPreview attachment={attachment} onRemove={() => setAttachment(null)} /> : null}
         <textarea
           rows="3"
           value={goal}
-          onChange={(event) => setGoal(event.target.value)}
-          placeholder="例如：为夏季活动生成 8 条短视频脚本，优先测试前三秒钩子"
+          onChange={(event) => {
+            setGoal(event.target.value);
+            const position = insertedSkillSlash(event);
+            if (position >= 0) { skillSlashRef.current = position; setShowSkillMenu(true); }
+          }}
+          placeholder="发消息或创建任务… / 使用技能，添加素材"
         />
         <div className="chat-composer-toolbar">
-          <details className="product-connector" onKeyDown={event => { if (event.key === "Escape") {event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus();} }}>
+          <div className="composer-tools">
+            <div className="composer-input-group" role="group" aria-label="输入与素材">
+              <button className={`composer-tool voice-input ${isListening ? "active listening" : ""}`} type="button" onClick={toggleVoiceInput} aria-label={isListening ? "停止语音输入" : "开始语音输入"} aria-pressed={isListening}>
+                {isListening ? <MicOff size={16} /> : <Mic size={16} />}<span>{isListening ? "正在听…" : "语音"}</span>
+              </button>
+              <label className={`composer-tool composer-connector ${attachment ? "active" : ""}`} title="添加图片或视频素材" role="button" tabIndex={0} aria-label="添加图片或视频素材" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector("input")?.click(); } }}>
+                <Upload size={15} /><span>{attachment ? "已添加素材" : "素材"}</span>
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={event => setAttachment(event.target.files?.[0] || null)} />
+              </label>
+            </div>
+            <div className="composer-assist-group" role="group" aria-label="创作辅助">
+          <details ref={productConnectorRef} className="product-connector" onKeyDown={event => { if (event.key === "Escape") {event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus();} }}>
             <summary className={`composer-tool ${productID ? "active" : ""}`} aria-label="产品连接器" title={products.find(product => product.id === productID)?.title || "连接产品资料"}><Package size={18}/>{productID && <span className="product-connector-dot"/>}</summary>
             <div className="product-connector-popover"><strong>连接产品资料</strong><label>产品库<select
             value={productID}
@@ -3496,15 +3538,22 @@ function AgentStart({
               </option>
             ))}
           </select></label></div></details>
+              <button className={`composer-tool ${showSkillMenu ? "active" : ""}`} type="button" aria-expanded={showSkillMenu} onClick={() => { skillSlashRef.current = -1; setShowSkillMenu(value => !value); }}><Sparkles size={16} /><span>技能</span><ChevronRight size={14} /></button>
+            </div>
+          </div>
+          <div className="composer-output-group" role="group" aria-label="生成与发送">
+            <button className="composer-tool composer-video-tool" type="button" onClick={() => onVideoSkill(productID, goal)}><Video size={16} /><span>生成视频</span><ChevronRight size={14} /></button>
           <button
             className="composer-send"
             type="submit"
             aria-label={isSending ? "发送中" : "发送"}
-            disabled={!goal.trim() || isSending}
+            disabled={(!goal.trim() && !attachment) || isSending}
           >
             {isSending ? <Loader2 className="spin" size={18}/> : <Send size={18}/>}
           </button>
+          </div>
         </div>
+        {voiceError ? <p className="voice-input-message">{voiceError}</p> : null}
       </form>
       {suggestions?.length ? (
         <section className="proactive-panel">
@@ -3543,50 +3592,47 @@ function AgentStart({
         </section>
       ) : null}
       <div className="agent-start-grid">
-        <section>
-          <h2>正在进行</h2>
-          {active.length ? (
-            active.map((job) => (
-              <button
-                className="agent-list-row"
-                key={job.id}
-                onClick={onHistory}
-              >
-                <span className="task-state-dot running" />
-                <strong>{job.title}</strong>
-                <small>{statusLabel(job.status)}</small>
-              </button>
-            ))
-          ) : (
-            <p>当前没有执行中的任务。</p>
-          )}
+        <section className="home-skills">
+          <div className="section-heading">
+            <span>我的 Skill</span>
+            <button className="home-skills-all" type="button" onClick={() => { skillSlashRef.current = -1; setShowSkillMenu(true); composerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }}>查看全部 <ChevronRight size={14} /></button>
+          </div>
+          {featuredSkills.length ? <div className="home-skill-grid">{featuredSkills.map((skill) => {
+            const description = skill.description?.trim();
+            const detail = description && description !== skill.title?.trim() ? description : skill.category || "点击使用";
+            return <button className="home-skill-row" type="button" key={skill.id || skill.name} onClick={() => handleSkill(skill)}>
+              <span><strong>{skill.title}</strong><small>{detail}</small></span>
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>;
+          })}</div> : <p className="home-skills-empty">暂无 Skill。点击“查看全部”创建一个。</p>}
         </section>
-        <section>
+        <section className="home-recent-spaces">
           <div className="section-heading">
             <span>最近空间</span>
             <button className="mini-button" type="button" onClick={onSpaces}>
               查看全部
             </button>
           </div>
-          {safeSpaces.length ? (
-            safeSpaces.slice(0, 3).map((space) => (
-              <button
-                className="agent-list-row"
-                key={space.id}
-                onClick={onSpaces}
-              >
-                <FolderKanban size={16} />
-                <strong>{space.title}</strong>
-                <small>{space.summary || "继续创作"}</small>
+          <div className="home-recent-grid">
+            {safeSpaces.length ? (
+              safeSpaces.slice(0, 3).map((space) => (
+                <button className="home-recent-card" type="button" key={space.id} onClick={onSpaces}>
+                  <span className="home-recent-card-icon"><FolderKanban size={18} /></span>
+                  <span className="home-recent-card-copy">
+                    <strong>{space.title}</strong>
+                    <small>{space.summary || "继续创作"}</small>
+                  </span>
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              ))
+            ) : (
+              <button className="home-recent-card" type="button" onClick={onSpaces}>
+                <span className="home-recent-card-icon"><FolderKanban size={18} /></span>
+                <span className="home-recent-card-copy"><strong>创建第一个空间</strong><small>把目标和历史放在一起</small></span>
+                <ChevronRight size={16} aria-hidden="true" />
               </button>
-            ))
-          ) : (
-            <button className="agent-list-row" onClick={onSpaces}>
-              <FolderKanban size={16} />
-              <strong>创建第一个空间</strong>
-              <small>把目标和历史放在一起</small>
-            </button>
-          )}
+            )}
+          </div>
         </section>
       </div>
     </section>
@@ -3778,7 +3824,8 @@ function SpacesWorkspace({
   onDirections,
   spaces,
   products,
-  jobs,
+  videos,
+  onConversation,
   suggestions,
   isCreating,
   isSending,
@@ -3790,12 +3837,79 @@ function SpacesWorkspace({
   onSuggestion,
 }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedSpaceId, setSelectedSpaceId] = useState("");
+  const [spaceVideos, setSpaceVideos] = useState([]);
+  const [selectedVideoId, setSelectedVideoId] = useState("");
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState("");
+  const [productAssets, setProductAssets] = useState([]);
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetsError, setAssetsError] = useState("");
+  const selectedSpace = spaces.find((space) => space.id === selectedSpaceId);
+  const selectedVideo = spaceVideos.find((video) => video.id === selectedVideoId);
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - (weekStart.getDay() + 6) % 7);
+  const weeklyMaterialCounts = (Array.isArray(videos) ? videos : []).reduce((counts, video) => {
+    if (video.status === "completed" && video.space_id) {
+      const completedAt = new Date(video.updated_at || video.created_at);
+      if (completedAt >= weekStart) counts[video.space_id] = (counts[video.space_id] || 0) + 1;
+    }
+    return counts;
+  }, {});
+  useEffect(() => {
+    if (!selectedSpace) return;
+    let active = true;
+    setVideosLoading(true);
+    setVideosError("");
+    setSpaceVideos([]);
+    setSelectedVideoId("");
+    listSpaceVideos(selectedSpace.id)
+      .then((items) => { if (active) setSpaceVideos(Array.isArray(items) ? items : []); })
+      .catch((err) => { if (active) setVideosError(err.message); })
+      .finally(() => { if (active) setVideosLoading(false); });
+    return () => { active = false; };
+  }, [selectedSpace?.id]);
+  useEffect(() => {
+    setProductAssets([]);
+    setAssetsError("");
+    if (!selectedSpace?.product_id) {
+      setAssetsLoading(false);
+      return;
+    }
+    let active = true;
+    setAssetsLoading(true);
+    listProductAssets(selectedSpace.product_id)
+      .then((items) => { if (active) setProductAssets(Array.isArray(items) ? items : []); })
+      .catch((err) => { if (active) setAssetsError(err.message); })
+      .finally(() => { if (active) setAssetsLoading(false); });
+    return () => { active = false; };
+  }, [selectedSpace?.product_id, selectedSpace?.id]);
   async function submit(event) {
     const created = await onCreate(event);
     if (created) setShowCreate(false);
   }
   return (
     <section className="spaces-workspace">
+      {selectedSpace ? <>
+        <button className="space-detail-back" type="button" onClick={() => { setSelectedSpaceId(""); setSelectedVideoId(""); }}><ChevronLeft size={16} />返回创意空间</button>
+        <header className="space-detail-head"><div><span className="eyebrow">创意空间</span><h1>{selectedSpace.title}</h1><p>{selectedSpace.summary || "持续创作与视频成果"}</p></div><button className="primary-button" type="button" onClick={() => onStart(selectedSpace)}>继续创作</button></header>
+        {selectedVideo ? <div className="space-video-detail">
+          <button className="space-detail-back" type="button" onClick={() => setSelectedVideoId("")}><ChevronLeft size={16} />全部视频</button>
+          <video controls autoPlay src={`/api/videos/${selectedVideo.id}/file`} />
+          <div className="space-video-detail-copy"><span className="eyebrow">生成提示词</span><p>{selectedVideo.prompt}</p>{selectedVideo.negative_prompt ? <><span className="eyebrow">负面提示词</span><p>{selectedVideo.negative_prompt}</p></> : null}</div>
+          <SpaceVideoMeta video={selectedVideo} />
+          {selectedVideo.conversation_id ? <button className="secondary-button" type="button" onClick={() => onConversation(selectedVideo.id, selectedVideo.conversation_id)}>进入生成该视频的对话 <ChevronRight size={16} /></button> : <p className="space-video-note">这条视频没有关联的生成对话。</p>}
+        </div> : <>
+          <section className="space-linked-assets" aria-label="关联产品素材">
+            <div className="space-video-heading"><h2>关联产品素材</h2><span>{assetsLoading ? "加载中" : `${productAssets.length} 个`}</span></div>
+            <p>来自关联的产品资料，可供多个创意空间共用。</p>
+            {assetsError ? <p role="alert" className="error-banner">素材加载失败：{assetsError}</p> : productAssets.length ? <div className="space-linked-assets-grid">{productAssets.map((asset) => <figure key={asset.id}><span className="space-linked-asset-thumb">{asset.kind === "video" ? <video src={`/api/assets/${asset.id}/file`} muted preload="metadata" playsInline /> : <img src={`/api/assets/${asset.id}/file`} alt="" />}</span><figcaption title={asset.original_name}>{asset.original_name}</figcaption></figure>)}</div> : !assetsLoading ? <p>暂无关联产品素材。</p> : null}
+          </section>
+          <div className="space-video-heading"><h2>已生成视频</h2><span>{spaceVideos.length} 个</span></div>
+          {videosLoading ? <p role="status">正在加载视频…</p> : videosError ? <p role="alert" className="error-banner">{videosError}</p> : spaceVideos.length ? <div className="space-video-grid">{spaceVideos.map((video) => <button className="space-video-tile" key={video.id} type="button" onClick={() => setSelectedVideoId(video.id)} aria-label={`查看 ${new Date(video.updated_at || video.created_at).toLocaleDateString("zh-CN")} 生成的视频及提示词`}><span className="space-video-thumb"><video src={`/api/videos/${video.id}/file`} preload="metadata" muted playsInline /><span><Play size={18} fill="currentColor" /></span></span><strong>{video.prompt || "生成视频"}</strong><SpaceVideoMeta video={video} compact /></button>)}</div> : <div className="space-video-empty"><Video size={28} /><strong>这个空间还没有成功生成的视频</strong><p>在此空间的对话中生成视频后，成片会显示在这里。</p><button className="secondary-button" type="button" onClick={() => onStart(selectedSpace)}>继续创作</button></div>}
+        </>}
+      </> : <>
       <div className="spaces-head">
         <div>
           <span className="eyebrow">长期创作</span>
@@ -3874,7 +3988,7 @@ function SpacesWorkspace({
               key={space.id}
               space={space}
               products={products}
-              jobCount={jobs.filter((job) => job.space_id === space.id).length}
+              weeklyMaterialCount={weeklyMaterialCounts[space.id] || 0}
               isSending={isSending}
               suggestion={suggestions?.find(
                 (item) => item.space_id === space.id,
@@ -3882,6 +3996,7 @@ function SpacesWorkspace({
               onUpdate={onUpdate}
               onDelete={onDelete}
               onStart={onStart}
+              onOpen={() => setSelectedSpaceId(space.id)}
               onSuggestion={onSuggestion}
             />
           ))
@@ -3889,8 +4004,13 @@ function SpacesWorkspace({
           <EmptyState text="还没有空间。点击右上角新建。" />
         )}
       </section>
+      </>}
     </section>
   );
+}
+
+function SpaceVideoMeta({ video, compact = false }) {
+  return <div className={`space-video-meta ${compact ? "compact" : ""}`}><time dateTime={video.updated_at || video.created_at}>{new Date(video.updated_at || video.created_at).toLocaleString("zh-CN")}</time><span>{video.model}</span><span>{video.resolution} · {video.ratio} · {video.duration} 秒</span><span>{video.sound_enabled ? "有声" : "无声"}</span></div>;
 }
 
 function IntelligenceWorkspace({ spaces, onCreateTask }) {
@@ -4013,9 +4133,9 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
     <section className="intelligence-workspace">
       <header className="intelligence-head">
         <div>
-          <span className="eyebrow">市场 × 竞品 × 自有数据</span>
+          <span className="eyebrow">演示版 · 创意证据</span>
           <h1>创意雷达</h1>
-          <p>连接外部数据，把证据转成可验证的素材实验和长期创意记忆。</p>
+          <p>先用示例信号练习：挑选创意方向，发起素材实验，或保存到空间记忆。</p>
         </div>
         <div className="intelligence-actions">
           <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>
@@ -4037,17 +4157,26 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
             ) : (
               <Play size={16} />
             )}
-            载入演示数据
+            {data.signals.length ? "重新载入演示数据" : "开始体验：载入演示数据"}
           </button>
         </div>
       </header>
+      <div className="intelligence-guide">
+        <strong>怎么使用</strong>
+        <ol>
+          <li>选择上方的创意空间，点击“载入演示数据”。</li>
+          <li>阅读“最新信号”，点击“去对话设计实验”会把信号带入该空间的对话草稿，确认后再发送。</li>
+          <li>有用的结论可点“保存到空间记忆”，供之后的空间对话参考。</li>
+        </ol>
+        <p>目前信号和竞品扫描结果都是演示内容，不会抓取账号或广告平台的实时数据。</p>
+      </div>
       <div className="connector-strip">
         <div>
           <Radar size={18} />
           <span>
-            <strong>数据连接</strong>
+            <strong>当前数据来源</strong>
             <small>
-              当前可用演示数据；文件导入与真实平台 OAuth/API 正在接入。
+              仅提供演示数据；文件导入和真实平台连接尚未开放。
             </small>
           </span>
         </div>
@@ -4057,7 +4186,7 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
             <span>
               <strong>{item.name}</strong>
               <small>
-                {item.status === "connected" ? "已连接" : item.status} ·{" "}
+                {item.status === "connected" ? "演示数据已载入" : item.status} ·{" "}
                 {item.last_synced_at
                   ? formatTime(item.last_synced_at)
                   : "未同步"}
@@ -4066,10 +4195,12 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
           </div>
         ))}
       </div>
-      <section className="competitor-monitor-panel">
+      <details className="competitor-monitor-panel" open={data.monitors?.length > 0 ? true : undefined}>
+        <summary>竞品监控演示 <span>可选 · 添加名称或关键词，生成模拟扫描结果</span></summary>
+        <div className="competitor-monitor-content">
         <div className="section-heading">
-          <span>竞品监控</span>
-          <small>添加账号或关键词；当前扫描生成明确标记的演示结果</small>
+          <span>设置演示监控</span>
+          <small>输入的账号链接仅作演示记录，不会访问该账号</small>
         </div>
         <form onSubmit={addMonitor}>
           <input name="name" placeholder="竞品名称" required />
@@ -4118,10 +4249,11 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
           </div>
         ) : (
           <p className="monitor-empty">
-            尚未添加竞品。Demo 阶段不会抓取真实平台数据。
+            尚未添加竞品演示监控。
           </p>
         )}
-      </section>
+        </div>
+      </details>
       {loadError ? <div className="error-banner">{loadError}</div> : null}
       {loading ? (
         <div className="intelligence-empty">
@@ -4133,7 +4265,7 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
           <section>
             <div className="section-heading">
               <span>最新信号</span>
-              <small>仅保存来源明确、带时间窗口的证据</small>
+              <small>以下为示例信号，请勿作为真实市场证据</small>
             </div>
             <div className="signal-grid">
               {data.signals.map((signal) => (
@@ -4160,8 +4292,8 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
                       onClick={() => remember(signal)}
                     >
                       {data.memories.some((m) => m.signal_id === signal.id)
-                        ? "已进入记忆"
-                        : "确认进入记忆"}
+                        ? "已保存到空间记忆"
+                        : "保存到空间记忆"}
                     </button>
                     <button
                       className="secondary-button"
@@ -4169,7 +4301,7 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
                       disabled={!activeSpace}
                       onClick={() => onCreateTask(activeSpace, signal)}
                     >
-                      生成实验任务
+                      去对话设计实验
                     </button>
                   </footer>
                 </article>
@@ -4179,7 +4311,7 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
           <aside>
             <div className="section-heading">
               <span>长期创意记忆</span>
-              <small>只注入已由用户确认的结论</small>
+              <small>保存后供该空间之后的对话参考</small>
             </div>
             {data.memories.length ? (
               data.memories.map((memory) => (
@@ -4193,7 +4325,7 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
               ))
             ) : (
               <div className="memory-empty">
-                选择一条有价值的信号并确认，之后空间对话会读取它。
+                选择一条信号并保存，之后该空间的对话会参考它。
               </div>
             )}
           </aside>
@@ -4201,9 +4333,9 @@ function IntelligenceWorkspace({ spaces, onCreateTask }) {
       ) : (
         <div className="intelligence-empty">
           <Radar size={30} />
-          <strong>还没有数据连接</strong>
+          <strong>还没有演示信号</strong>
           <span>
-            无需广告账户，先载入演示数据验证“发现—创作—投放反馈—再创作”闭环。
+            选择空间并点击“开始体验：载入演示数据”，即可查看示例信号。
           </span>
         </div>
       )}
@@ -4335,12 +4467,13 @@ function CreativeMemoryCard({ memory, busy, onSave, onDelete }) {
 function SpaceCard({
   space,
   products,
-  jobCount,
+  weeklyMaterialCount,
   isSending,
   suggestion,
   onUpdate,
   onDelete,
   onStart,
+  onOpen,
   onSuggestion,
 }) {
   const [editing, setEditing] = useState(false);
@@ -4381,12 +4514,12 @@ function SpaceCard({
   }
 
   return (
-    <article className={editing ? "editing" : ""}>
+    <article className={editing ? "editing" : confirmingDelete ? "confirming-delete" : ""}>
       <span className="space-card-icon">
         <FolderKanban size={18} />
       </span>
       <div className="space-card-copy">
-        <strong>{space.title}</strong>
+        <button className="space-card-open" type="button" onClick={onOpen}>{space.title}<ChevronRight size={16} /></button>
         <p>{space.summary || "继续上次的创作"}</p>
         {editing ? (
           <div className="space-product-editor">
@@ -4434,7 +4567,7 @@ function SpaceCard({
               <span>{marketingLabel(marketingStages, space.goal_stage)}</span>
             </div>
             <small>
-              {product?.title || "暂未关联资料"} · {jobCount} 次执行
+              {product?.title || "暂未关联资料"} · 产品素材 {space.asset_count || 0} 个 · <span title="按本周完成的视频统计">本周制作素材 {weeklyMaterialCount} 个</span>
             </small>
             {suggestion ? (
               <button
@@ -4471,6 +4604,7 @@ function SpaceCard({
           </div>
         ) : editing ? (
           <>
+            <button className="mini-button" type="button" onClick={onOpen}>查看空间</button>
             <button
               className="mini-button"
               type="button"
@@ -4529,20 +4663,12 @@ function ProductKnowledgeWorkspace({
   products,
   selectedProductId,
   productPreview,
-  creativeReports,
-  selectedCreativeReportId,
   isLoadingProductPreview,
-  isLoadingCreativeReports,
-  isCreatingCreativeReport,
   isCreatingProduct,
   isSavingProduct,
   error,
   onSelect,
   onStartJob,
-  onReportSelect,
-  onCreateCreativeReport,
-  onReportToJob,
-  onContinueAnalysis,
   onCreate,
   onUpdate,
 }) {
@@ -4557,15 +4683,10 @@ function ProductKnowledgeWorkspace({
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [deletingAssetId, setDeletingAssetId] = useState("");
   const [isSourcesOpen, setIsSourcesOpen] = useState(true);
-  const [isReportExpanded, setIsReportExpanded] = useState(false);
-  const [isReportFormOpen, setIsReportFormOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const selected =
     products.find((item) => item.id === selectedProductId) || products[0];
-  const selectedReport =
-    creativeReports.find((report) => report.id === selectedCreativeReportId) ||
-    creativeReports[0];
   const selectedAsset =
     assets.find((asset) => asset.id === selectedAssetId) ||
     assets.find((asset) => asset.kind === "image") ||
@@ -4592,8 +4713,6 @@ function ProductKnowledgeWorkspace({
         );
       })
       .catch(() => setAssets([]));
-    setIsReportExpanded(false);
-    setIsReportFormOpen(false);
   }, [selected?.id]);
   async function save(event) {
     event.preventDefault();
@@ -4829,115 +4948,17 @@ function ProductKnowledgeWorkspace({
                 </details>
               </header>
 
-              <div className="research-context-line">
-                <Sparkles size={17} />
-                <span>面向短视频平台的产品创意分析</span>
-              </div>
-
-              <section className="research-report">
-                <div className="research-report-head">
-                  <div>
-                    <h2>创意策略报告</h2>
-                    <p>
-                      {selectedReport
-                        ? `生成时间：${formatTime(selectedReport.created_at)}`
-                        : "基于现有产品资料生成可执行的创意方向"}
-                    </p>
-                  </div>
-                  {creativeReports.length ? (
-                    <details className="research-report-history">
-                      <summary>
-                        <History size={15} />
-                        历史报告
-                        <ChevronDown size={14} />
-                      </summary>
-                      <div>
-                        {creativeReports.map((report) => (
-                          <button
-                            type="button"
-                            key={report.id}
-                            className={report.id === selectedReport?.id ? "active" : ""}
-                            onClick={() => onReportSelect(report.id)}
-                          >
-                            <strong>{formatTime(report.created_at)}</strong>
-                            <span>{reportConfigLabel(report.source_config_json)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </div>
-
-                {isLoadingCreativeReports ? (
-                  <EmptyState text="正在读取创意策略报告" compact />
-                ) : selectedReport ? (
-                  <>
-                    {selectedReport.report_summary ? (
-                      <p className="research-report-summary">
-                        {selectedReport.report_summary}
-                      </p>
-                    ) : null}
-                    <div className={`research-report-content ${isReportExpanded ? "expanded" : ""}`}>
-                      <MarkdownContent content={selectedReport.report_markdown} />
-                    </div>
-                    <div className="research-report-actions">
-                      <button className="primary-button" type="button" onClick={() => onReportToJob(selectedReport)}>
-                        <Play size={16} />
-                        转为脚本
-                      </button>
-                      <button className="research-text-action" type="button" onClick={() => setIsReportFormOpen((value) => !value)}>
-                        <RefreshCw size={15} />
-                        重新生成
-                      </button>
-                      <button className="research-text-action continue" type="button" onClick={() => onContinueAnalysis(selected.id)}>
-                        继续分析
-                        <ChevronRight size={15} />
-                      </button>
-                    </div>
-                    <button className="research-expand-report" type="button" onClick={() => setIsReportExpanded((value) => !value)}>
-                      <ChevronDown size={15} />
-                      {isReportExpanded ? "收起完整报告" : "展开完整报告"}
-                    </button>
-                  </>
+              <section className="research-product-document">
+                <h2>产品资料</h2>
+                {productPreview?.error ? (
+                  <div className="error-banner">{productPreview.error}</div>
+                ) : isLoadingProductPreview ? (
+                  <EmptyState text="正在读取产品资料" compact />
+                ) : productPreview?.content ? (
+                  <MarkdownContent content={productPreview.content} />
                 ) : (
-                  <div className="research-report-empty">
-                    <p>还没有创意策略报告。</p>
-                    <button className="primary-button" type="button" onClick={() => setIsReportFormOpen(true)}>
-                      生成第一份报告
-                    </button>
-                  </div>
+                  <EmptyState text="暂无产品资料内容" compact />
                 )}
-
-                {isReportFormOpen ? (
-                  <form className="research-report-form" onSubmit={onCreateCreativeReport}>
-                    <input type="hidden" name="product_name" value={selected.title} />
-                    <input type="hidden" name="date_range" value="近 30 天" />
-                    <input type="hidden" name="sample_count" value="50" />
-                    <label>
-                      <span>这次重点</span>
-                      <textarea name="requirement" rows="3" placeholder="例如：优先分析小红书开头钩子和生活化场景。" />
-                    </label>
-                    <details>
-                      <summary>补充数据来源</summary>
-                      <div className="research-report-source-fields">
-                        <label>
-                          <span>DataEye URL</span>
-                          <input name="dataeye_url" type="url" placeholder="https://..." />
-                        </label>
-                        <label>
-                          <span>素材备注</span>
-                          <textarea name="material_note" rows="2" />
-                        </label>
-                      </div>
-                    </details>
-                    <div>
-                      <button className="secondary-button" type="button" onClick={() => setIsReportFormOpen(false)}>取消</button>
-                      <button className="primary-button" type="submit" disabled={isCreatingCreativeReport}>
-                        {isCreatingCreativeReport ? "生成中" : "生成报告"}
-                      </button>
-                    </div>
-                  </form>
-                ) : null}
               </section>
               {error ? <div className="error-banner research-error">{error}</div> : null}
             </>
@@ -5190,467 +5211,6 @@ function AssetPreviewModal({ asset, deleting, onClose, onDelete }) {
         </footer>
       </section>
     </div>
-  );
-}
-
-function ProductCover({ product, compact = false }) {
-  const variant = productCoverVariant(product);
-  return (
-    <div
-      className={`product-cover cover-${variant} ${compact ? "compact" : ""}`}
-    >
-      <div className="cover-noise" />
-      <div className="cover-frame">
-        <span>{productInitial(product?.title)}</span>
-        <strong>{product?.title || "新产品"}</strong>
-      </div>
-      <div className="cover-strip">
-        <i />
-        <i />
-        <i />
-      </div>
-    </div>
-  );
-}
-
-function ProductAssetCard({ product, stats, isActive, onSelect, onStartJob }) {
-  return (
-    <article
-      className={`product-asset-card ${isActive ? "active" : ""}`}
-      onClick={() => onSelect(product.id)}
-    >
-      <ProductCover product={product} />
-      <div className="asset-card-body">
-        <div>
-          <h3>{product.title}</h3>
-          <p>{product.md_name}</p>
-        </div>
-        <div className="asset-metrics">
-          <span>
-            <strong>{stats?.scriptCount || 0}</strong>
-            脚本
-          </span>
-          <span>
-            <strong>{stats?.taskCount || 0}</strong>
-            任务
-          </span>
-        </div>
-        <div className="asset-card-footer">
-          <small>
-            {stats?.latestAt
-              ? `最近生成 ${formatTime(stats.latestAt)}`
-              : `更新 ${formatTime(product.updated_at)}`}
-          </small>
-          <button
-            className="primary-button compact-action"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onStartJob(product.id);
-            }}
-          >
-            <Play size={15} />
-            <span>生成新脚本</span>
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function ProductsWorkspace({
-  products,
-  selectedProductId,
-  productPreview,
-  creativeReports,
-  selectedCreativeReportId,
-  isLoadingProductPreview,
-  isLoadingCreativeReports,
-  isCreatingCreativeReport,
-  isCreatingProduct,
-  isSavingProduct,
-  productStats,
-  error,
-  onSelect,
-  onReportSelect,
-  onStartJob,
-  onCreateCreativeReport,
-  onReportToJob,
-  onCreate,
-  onUpdate,
-}) {
-  const [editing, setEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const selectedProduct =
-    products.find((product) => product.id === selectedProductId) || products[0];
-  const selectedStats = selectedProduct
-    ? productStats.get(selectedProduct.id)
-    : null;
-  const selectedReport =
-    creativeReports.find((report) => report.id === selectedCreativeReportId) ||
-    creativeReports[0];
-  const totalScripts = Array.from(productStats.values()).reduce(
-    (total, stats) => total + (stats.scriptCount || 0),
-    0,
-  );
-  useEffect(() => {
-    if (!editing) {
-      setEditTitle(selectedProduct?.title || "");
-      setEditContent(productPreview?.content || "");
-    }
-  }, [selectedProduct?.id, productPreview?.content, editing]);
-  return (
-    <section className="product-home">
-      <div className="product-home-hero">
-        <div>
-          <span className="eyebrow">产品资产库</span>
-          <h1>先把产品放进来，再批量裂变脚本</h1>
-          <p>
-            每个产品都对应一份 Markdown
-            资料、历史任务和可复用脚本。运营同学进来先看到自己的产品，而不是一张空表单。
-          </p>
-        </div>
-        <div className="home-stats">
-          <div>
-            <strong>{products.length}</strong>
-            <span>产品</span>
-          </div>
-          <div>
-            <strong>{totalScripts}</strong>
-            <span>脚本</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="product-home-grid">
-        <section className="asset-board">
-          <div>
-            <h2>我的产品</h2>
-            <p>选择一个产品查看资料，或直接生成新的复刻/裂变脚本。</p>
-          </div>
-          {products.length ? (
-            <div className="product-asset-grid">
-              {products.map((product) => (
-                <ProductAssetCard
-                  key={product.id}
-                  product={product}
-                  stats={productStats.get(product.id)}
-                  isActive={selectedProduct?.id === product.id}
-                  onSelect={onSelect}
-                  onStartJob={onStartJob}
-                />
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="暂无产品，先上传一份产品 Markdown" />
-          )}
-        </section>
-
-        <aside className="new-product-panel">
-          <div>
-            <h2>新增产品</h2>
-            <p>上传一份产品 Markdown，后续任务直接复用。</p>
-          </div>
-          <form className="task-form" onSubmit={onCreate}>
-            <label>
-              <span>产品名称</span>
-              <input name="title" type="text" placeholder="例如：无尽冬日" />
-            </label>
-            <FileField
-              name="product_md"
-              label="产品 Markdown"
-              accept=".md,.markdown,text/markdown"
-              icon={<FileText size={16} />}
-              required
-            />
-            <button
-              className="primary-button wide-button"
-              type="submit"
-              disabled={isCreatingProduct}
-            >
-              {isCreatingProduct ? (
-                <Loader2 className="spin" size={16} />
-              ) : (
-                <Plus size={16} />
-              )}
-              <span>{isCreatingProduct ? "保存中" : "保存产品"}</span>
-            </button>
-          </form>
-          {error ? <div className="error-banner">{error}</div> : null}
-        </aside>
-      </div>
-
-      <section className="product-dossier">
-        {selectedProduct ? (
-          <>
-            <div className="dossier-summary">
-              <ProductCover product={selectedProduct} compact />
-              <div>
-                <span className="eyebrow">产品档案</span>
-                <h2>{selectedProduct.title}</h2>
-                <p>
-                  {selectedProduct.md_name} · 更新{" "}
-                  {formatTime(selectedProduct.updated_at)}
-                </p>
-              </div>
-              <div className="dossier-actions">
-                <span className="status-pill success">可用于任务</span>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setEditing((value) => !value)}
-                >
-                  <FileText size={15} />
-                  <span>{editing ? "阅读资料" : "编辑资料"}</span>
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => onStartJob(selectedProduct.id)}
-                >
-                  <Play size={15} />
-                  <span>生成新脚本</span>
-                </button>
-              </div>
-            </div>
-            <div className="product-meta-grid">
-              <div className="detail-row">
-                <span>已生成脚本</span>
-                <strong>{selectedStats?.scriptCount || 0}</strong>
-              </div>
-              <div className="detail-row">
-                <span>历史任务</span>
-                <strong>{selectedStats?.taskCount || 0}</strong>
-              </div>
-              <div className="detail-row">
-                <span>最近生成</span>
-                <strong>
-                  {selectedStats?.latestAt
-                    ? formatTime(selectedStats.latestAt)
-                    : "-"}
-                </strong>
-              </div>
-            </div>
-            <section className="creative-report-panel">
-              <div className="section-heading">
-                <span>创意策略报告</span>
-                <small>配置 DataEye 来源，生成后可转为裂变脚本任务</small>
-              </div>
-              <div className="creative-report-grid">
-                <form
-                  className="task-form compact-form"
-                  onSubmit={onCreateCreativeReport}
-                >
-                  <div className="upload-grid">
-                    <label>
-                      <span>DataEye URL</span>
-                      <input
-                        name="dataeye_url"
-                        type="url"
-                        placeholder="https://..."
-                      />
-                    </label>
-                    <label>
-                      <span>DataEye 产品 ID</span>
-                      <input name="dataeye_id" type="text" placeholder="可选" />
-                    </label>
-                  </div>
-                  <div className="upload-grid">
-                    <label>
-                      <span>产品名</span>
-                      <input
-                        name="product_name"
-                        type="text"
-                        defaultValue={selectedProduct.title}
-                      />
-                    </label>
-                    <label>
-                      <span>时间范围</span>
-                      <input
-                        name="date_range"
-                        type="text"
-                        defaultValue="近 30 天"
-                      />
-                    </label>
-                  </div>
-                  <div className="upload-grid three-cols">
-                    <label>
-                      <span>媒体</span>
-                      <input
-                        name="media"
-                        type="text"
-                        placeholder="TikTok / Meta"
-                      />
-                    </label>
-                    <label>
-                      <span>国家/地区</span>
-                      <input
-                        name="country"
-                        type="text"
-                        placeholder="美国 / 日本"
-                      />
-                    </label>
-                    <label>
-                      <span>样本数</span>
-                      <input
-                        name="sample_count"
-                        type="number"
-                        min="5"
-                        max="200"
-                        defaultValue="50"
-                      />
-                    </label>
-                  </div>
-                  <label>
-                    <span>排序指标</span>
-                    <input
-                      name="sort_metric"
-                      type="text"
-                      defaultValue="热度/曝光/播放优先"
-                    />
-                  </label>
-                  <label>
-                    <span>补充要求</span>
-                    <textarea
-                      name="requirement"
-                      rows="3"
-                      placeholder="例如：重点看开头钩子、节奏和可复制素材结构。"
-                    />
-                  </label>
-                  <label>
-                    <span>素材备注</span>
-                    <textarea
-                      name="material_note"
-                      rows="3"
-                      placeholder="如已有素材观察、DataEye 导出摘要，可贴在这里。"
-                    />
-                  </label>
-                  <button
-                    className="primary-button wide-button"
-                    type="submit"
-                    disabled={isCreatingCreativeReport}
-                  >
-                    {isCreatingCreativeReport ? (
-                      <Loader2 className="spin" size={16} />
-                    ) : (
-                      <Activity size={16} />
-                    )}
-                    <span>
-                      {isCreatingCreativeReport ? "生成中" : "生成创意策略报告"}
-                    </span>
-                  </button>
-                </form>
-                <div className="creative-report-list">
-                  {isLoadingCreativeReports ? (
-                    <EmptyState text="正在读取创意策略报告" compact />
-                  ) : creativeReports.length ? (
-                    <>
-                      <div className="report-switcher">
-                        {creativeReports.map((report) => (
-                          <button
-                            key={report.id}
-                            className={
-                              selectedReport?.id === report.id ? "active" : ""
-                            }
-                            type="button"
-                            onClick={() => onReportSelect(report.id)}
-                          >
-                            <strong>{formatTime(report.created_at)}</strong>
-                            <span>
-                              {reportConfigLabel(report.source_config_json)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      {selectedReport ? (
-                        <article className="creative-report-preview">
-                          <div className="report-actions">
-                            <div>
-                              <strong>报告摘要</strong>
-                              <p>
-                                {selectedReport.report_summary ||
-                                  "报告已生成，可查看完整内容。"}
-                              </p>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => onReportToJob(selectedReport)}
-                            >
-                              <Play size={15} />
-                              <span>转裂变任务</span>
-                            </button>
-                          </div>
-                          <MarkdownContent
-                            content={selectedReport.report_markdown}
-                          />
-                        </article>
-                      ) : null}
-                    </>
-                  ) : (
-                    <EmptyState
-                      text="暂无报告，先生成一份创意策略报告"
-                      compact
-                    />
-                  )}
-                </div>
-              </div>
-            </section>
-            <section className="product-preview">
-              <div className="section-heading">
-                <span>Markdown 预览</span>
-                <small>
-                  {isLoadingProductPreview
-                    ? "读取中"
-                    : productPreview?.md_name || selectedProduct.md_name}
-                </small>
-              </div>
-              {editing ? (
-                <form
-                  className="living-product-editor"
-                  onSubmit={async (event) => {
-                    event.preventDefault();
-                    await onUpdate(selectedProduct.id, editTitle, editContent);
-                    setEditing(false);
-                  }}
-                >
-                  <input
-                    value={editTitle}
-                    onChange={(event) => setEditTitle(event.target.value)}
-                    required
-                    aria-label="产品名称"
-                  />
-                  <textarea
-                    value={editContent}
-                    onChange={(event) => setEditContent(event.target.value)}
-                    required
-                    aria-label="产品资料内容"
-                  />
-                  <button
-                    className="primary-button"
-                    type="submit"
-                    disabled={isSavingProduct}
-                  >
-                    {isSavingProduct ? "保存中" : "保存更新"}
-                  </button>
-                </form>
-              ) : productPreview?.error ? (
-                <div className="error-banner">{productPreview.error}</div>
-              ) : isLoadingProductPreview ? (
-                <EmptyState text="正在读取产品 Markdown" compact />
-              ) : productPreview?.content ? (
-                <MarkdownContent content={productPreview.content} />
-              ) : (
-                <EmptyState text="暂无可预览内容" compact />
-              )}
-            </section>
-          </>
-        ) : (
-          <EmptyState text="保存产品后可在这里查看档案" />
-        )}
-      </section>
-    </section>
   );
 }
 
@@ -6688,13 +6248,4 @@ function formatChatTime(value) {
   const date = new Date(value);
   const part = (number) => String(number).padStart(2, "0");
   return `${date.getFullYear()}/${part(date.getMonth() + 1)}/${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
-}
-
-function reportConfigLabel(raw) {
-  const config = parseJSONValue(raw) || {};
-  return (
-    [config.date_range, config.media, config.country, config.sort_metric]
-      .filter(Boolean)
-      .join(" · ") || "创意策略报告"
-  );
 }

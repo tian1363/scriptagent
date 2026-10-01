@@ -15,12 +15,13 @@ test('publishes source-backed, indexable Skill pages', () => {
   const sitemap = readFileSync(path.join(website, 'public/sitemap.xml'), 'utf8');
   const listing = readFileSync(path.join(website, 'public/skills/index.html'), 'utf8');
   assert.match(listing, /href="\/scriptagent\/skills\/ugc-hook-writer\/"/);
+  assert.match(listing, /href="\/scriptagent\/skills\/hook-replication\/"/);
   assert.match(listing, /★ 去 GitHub 点亮 Star/);
   assert.match(listing, /href="https:\/\/github.com\/tian1363\/scriptagent"/);
   assert.doesNotMatch(listing, /fission-strategy|创意裂变策略/);
   assert.doesNotMatch(sitemap, /fission-strategy/);
   assert.equal(existsSync(path.join(website, 'public/skills/fission-strategy/index.html')), false);
-  for (const slug of ['ugc-hook-writer', 'product-selling-point-writer', 'script-review']) {
+  for (const slug of ['hook-replication', 'ugc-hook-writer', 'product-selling-point-writer', 'script-review']) {
     const page = readFileSync(path.join(website, `public/skills/${slug}/index.html`), 'utf8');
     assert.match(page, new RegExp(`rel="canonical" href="https://tian1363.github.io/scriptagent/skills/${slug}/"`));
     assert.match(page, /完整工作流/);
@@ -29,5 +30,6 @@ test('publishes source-backed, indexable Skill pages', () => {
     assert.match(sitemap, new RegExp(`<loc>https://tian1363.github.io/scriptagent/skills/${slug}/</loc>`));
   }
   assert.match(readFileSync(path.join(website, 'public/skills/ugc-hook-writer/index.html'), 'utf8'), /首帧画面/);
+  assert.match(readFileSync(path.join(website, 'public/skills/hook-replication/index.html'), 'utf8'), /锚点衔接/);
   assert.match(readFileSync(path.join(website, 'public/skills/product-selling-point-writer/index.html'), 'utf8'), /待核实/);
 });

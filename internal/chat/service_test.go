@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/reactagent"
 )
 
@@ -262,6 +263,18 @@ func TestBuiltInSkillIncludesMaterialReplicationAnalysis(t *testing.T) {
 	}
 }
 
+func TestHookReplicationSkillCoversReferenceTargetAndTransition(t *testing.T) {
+	skill, err := builtInSkill("hook_replication")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phrase := range []string{"参考视频", "目标视频", "脚本结构", "文案口播", "视觉锚点", "夸张手法", "锚点衔接", "正片首镜"} {
+		if !strings.Contains(skill, phrase) {
+			t.Errorf("hook_replication missing %q", phrase)
+		}
+	}
+}
+
 func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
 	skills := BuiltInSkills()
 	if len(skills) < 5 {
@@ -274,7 +287,7 @@ func TestBuiltInSkillsExposeUserFacingMetadata(t *testing.T) {
 		}
 		found[skill.Name] = true
 	}
-	for _, name := range []string{"fission_strategy", "material_replication_analysis", "seedance_video_prompt_writer", "ugc_hook_writer", "product_selling_point_writer"} {
+	for _, name := range []string{"fission_strategy", "material_replication_analysis", "hook_replication", "seedance_video_prompt_writer", "ugc_hook_writer", "product_selling_point_writer"} {
 		if !found[name] {
 			t.Fatalf("expected skill %s in catalog", name)
 		}
@@ -291,6 +304,32 @@ func TestNewCreativeSkillsRequireGroundedProductClaims(t *testing.T) {
 			if !strings.Contains(content, phrase) {
 				t.Errorf("%s missing %q guidance", name, phrase)
 			}
+		}
+	}
+}
+func TestHookReplicationUsesReferenceVideoBeforeScript(t *testing.T) {
+	request := "调用 hook_replication skill，参考视频写 15 秒脚本"
+	if !isHookReplicationRequest(request) {
+		t.Fatal("expected explicit hook skill to use evidence workflow")
+	}
+	if !isHookReplicationFollowup("请修正上一版脚本，以本轮上传的参考视频为证据", []jobs.ChatMessage{{Role: "user", Content: request}}) {
+		t.Fatal("expected corrected script with a reuploaded reference to use evidence workflow")
+	}
+	if isHookReplicationFollowup("生成视频", []jobs.ChatMessage{{Role: "user", Content: request}}) {
+		t.Fatal("video generation should not trigger script analysis")
+	}
+	video, ok := firstVideo([]model.ContentItem{{Image: "image"}, {Video: "reference", FPS: 2}})
+	if !ok || video.Video != "reference" {
+		t.Fatal("reference video was not selected")
+	}
+	evidence := hookVideoEvidencePrompt("时长 52.67 秒；候选切镜秒数：6.5")
+	if !strings.Contains(evidence, "只分析本次附带的参考视频") || !strings.Contains(evidence, "不要声称逐帧") {
+		t.Fatal("reference analysis should be source-only and honest about sampling")
+	}
+	script := hookScriptPrompt(request, "橙子和凤梨", "街头逐个采访", nil)
+	for _, phrase := range []string{"参考片时间/功能", "产品事实", "视频生成提示词", "00:00–00:15"} {
+		if !strings.Contains(script, phrase) {
+			t.Fatalf("script prompt missing %q", phrase)
 		}
 	}
 }

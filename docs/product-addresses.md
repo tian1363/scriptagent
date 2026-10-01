@@ -32,7 +32,6 @@
 | Skill | `GET /api/skills` · `POST /api/skills/draft` · `POST /api/skills` · `PUT /api/skills/{id}` |
 | 产品资料 | `GET/POST /api/products` · `PUT /api/products/{id}` · `GET /api/products/{id}/markdown` |
 | 产品素材 | `GET/POST /api/products/{id}/assets` · `GET /api/assets/{id}/file` |
-| 创意报告 | `GET/POST /api/products/{id}/creative-reports` |
 | 创作空间 | `GET/POST /api/spaces` · `PUT/DELETE /api/spaces/{id}` · `GET /api/spaces/{id}/observability` |
 | 执行任务 | `GET/POST /api/jobs` · `GET /api/jobs/{id}` · `POST /api/jobs/{id}/retry` · `POST /api/jobs/{id}/publish` · `POST /api/jobs/{id}/video-prompts` |
 | 对话 | `GET/POST /api/chats` · `POST /api/chats/messages` · `GET /api/chats/{id}` · `POST /api/chats/{id}/messages` |

@@ -77,6 +77,7 @@ type Space struct {
 	Title         string    `json:"title"`
 	Summary       string    `json:"summary,omitempty"`
 	ProductID     string    `json:"product_id"`
+	AssetCount    int       `json:"asset_count"`
 	AgentBrief    string    `json:"agent_brief,omitempty"`
 	MarketingGoal string    `json:"marketing_goal,omitempty"`
 	GoalStage     string    `json:"goal_stage,omitempty"`
@@ -307,11 +308,23 @@ type ChatConversation struct {
 }
 
 type ChatMessage struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	Role           string    `json:"role"`
-	Content        string    `json:"content"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string           `json:"id"`
+	ConversationID string           `json:"conversation_id"`
+	Role           string           `json:"role"`
+	Content        string           `json:"content"`
+	Attachments    []ChatAttachment `json:"attachments,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
+type ChatAttachment struct {
+	ID           string    `json:"id"`
+	MessageID    string    `json:"message_id"`
+	Kind         string    `json:"kind"`
+	OriginalName string    `json:"original_name"`
+	MimeType     string    `json:"mime_type"`
+	Size         int64     `json:"size"`
+	Path         string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type ChatThread struct {
