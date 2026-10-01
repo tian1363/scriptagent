@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:56
+
+- `5646046` build(deps): bump @vitejs/plugin-react from 5.2.0 to 6.1.1 in /web/app (#31)
+
 ### 2026-10-01 15:55
 
 - `a5488d6` build(deps): bump vite from 8.2.2 to 8.3.1 in /web/app (#32)
