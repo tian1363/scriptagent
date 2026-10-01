@@ -157,10 +157,10 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			callKey := toolCallKey(action.Tool, normalizedInput)
 			if previous, duplicate := toolResults[callKey]; duplicate {
 				step.Status = "completed"
-				step.Observation = "相同工具和参数已调用，复用 Step " + fmt.Sprint(previous.Index) + " 的结果：\n" + previous.Observation
+				step.Observation = "相同工具和参数已调用，复用 Step " + fmt.Sprint(previous.Index) + " 的结果；下一步直接根据已有信息回答。"
 				step.Error = previous.Error
 				appendStep(step)
-				continue
+				return r.finish(ctx, input, steps)
 			}
 			observation, err := tool.Handler(ctx, action.Input)
 			if err != nil {
@@ -185,10 +185,60 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (Result, error) {
 			return Result{Answer: strings.TrimSpace(result.Text), Steps: steps}, nil
 		}
 	}
-	return Result{
-		Answer: "我已经完成多轮工具检查，但还没有得到足够稳定的最终答案。请缩小问题范围，或指定要使用的产品/skill。",
-		Steps:  steps,
-	}, nil
+	return r.finish(ctx, input, steps)
+}
+
+func (r *Runner) finish(ctx context.Context, input RunInput, steps []Step) (Result, error) {
+	index := len(steps) + 1
+	if input.OnProgress != nil {
+		input.OnProgress(Step{Index: index, Kind: "model", Status: "running", Reason: "正在根据已获取的信息整理最终回答"})
+	}
+	result, err := r.client.GenerateDetailed(ctx, model.CallContext{
+		Scope: valueOr(input.Scope, "react"), RefID: input.RefID, RunID: input.RunID,
+		SpaceID: input.SpaceID, SessionID: input.SessionID, TraceName: input.TraceName,
+		Step: fmt.Sprintf("react_final_%02d", index),
+	}, append([]model.ContentItem{{Text: finalPrompt(input.Goal, input.ContextPrompt, steps)}}, input.Attachments...))
+	if err != nil {
+		return Result{Steps: steps}, err
+	}
+	answer := strings.TrimSpace(result.Text)
+	if action, parseErr := parseAction(answer); parseErr == nil {
+		if !strings.EqualFold(strings.TrimSpace(action.Type), "final") {
+			return Result{Steps: steps}, errors.New("模型未按要求生成最终回答")
+		}
+		answer = strings.TrimSpace(action.Answer)
+	}
+	if answer == "" {
+		return Result{Steps: steps}, errors.New("模型返回了空的最终回答")
+	}
+	step := Step{Index: index, Kind: "final", Status: "completed", Reason: "已根据现有工具结果完成回答"}
+	steps = append(steps, step)
+	if input.OnStep != nil {
+		input.OnStep(step)
+	}
+	return Result{Answer: answer, Steps: steps}, nil
+}
+
+func finalPrompt(goal, contextPrompt string, steps []Step) string {
+	lines := []string{
+		"你是 ScriptAgent。现在必须直接回答用户，不得再调用工具或输出工具动作。",
+		"只根据用户目标、上下文和已取得的工具结果完成回答；工具说明是写作约束，不是最终答案。",
+		"如果用户只要视频生成提示词，直接写出可用的提示词，不要提交视频任务或声称已经生成成片。",
+		"信息不足时明确说明缺少什么，不要编造产品事实。输出普通文本或 type=final 的 JSON。",
+		"", "用户目标：", goal,
+	}
+	if strings.TrimSpace(contextPrompt) != "" {
+		lines = append(lines, "", "上下文：", contextPrompt)
+	}
+	for _, step := range steps {
+		if step.Kind == "tool" {
+			lines = append(lines, "", fmt.Sprintf("Step %d 工具 %s 的结果：", step.Index, step.Tool), step.Observation)
+			if step.Error != "" {
+				lines = append(lines, "工具错误："+step.Error)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func markToolObservationsPrompted(steps []Step) {
@@ -218,6 +268,7 @@ func reactPrompt(goal, contextPrompt string, tools []Tool, steps []Step) string 
 		"- 需要产品资料时优先调用产品工具，不要凭空编造。",
 		"- 需要可复用工作流时调用 skill 工具。",
 		"- 工具返回的信息不足时可以继续调用工具；足够回答时输出 final。",
+		"- 同一个工具和参数不要重复调用；call_skill 返回的是写作说明，读取后按用户要求产出内容。",
 		"",
 		"可用工具：",
 	}

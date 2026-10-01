@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Sparkles, Check, ChevronDown, Copy, Download, FileText, Film, FolderOpen, History, ImagePlus, Layers, Loader2, Package, Plus, Save, ScanFace, Trash2, Upload, X } from "lucide-react";
-import { listProductAssets } from "./api.js";
+import { listProductAssets, interpretCreative } from "./api.js";
 import { toolboxDrafts } from "./toolboxStorage.js";
 import "./EcommerceToolbox.css";
 import CharacterLibrary from "./CharacterLibrary.jsx";
@@ -9,6 +9,7 @@ import { aiCandidatePatch } from "./toolboxAI.js";
 import { MAX_VERSIONS, MODE_LABELS, createVersion, initialVersions, versionIssues, batchSummary, restoreBatch, mergeImportedVersions, parseBulkCopies } from "./toolboxBatch.js";
 
 const tools = [
+  { id: "interpret", title: "创意解读", Icon: Sparkles, description: "拆解小红书素材的创意表达。" },
   { id: "model", title: "换模特", Icon: ScanFace, description: "换一个出镜人物，延续原来的创意。", target: "目标模特", hint: "上传清晰的单人参考图" },
   { id: "copy", title: "换文案", Icon: FileText, description: "换一种表达，让卖点更贴近受众。" },
   { id: "product", title: "换产品", Icon: Package, description: "沿用视频创意，展示你的商品。", target: "目标产品", hint: "上传能看清外观和包装的商品图" },
@@ -91,7 +92,43 @@ function BatchDialog({ title, children, onClose }) {
 }
 
 export function ToolboxLauncher({ onChoose }) {
-  return <div className="tb-launcher"><nav className="tb-tool-choices" aria-label="电商工具箱">{tools.map(({ id, title, Icon }) => <button key={id} className="tb-tool-choice" onClick={() => onChoose(id)} aria-label={`${title}，进入操作台`}><Icon size={34} strokeWidth={1.6} /><span>{title}</span><ArrowUpRight className="tb-tool-arrow" size={20} /></button>)}</nav></div>;
+  return <div className="tb-launcher"><div className="tb-launcher-heading"><span>电商工具箱</span><h1>从一条素材，开始下一版创意</h1><p>选择要处理的内容，进入对应操作台。</p></div><nav className="tb-tool-choices" aria-label="电商工具箱">{tools.map(({ id, title, Icon, description }) => <button key={id} className="tb-tool-choice" onClick={() => onChoose(id)} aria-label={`${title}，进入操作台`}><span className="tb-tool-icon"><Icon size={23} strokeWidth={1.7} /></span><span className="tb-tool-copy"><strong>{title}</strong><small>{description}</small></span><ArrowUpRight className="tb-tool-arrow" size={18} /></button>)}</nav></div>;
+}
+
+function CreativeInterpretTool({ onBack }) {
+  const [sourceURL, setSourceURL] = useState("");
+  const [materialNote, setMaterialNote] = useState("");
+  const [comments, setComments] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  async function interpret(event) {
+    event.preventDefault(); setBusy("interpret"); setError(""); setResult(null);
+    try { setResult(await interpretCreative({ source_url: sourceURL, material_note: materialNote, comments })); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(""); }
+  }
+  const snapshot = result?.snapshot;
+  return <div className="ecommerce-toolbox tb-interpret-workspace">
+    <div className="tb-workbench-nav"><button className="tb-text-button" type="button" onClick={onBack}><ArrowLeft size={16} />工具箱</button></div>
+    <header className="tb-page-header"><div><h1>创意解读</h1><p>拆解小红书素材的内容表达与可观察的创意手法。</p></div></header>
+    <div className="tb-interpret-grid">
+      <form className="tb-interpret-card" onSubmit={interpret}>
+        <h2>解读来源创意</h2>
+        <label className="tb-field">小红书链接<input type="url" required value={sourceURL} onChange={(e) => setSourceURL(e.target.value)} placeholder="https://www.xiaohongshu.com/explore/..." /></label>
+        <label className="tb-field">素材内容补充<textarea rows="5" maxLength={12000} value={materialNote} onChange={(e) => setMaterialNote(e.target.value)} placeholder="可粘贴完整笔记正文、图片文字、视频逐字稿或画面描述；公开页面读不到的内容可在这里补齐。" /></label>
+        <label className="tb-field">评论补充<textarea rows="4" maxLength={8000} value={comments} onChange={(e) => setComments(e.target.value)} placeholder="可粘贴代表性评论；会标注为用户提供。" /></label>
+        <button className="tb-primary" disabled={!!busy}>{busy === "interpret" ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}生成创意解读</button>
+        <p className="tb-muted">自动读取公开页面信息。视频画面、完整图文和评论的覆盖范围以解析结果为准。</p>
+      </form>
+      <div className="tb-interpret-card" aria-live="polite">
+        <h2>解读结果</h2>
+        {error && <p role="alert" className="tb-inline-note">{error}</p>}
+        {snapshot && <div className="tb-interpret-source"><strong>{snapshot.title || "未获取笔记标题"}</strong><p>解析状态：{snapshot.status} · {snapshot.warning}</p>{snapshot.description && <p>{snapshot.description}</p>}{snapshot.page_text && <p>公开正文片段：{snapshot.page_text}</p>}{snapshot.images?.length > 0 && <p>图片地址：{snapshot.images.length} 个；提交视觉模型：{result.images_submitted || 0} 个。{result.visual_warning || "请核对模型对画面的描述。"}</p>}{snapshot.video_url && <p>发现视频地址；尚未解析视频画面或声音。</p>}</div>}
+        {result ? <pre className="tb-interpret-output">{result.markdown}</pre> : <p className="tb-muted">提交链接后，这里会显示来源覆盖情况和创意拆解。</p>}
+      </div>
+    </div>
+  </div>;
 }
 
 export default function EcommerceToolbox({ products = [], userId, active = true, onOpenRadar }) {
@@ -120,7 +157,7 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
   const videoRef = useRef(null);
   const importRef = useRef(null);
   const sourceURL = useMediaURL(source);
-  const rows = versionsByMode[mode];
+  const rows = versionsByMode[mode] || [];
   const current = rows.find((row) => row.id === activeId) || rows[0];
   const currentIndex = rows.findIndex((row) => row.id === current?.id);
   const summary = batchSummary(mode, rows);
@@ -146,13 +183,20 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
     if (rows.length >= MAX_VERSIONS) return;
     const row = createVersion(base); updateRows((items) => [...items, row]); setActiveId(row.id);
   }
+  function removeVersion(id) {
+    const index = rows.findIndex((row) => row.id === id);
+    const next = rows.filter((row) => row.id !== id);
+    if (current?.id === id) setActiveId(next[Math.min(index, next.length - 1)]?.id || null);
+    updateRows(() => next);
+    setDialog(null);
+  }
   function addImported(imported) {
     let next;
     try { next = mergeImportedVersions(rows, imported); }
     catch (e) { setError(e.message); return false; }
     updateRows(() => next);
     setActiveId(next[0]?.id);
-    setNotice(`已导入 ${imported.length} 个差异化版本，请检查并勾选本次需要的版本。`);
+    setNotice(`已导入 ${imported.length} 个差异化版本，请检查并确认要纳入的版本。`);
     return true;
   }
   function importImages(files) {
@@ -194,6 +238,7 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
   }
 
   if (!entered) return <ToolboxLauncher onChoose={(id) => { setMode(id); setActiveId(null); setEntered(true); setError(""); }} />;
+  if (mode === "interpret") return <CreativeInterpretTool onBack={() => setEntered(false)} />;
 
   return <div className="ecommerce-toolbox tb-batch-workspace">
     <div className="tb-workbench-nav"><button className="tb-text-button" onClick={() => setEntered(false)}><ArrowLeft size={16} />工具箱</button>{onOpenRadar && <button className="tb-text-button" onClick={onOpenRadar}>创意雷达<ArrowUpRight size={14} /></button>}</div>
@@ -214,25 +259,21 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
       </aside>
       <section className="tb-version-column" aria-label="差异化版本清单">
         <div className="tb-column-title"><h2><span className="tb-step-number">2</span>{tool.title}</h2><span>{rows.length} 个版本</span></div>
-        <div className="tb-version-switcher" aria-label="选择编辑版本">{rows.map((row, index) => <button key={row.id} className={current?.id === row.id ? "active" : ""} aria-pressed={current?.id === row.id} onClick={() => setActiveId(row.id)} title={row.title || `版本 ${index + 1}`}>{row.title || `版本 ${index + 1}`}</button>)}<button className="tb-new-version" disabled={rows.length >= MAX_VERSIONS} onClick={() => addVersion()}><Plus size={15} />添加版本</button></div>
-        <details className="tb-details tb-manage-versions"><summary>批量管理 <span>导入、勾选与复制<ChevronDown size={16} /></span></summary>
-        <div className="tb-list-toolbar"><label className="tb-check"><input type="checkbox" checked={selectedAll} onChange={(e) => updateRows((items) => items.map((row) => ({ ...row, selected: e.target.checked })))} />全选 <span>{summary.selected.length}/{rows.length}</span></label><button className="tb-text-button" onClick={() => mode === "copy" ? (setError(""), setDialog("import")) : importRef.current?.click()}><Upload size={14} />{mode === "copy" ? "批量粘贴文案" : "批量导入图片"}</button><input ref={importRef} type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp" aria-label="批量导入参考图" onChange={(e) => { importImages(e.target.files); e.target.value = ""; }} /></div>
+        <div className="tb-list-toolbar"><span>选择版本编辑，并决定是否纳入检查</span><div><button className="tb-text-button" onClick={() => mode === "copy" ? (setError(""), setDialog("import")) : importRef.current?.click()}><Upload size={14} />{mode === "copy" ? "批量粘贴" : "批量导入"}</button><button className="tb-text-button" disabled={!rows.length} onClick={() => updateRows((items) => items.map((row) => ({ ...row, selected: !selectedAll })))}>{selectedAll ? "全部移出" : "全部纳入"}</button></div><input ref={importRef} type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp" aria-label="批量导入参考图" onChange={(e) => { importImages(e.target.files); e.target.value = ""; }} /></div>
         <div className="tb-version-list">{rows.map((row, index) => {
           const issues = versionIssues(mode, row);
           const duplicate = summary.duplicateIds.has(row.id);
           return <article className={`tb-version-row ${current?.id === row.id ? "active" : ""}`} key={row.id}>
-            <input type="checkbox" checked={row.selected} aria-label={`选择版本 ${index + 1}`} onChange={(e) => updateRow(row.id, { selected: e.target.checked })} />
-            <button className="tb-version-select" aria-label={`编辑版本 ${index + 1}`} aria-pressed={current?.id === row.id} onClick={() => setActiveId(row.id)}><VersionThumbnail row={row} mode={mode} /><span className="tb-row-copy"><strong><span className="tb-version-number">{String(index + 1).padStart(2, "0")}</span>{row.title || `版本 ${index + 1}`}</strong><span>{mode === "copy" ? row.text || "添加一版独立文案" : row.target ? mediaName(row.target) : mode === "model" ? "添加不同的模特参考图" : "添加目标商品参考图"}</span><small className={duplicate ? "tb-duplicate" : ""}>{duplicate ? "内容重复，请调整差异" : issues.length ? "待完善" : "已配置"}</small></span></button>
-            <div className="tb-row-actions"><button className="tb-icon-button" aria-label={`复制版本 ${index + 1}`} disabled={rows.length >= MAX_VERSIONS} onClick={() => addVersion({ ...row, id: crypto.randomUUID(), title: `${row.title || `版本 ${index + 1}`} 副本`, selected: true })}><Copy size={14} /></button><button className="tb-icon-button" aria-label={`移除版本 ${index + 1}`} onClick={() => setDialog({ type: "remove", id: row.id, name: row.title || `版本 ${index + 1}` })}><Trash2 size={14} /></button></div>
+            <button className="tb-version-select" aria-label={`编辑版本 ${index + 1}`} aria-pressed={current?.id === row.id} onClick={() => setActiveId(row.id)}><VersionThumbnail row={row} mode={mode} /><span className="tb-row-copy"><strong><span className="tb-version-number">{String(index + 1).padStart(2, "0")}</span>{row.title || `版本 ${index + 1}`}</strong><span>{mode === "copy" ? row.text || "添加一版独立文案" : row.target ? mediaName(row.target) : mode === "model" ? "添加不同的模特参考图" : "添加目标商品参考图"}</span><small className={duplicate ? "tb-duplicate" : ""}>{!row.selected ? "未纳入本批次" : duplicate ? "内容重复，请调整差异" : issues.length ? "待完善" : "已配置"}</small></span></button>
+            <div className="tb-row-actions"><button className={`tb-include-button ${row.selected ? "included" : ""}`} aria-label={`${row.selected ? "移出" : "纳入"}版本 ${index + 1}`} aria-pressed={row.selected} onClick={() => updateRow(row.id, { selected: !row.selected })}>{row.selected ? <><Check size={13} />已纳入</> : "纳入"}</button><button className="tb-icon-button" aria-label={`复制版本 ${index + 1}`} disabled={rows.length >= MAX_VERSIONS} onClick={() => addVersion({ ...row, id: crypto.randomUUID(), title: `${row.title || `版本 ${index + 1}`} 副本`, selected: true })}><Copy size={14} /></button><button className="tb-icon-button" aria-label={`移除版本 ${index + 1}`} onClick={() => setDialog({ type: "remove", id: row.id, name: row.title || `版本 ${index + 1}` })}><Trash2 size={14} /></button></div>
           </article>;
-        })}</div>
+        })}</div><button className="tb-new-version" disabled={rows.length >= MAX_VERSIONS} onClick={() => addVersion()}><Plus size={15} />添加版本 <span>{rows.length}/{MAX_VERSIONS}</span></button>
         {summary.duplicateIds.size > 0 && <p className="tb-inline-note" role="status">{summary.duplicateIds.size} 个选中版本内容重复。修改差异或取消勾选，避免重复生成。</p>}
-        </details>
       </section>
       <aside className="tb-editor-column" aria-label="当前版本设置">
         {current ? <div key={current.id} className="tb-current-editor"><div className="tb-editor-heading"><h3>{mode === "copy" ? "写下新文案" : mode === "model" ? "添加模特参考图" : "添加商品参考图"}</h3><span>{current.title || `版本 ${currentIndex + 1}`}</span></div>
           {mode === "copy" ? <><label className="tb-field">新文案<textarea rows={9} value={current.text} onChange={(e) => updateRow(current.id, { text: e.target.value })} maxLength={3000} placeholder="写下这一版的口播或字幕…" /></label><div className="tb-input-meta"><span>{current.text.length}/3000</span>{current.scope !== "subtitle" && <span>口播约 {estimates} 秒</span>}</div>{duration > 0 && estimates > duration && current.scope !== "subtitle" && <p className="tb-inline-note">预计口播超过原片时长，建议精简。</p>}</> : <><MediaUpload label={tool.target} kind="image" value={current.target} onChange={(target) => updateRow(current.id, { target })} onLibrary={() => setPicker(current.id)} onError={setError} />
-            {mode === "product" && <><label className="tb-check"><input type="checkbox" checked={current.adapt} onChange={(e) => updateRow(current.id, { adapt: e.target.checked })} />同时替换商品文案</label>{current.adapt ? <label className="tb-field">商品文案<textarea rows={4} value={current.text} onChange={(e) => updateRow(current.id, { text: e.target.value })} placeholder="确认这版商品对应的口播／字幕" maxLength={3000} /></label> : <p className="tb-inline-note">沿用原文案前，请核对规格和功效。</p>}</>}
+            {mode === "product" && <><button className={`tb-option-button ${current.adapt ? "active" : ""}`} aria-pressed={current.adapt} onClick={() => updateRow(current.id, { adapt: !current.adapt })}><span><strong>同时替换商品文案</strong><small>{current.adapt ? "为新商品填写对应的口播或字幕" : "沿用原文案，请核对规格和功效"}</small></span><span className="tb-option-state">{current.adapt ? "已开启" : "未开启"}</span></button>{current.adapt && <label className="tb-field">商品文案<textarea rows={4} value={current.text} onChange={(e) => updateRow(current.id, { text: e.target.value })} placeholder="确认这版商品对应的口播／字幕" maxLength={3000} /></label>}</>}
           </>}
           {mode === "model" && <div className="tb-character-actions"><button className="tb-secondary" onClick={() => setCharacters({id:current.id,tab:"library"})}><FolderOpen size={16}/>从角色库选择</button><button className="tb-secondary" onClick={() => setCharacters({id:current.id,tab:"generate"})}><Sparkles size={16}/>AI 生成角色图</button></div>}
           <div className="tb-ai-entry"><button className="tb-ai-button" onClick={() => setAI({ mode, row: { ...current } })}><Sparkles size={16} />{mode === "model" ? "AI 生成表现要求" : mode === "copy" ? "AI 写文案" : "AI 写商品文案"}</button></div>
@@ -242,7 +283,7 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
             {mode === "model" && <label className="tb-field">补充要求（选填）<textarea rows={3} value={current.notes} onChange={(e) => updateRow(current.id, { notes: e.target.value })} placeholder="例如：自然分享语气、居家穿搭" maxLength={2000} /></label>}
             {mode === "product" && <><label className="tb-field">商品名称（选填）<input value={current.name} onChange={(e) => updateRow(current.id, { name: e.target.value })} placeholder="目标商品名称" maxLength={100} /></label><label className="tb-field">已确认的卖点（选填）<textarea rows={2} value={current.claims} onChange={(e) => updateRow(current.id, { claims: e.target.value })} placeholder="材质、规格、功能等" maxLength={2000} /></label></>}
           </details>
-          <p className="tb-helper">{mode === "copy" ? `修改${{ both: "口播与字幕", voice: "口播", subtitle: "字幕" }[current.scope]}` : mode === "model" ? "默认保留产品、文案和场景" : "默认保留人物和视频创意"}{!current.selected ? " · 此版本未勾选，不会纳入检查" : ""}</p>
+          <p className="tb-helper">{mode === "copy" ? `修改${{ both: "口播与字幕", voice: "口播", subtitle: "字幕" }[current.scope]}` : mode === "model" ? "默认保留产品、文案和场景" : "默认保留人物和视频创意"}{!current.selected ? " · 此版本未纳入本批次，不会纳入检查" : ""}</p>
           {!current.selected && <button className="tb-text-button" onClick={() => updateRow(current.id, { selected: true })}>将此版本加入本批次</button>}
         </div> : <div className="tb-empty-editor"><Layers size={28} /><h2>添加第一个版本</h2><p>也可以一次导入多个参考图或多版文案。</p><button className="tb-secondary" onClick={() => addVersion()}><Plus size={16} />添加版本</button></div>}
       </aside>
@@ -253,9 +294,9 @@ export default function EcommerceToolbox({ products = [], userId, active = true,
     {characters && <CharacterLibrary initialTab={characters.tab} onClose={() => setCharacters(null)} onPick={(target) => { updateRow(characters.id,{target}); setCharacters(null); }} />}
     {ai && <ToolboxAI mode={ai.mode} row={ai.row} remaining={MAX_VERSIONS - rows.length} onApply={applyAI} onClose={() => setAI(null)} />}
     {picker && <AssetPicker products={products} kind={picker === "source" ? "video" : "image"} onClose={() => setPicker(null)} onPick={(asset) => { if (picker === "source") changeSource(asset); else updateRow(picker, { target: asset }); setPicker(null); }} />}
-    {dialog?.type === "remove" && <BatchDialog title={`移除${dialog.name}？`} onClose={() => setDialog(null)}><p className="tb-muted">此版本的输入将从当前批次移除，其他版本不受影响。</p><div className="tb-plan-actions"><button className="tb-secondary" onClick={() => setDialog(null)}>保留版本</button><button className="tb-primary" onClick={() => { updateRows((items) => items.filter((item) => item.id !== dialog.id)); setDialog(null); }}>移除版本</button></div></BatchDialog>}
+    {dialog?.type === "remove" && <BatchDialog title={`移除${dialog.name}？`} onClose={() => setDialog(null)}><p className="tb-muted">此版本的输入将从当前批次移除，其他版本不受影响。</p><div className="tb-plan-actions"><button className="tb-secondary" onClick={() => setDialog(null)}>保留版本</button><button className="tb-primary" onClick={() => removeVersion(dialog.id)}>移除版本</button></div></BatchDialog>}
     {dialog === "import" && <BatchDialog title="批量粘贴文案" onClose={() => setDialog(null)}>{error && <p className="tb-inline-note" role="alert">{error}</p>}<p className="tb-muted">每个版本之间用单独一行 --- 分隔。段内换行会保留。</p><label className="tb-field">多版文案<textarea autoFocus rows={12} value={bulkCopy} onChange={(e) => setBulkCopy(e.target.value)} placeholder={"第一版文案\n---\n第二版文案\n---\n第三版文案"} /></label><button className="tb-primary" disabled={!bulkCopy.trim()} onClick={() => { let imported; try { imported = parseBulkCopies(bulkCopy); } catch (e) { setError(e.message); return; } if (addImported(imported)) { setDialog(null); setBulkCopy(""); } }}>导入 {bulkCopy.split(/^\s*---\s*$/m).filter((text) => text.trim()).length} 个版本</button></BatchDialog>}
     {dialog === "drafts" && <BatchDialog title="已存批次" onClose={() => setDialog(null)}><p className="tb-muted">保存在当前浏览器，包含原素材及各工具的版本配置。</p><div className="tb-draft-list">{drafts.length ? drafts.map((draft) => <article key={draft.id}><button onClick={() => restore(draft)}><Layers size={18} /><span><strong>{draft.batchName || `${MODE_LABELS[draft.mode]}批次`}</strong><small>{draft.versionsByMode?.[draft.mode]?.length || 1} 个版本 · {new Date(draft.updatedAt).toLocaleString("zh-CN")}</small></span></button></article>) : <p className="tb-muted">暂无保存的批次。</p>}</div></BatchDialog>}
-    {dialog === "review" && <BatchDialog title={`检查 ${summary.selected.length} 个版本`} onClose={() => setDialog(null)}>{error && <p className="tb-inline-note" role="alert">{error}</p>}<p className="tb-muted">原视频：{mediaName(source)} · {resolution}</p><div className="tb-review-list">{summary.selected.map((row) => <div key={row.id}><strong>{row.title || `版本 ${rows.indexOf(row) + 1}`}</strong><span>{versionIssues(mode, row).join("、") || (summary.duplicateIds.has(row.id) ? "内容重复，请调整" : "已配置")}</span></div>)}</div><p className="tb-inline-note">{ready ? "整批配置已就绪。批量生成服务尚未接入，可先保存。" : "请返回补齐缺项，或取消勾选重复版本。"}</p><div className="tb-plan-actions"><button className="tb-secondary" onClick={() => setDialog(null)}>返回编辑</button><button className="tb-primary" disabled={saving} onClick={async () => { if (await save()) setDialog(null); }}><Save size={16} />保存整批配置</button><button className="tb-secondary" onClick={download}><Download size={15} />导出清单</button></div></BatchDialog>}
+    {dialog === "review" && <BatchDialog title={`检查 ${summary.selected.length} 个版本`} onClose={() => setDialog(null)}>{error && <p className="tb-inline-note" role="alert">{error}</p>}<p className="tb-muted">原视频：{mediaName(source)} · {resolution}</p><div className="tb-review-list">{summary.selected.map((row) => <div key={row.id}><strong>{row.title || `版本 ${rows.indexOf(row) + 1}`}</strong><span>{versionIssues(mode, row).join("、") || (summary.duplicateIds.has(row.id) ? "内容重复，请调整" : "已配置")}</span></div>)}</div><p className="tb-inline-note">{ready ? "整批配置已就绪。批量生成服务尚未接入，可先保存。" : "请返回补齐缺项，或移出重复版本。"}</p><div className="tb-plan-actions"><button className="tb-secondary" onClick={() => setDialog(null)}>返回编辑</button><button className="tb-primary" disabled={saving} onClick={async () => { if (await save()) setDialog(null); }}><Save size={16} />保存整批配置</button><button className="tb-secondary" onClick={download}><Download size={15} />导出清单</button></div></BatchDialog>}
   </div>;
 }

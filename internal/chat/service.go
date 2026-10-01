@@ -192,6 +192,11 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 		conversation = &thread.Conversation
 		messages = thread.Messages
 	}
+	if productID == "" && conversation.SpaceID != "" {
+		if space, spaceErr := s.store.GetUserSpace(userID, conversation.SpaceID); spaceErr == nil {
+			productID = space.ProductID
+		}
+	}
 
 	displayContent := content
 	if displayContent == "" {
@@ -204,14 +209,28 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 	if err != nil {
 		return nil, err
 	}
-	productVisualContext := ""
-	if productItems, assetContext := s.productAssetContext(userID, productID); len(productItems) > 0 {
+	referenceVideo, hasReferenceVideo := firstVideo(modelAttachments)
+	productItems, productVisualContext := s.productAssetContext(userID, productID)
+	if len(productItems) > 0 {
 		modelAttachments = append(productItems, modelAttachments...)
-		productVisualContext = assetContext
 	}
 	userMessage, err := s.store.AddChatMessage(conversationID, "user", displayContent)
 	if err != nil {
 		return nil, err
+	}
+	for _, attachment := range attachments {
+		mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(attachment.Path)))
+		kind := "image"
+		if strings.HasPrefix(mimeType, "video/") {
+			kind = "video"
+		}
+		stored, err := s.store.AddChatAttachment(conversationID, userMessage.ID, jobs.ChatAttachment{
+			Kind: kind, OriginalName: attachment.Name, MimeType: mimeType, Size: attachment.Size, Path: attachment.Path,
+		})
+		if err != nil {
+			return nil, err
+		}
+		userMessage.Attachments = append(userMessage.Attachments, *stored)
 	}
 	messages = append(messages, *userMessage)
 	ctx, traceSpan := telemetry.StartAgentRun(ctx, telemetry.RunAttributes{
@@ -244,6 +263,34 @@ func (s *Service) SendWithAttachments(ctx context.Context, conversationID, conte
 	}
 	citations := []jobs.ProductCitation{}
 	s.resetProgress(conversationID)
+	if hasReferenceVideo && (isHookReplicationRequest(content) || isHookReplicationFollowup(content, contextMessages)) {
+		referencePath := ""
+		for _, attachment := range attachments {
+			if strings.HasPrefix(mime.TypeByExtension(strings.ToLower(filepath.Ext(attachment.Path))), "video/") {
+				referencePath = attachment.Path
+				break
+			}
+		}
+		answer, evidenceCitations, steps, err := s.runHookReplication(ctx, conversationID, userMessage.ID, conversation.SpaceID, productID, userID, content, referencePath, productVisualContext, contextMessages, referenceVideo, productItems)
+		if err != nil {
+			return nil, err
+		}
+		traceOutput = answer
+		assistantMessage, err := s.store.AddChatMessage(conversationID, "assistant", answer)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.store.SaveChatAgentSteps(conversationID, assistantMessage.ID, steps); err != nil {
+			return nil, err
+		}
+		thread, err := s.store.GetUserChatThread(userID, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		thread.Citations = evidenceCitations
+		thread.AgentSteps = steps
+		return thread, nil
+	}
 	reactResult, err := s.reactRunner.Run(ctx, reactagent.RunInput{
 		Scope:         "chat",
 		RefID:         conversationID,

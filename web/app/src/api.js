@@ -109,6 +109,16 @@ export async function updateProduct(id, input) {
 export async function listSpaces() {
   return request("/api/spaces");
 }
+export async function assignChatSpace(id, spaceId) {
+  return request(`/api/chats/${encodeURIComponent(id)}/space`, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ space_id: spaceId }),
+  });
+}
+export async function listSpaceVideos(id) {
+  return request(`/api/spaces/${encodeURIComponent(id)}/videos`);
+}
 export async function listSuggestions() {
   return request("/api/suggestions");
 }
@@ -201,16 +211,8 @@ export async function logoutOwner() {
   return request("/api/owner/logout", { method: "POST", headers: jsonHeaders });
 }
 
-export async function listCreativeReports(productId) {
-  return request(`/api/products/${productId}/creative-reports`);
-}
-
-export async function createCreativeReport(productId, input) {
-  return request(`/api/products/${productId}/creative-reports`, {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify(input),
-  });
+export async function interpretCreative(input) {
+  return request("/api/creative/interpret", { method: "POST", headers: jsonHeaders, body: JSON.stringify(input) });
 }
 
 export async function getModelSettings() {

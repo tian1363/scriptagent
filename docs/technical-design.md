@@ -273,7 +273,7 @@ Top NavBar
 
 ### 9.2 视频理解
 
-ScriptAgent 将视频和产品 Markdown 输入模型，使用固定视频理解 Prompt，输出：
+ScriptAgent 先仅将参考视频输入模型，建立与目标产品隔离的观察记录，再在复刻脚本阶段引入产品 Markdown：
 
 - 行业判断。
 - 命名统一表。
@@ -284,7 +284,7 @@ ScriptAgent 将视频和产品 Markdown 输入模型，使用固定视频理解 
 
 - 只填视频中能直接观察到的内容。
 - 无法判断填 `-`。
-- 产品卖点可基于画面合理推断。
+- 产品卖点在观察阶段只记录视频中可见或可听的表达，不用目标产品资料补造原片。
 - 分镜表必须用 Markdown 表格输出。
 - 同一道具、角色、场景、UI 元素必须全表统一命名。
 - 游戏类追加游戏素材类型、游戏 UI 描述。
@@ -540,25 +540,20 @@ POST /api/jobs/{id}/video-prompts
 - 负向提示词使用统一安全约束，避免乱码、水印、产品不一致、版权角色和夸大功效。
 - 前端任务结果页新增“视频提示词”Tab，打开时调用该接口并以 Markdown 样式展示。
 
-### 10.9 DataEye 爆款素材分析产品化
+### 10.9 小红书参考素材分析
 
-当前阶段先配置两层能力：
-
-- Codex 本机 skill：`dataeye-video-download`，用于在开发/运营环境中基于 DataEye 登录态抓取素材元数据和视频文件。
-- ScriptAgent 内置 ReAct skill：`material_replication_analysis`，用于直接解析用户上传的图片或视频，拆解内容表达、视听设计与时间结构并输出视频复刻方案；无投放数据时不得声称素材已经验证为爆款。
-
-当前 ReAct 对话仍保持只读工具边界，不直接执行 DataEye 下载脚本。后续产品化建议增加独立任务：
+当前阶段支持小红书公开笔记长链接和 `xhslink.com` 分享短链，并保留 `material_replication_analysis` 对用户上传图片或视频的深度分析能力。无投放数据时不得声称素材已经验证为爆款。
 
 ```text
 选择产品
   ↓
-配置素材来源（DataEye URL / 产品 ID / 产品名）
+填写小红书笔记链接
   ↓
-设置筛选（近 30 天 / 媒体 / 国家 / 排序指标 / 样本数）
+校验域名与目标网络地址
   ↓
-后端白名单拉取任务
+展开短链并提取公开页面元数据
   ↓
-保存素材批次与视频文件
+保存解析状态与来源快照
   ↓
 爆款分析 Agent
   ↓
@@ -569,48 +564,22 @@ POST /api/jobs/{id}/video-prompts
 
 建议新增数据模型：
 
-- `material_sources`：产品 ID、来源类型、DataEye URL/产品 ID/产品名、媒体、国家、排序指标、创建时间。
+- `material_sources`：产品 ID、来源类型、小红书原始 URL、最终 URL、解析状态和创建时间。
 - `material_batches`：产品 ID、时间范围、样本数、拉取状态、输出目录、原始 JSON 路径、创建时间。
 - `material_items`：批次 ID、素材 ID、标题、指标 JSON、首见时间、媒体、国家、视频路径、封面路径。
 - `creative_insight_reports`：产品 ID、批次 ID、样本说明、爆款特征 Markdown、创意方向 JSON、创建时间。
 
 安全约束：
 
-- DataEye 抓取必须通过后端 allowlist job 执行，禁止前端传任意命令。
-- 不在数据库保存浏览器 Cookie 或明文登录态；优先复用用户本机浏览器授权或部署环境显式配置。
+- 只允许 `xiaohongshu.com` 和 `xhslink.com` 的 HTTPS 链接，并在每次重定向后重新校验。
+- 不在数据库保存浏览器 Cookie 或明文登录态；第一版只读取无需登录即可返回的公开元数据。
+- 页面请求必须拒绝本机、私有、链路本地及未指定 IP，并限制超时、重定向次数和响应体大小。
 - 报告中必须展示数据口径和缺失字段，禁止模型补造指标。
 - 没有指标数据时，只能标记为“素材内容分析”，不能标记为“爆款表现分析”。
 
-### 10.10 产品创意策略报告
+### 10.10 产品创意策略报告（已下线）
 
-产品库支持从产品详情直接生成创意策略报告，并把报告转入裂变脚本任务。
-
-```http
-GET /api/products/{id}/creative-reports
-POST /api/products/{id}/creative-reports
-```
-
-`POST /api/products/{id}/creative-reports` 使用 JSON：
-
-- `source_type`: 来源类型，第一版固定为 `dataeye`。
-- `dataeye_url`: DataEye 产品或素材页面 URL，可为空。
-- `dataeye_id`: DataEye 产品 ID，可为空。
-- `product_name`: DataEye 中的产品名，默认产品库名称。
-- `date_range`: 时间范围，默认近 30 天。
-- `media`: 媒体过滤，例如 TikTok、Meta。
-- `country`: 国家/地区过滤。
-- `sort_metric`: 排序指标，例如热度、曝光、播放。
-- `sample_count`: 样本数，默认 50。
-- `requirement`: 用户补充分析要求。
-- `material_note`: 用户手动补充的素材观察或 DataEye 导出摘要。
-
-实现约束：
-
-- 第一版生成报告时读取产品 Markdown 与 DataEye 来源配置，调用当前模型生成创意策略报告。
-- 在真实 DataEye 白名单拉取任务接入前，报告必须标注为策略预案，不得编造素材指标。
-- 模型调用 scope 为 `creative_report`，ref_id 为产品 ID，方便开发者模式追踪 Token 与输入输出。
-- 报告保存到 `creative_reports` 表，产品详情读取历史报告并默认选中最新报告。
-- 前端“转裂变任务”只做工作流跳转：进入脚本任务页，自动选中产品，并把 `report_summary` 填入补充要求；创建任务仍需要用户上传参考视频。
+产品资料页已移除报告生成、历史查看与转脚本流程，`GET/POST /api/products/{id}/creative-reports` 不再注册。已有 `creative_reports` 数据表和历史记录保留。
 
 ## 11. 数据库设计
 
@@ -1196,7 +1165,7 @@ type IntelligenceAdapter interface {
 }
 ```
 
-连接方式：DataEye 使用后端白名单任务与既有合法登录态；巨量/千川/聚光使用官方 OAuth 和 Marketing API；CSV/XLSX 使用 `PerformanceImporter`；`demo` Adapter 生成固定、可重复、明确标记 synthetic 的样本。
+连接方式：小红书公开笔记使用受限的只读链接解析器；巨量/千川/聚光使用官方 OAuth 和 Marketing API；CSV/XLSX 使用 `PerformanceImporter`；`demo` Adapter 生成固定、可重复、明确标记 synthetic 的样本。
 
 数据分四层保存：
 
@@ -1219,7 +1188,7 @@ MCP 是外部交互协议而非平台连接本身。未来只读工具建议为 
 竞品监控使用 `competitor_monitors` 保存名称、平台、账号 URL、关键词、数据源、执行频率和最近扫描时间。扫描器输出标准信号，不直接写入 Prompt。数据源优先级：
 
 1. 官方广告库或官方 Marketing API：结构稳定、来源清晰，优先使用。
-2. 经授权的第三方创意情报服务（如 DataEye 类产品）：用于补齐国内平台竞品素材、榜单和投放线索，通过 Adapter 隔离字段与授权方式。
+2. 经授权的第三方创意情报服务：用于补齐国内平台竞品素材、榜单和投放线索，通过 Adapter 隔离字段与授权方式。
 3. Web Search Provider：使用可配置的搜索 API 发现公开页面；仅保存 URL、标题、摘要、发布时间和抓取时间，不声称获得曝光、CTR、消耗或转化。
 4. CSV/XLSX/JSON 导入：用于用户已有的数据采购结果或运营导出。
 
