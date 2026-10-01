@@ -6,6 +6,11 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:49
+
+- `ff4906e` build(deps): bump actions/checkout from 4 to 7 (#26)
+- `7ebf921` build(deps): bump actions/upload-pages-artifact from 3 to 5 (#27)
+
 ### 2026-10-01 15:47
 
 - `0c7c778` build(deps): bump actions/setup-node from 4 to 7 (#24)
