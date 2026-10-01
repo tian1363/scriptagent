@@ -6,6 +6,10 @@
 
 <!-- AUTO-CHANGELOG: entries are inserted below this line. -->
 
+### 2026-10-01 15:51
+
+- `fced8f2` build(deps): bump react from 19.2.8 to 19.3.0 in /web/app (#30)
+
 ### 2026-10-01 15:50
 
 - `f214e64` build(deps): bump react-dom from 19.2.8 to 19.3.0 in /web/app (#28)
